@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Probe Security Report - {{ target_url }}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    padding: 2rem;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #fff; }
+  h2 { font-size: 1.4rem; margin: 2rem 0 1rem; color: #fff; border-bottom: 1px solid #333; padding-bottom: 0.5rem; }
+  h3 { font-size: 1.1rem; margin-bottom: 0.5rem; color: #fff; }
+
+  .header { text-align: center; margin-bottom: 2rem; }
+  .header p { color: #888; }
+
+  .score-container { text-align: center; margin: 2rem 0; }
+  .score-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    border: 6px solid {{ score_color }};
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: {{ score_color }};
+  }
+  .score-label { margin-top: 0.5rem; color: #888; font-size: 0.9rem; }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+  .summary-card {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .summary-card .count { font-size: 2rem; font-weight: bold; }
+  .summary-card .label { font-size: 0.8rem; color: #888; text-transform: uppercase; }
+
+  .severity-critical { color: #ff4444; }
+  .severity-high { color: #ff8c00; }
+  .severity-medium { color: #ffd700; }
+  .severity-low { color: #4fc3f7; }
+  .severity-info { color: #888; }
+
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .badge-critical { background: #ff4444; color: #fff; }
+  .badge-high { background: #ff8c00; color: #fff; }
+  .badge-medium { background: #ffd700; color: #1a1a2e; }
+  .badge-low { background: #4fc3f7; color: #1a1a2e; }
+  .badge-info { background: #555; color: #e0e0e0; }
+
+  .finding-card {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border-left: 4px solid #555;
+  }
+  .finding-card.border-critical { border-left-color: #ff4444; }
+  .finding-card.border-high { border-left-color: #ff8c00; }
+  .finding-card.border-medium { border-left-color: #ffd700; }
+  .finding-card.border-low { border-left-color: #4fc3f7; }
+  .finding-card.border-info { border-left-color: #555; }
+
+  .finding-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+  .finding-endpoint { color: #888; font-size: 0.9rem; margin-bottom: 0.75rem; }
+  .finding-endpoint code { background: #0f3460; padding: 0.15rem 0.4rem; border-radius: 3px; color: #4fc3f7; }
+  .finding-description { margin-bottom: 1rem; }
+  .finding-fix {
+    background: #0a2a1a;
+    border: 1px solid #1a5c3a;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.75rem;
+  }
+  .finding-fix strong { color: #4caf50; }
+
+  .evidence-block {
+    background: #0d1b2a;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .evidence-block h4 { font-size: 0.9rem; color: #888; margin-bottom: 0.5rem; }
+  .evidence-block pre {
+    background: #0a0a1a;
+    padding: 0.75rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    color: #b0b0b0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .timeline { margin-top: 1rem; }
+  .timeline-item {
+    display: flex;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    border-left: 2px solid #333;
+    padding-left: 1rem;
+    margin-left: 0.5rem;
+  }
+  .timeline-item .step {
+    background: #0f3460;
+    color: #4fc3f7;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+  .timeline-item .content { color: #b0b0b0; font-size: 0.9rem; }
+
+  .meta-info { color: #666; font-size: 0.85rem; margin-top: 0.25rem; }
+
+  .specialists-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .specialist-card {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    border-left: 3px solid #4fc3f7;
+  }
+  .specialist-card .name { font-weight: bold; color: #fff; font-size: 0.95rem; }
+  .specialist-card .findings-count { color: #888; font-size: 0.8rem; margin-top: 0.25rem; }
+
+  .cred-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  .cred-table th {
+    background: #0f3460;
+    color: #4fc3f7;
+    text-align: left;
+    padding: 0.6rem 1rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+  }
+  .cred-table td {
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid #1a2a4a;
+    color: #e0e0e0;
+  }
+  .cred-table tr:hover td { background: #1a2a4a; }
+  .cred-table code {
+    background: #0d1b2a;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    color: #ff8c00;
+    font-size: 0.85rem;
+  }
+
+  .attack-path {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin: 1rem 0;
+  }
+  .attack-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .attack-step .arrow {
+    color: #ff4444;
+    font-weight: bold;
+    flex-shrink: 0;
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+  .attack-step .desc { color: #e0e0e0; font-size: 0.9rem; }
+
+  .goal-section {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+  }
+  .goal-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .goal-type-badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+    background: #0f3460;
+    color: #4fc3f7;
+  }
+  .goal-status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .goal-status-achieved { background: #4caf50; color: #fff; }
+  .goal-status-partial { background: #ffd700; color: #1a1a2e; }
+  .goal-status-inprogress { background: #4fc3f7; color: #1a1a2e; }
+  .goal-status-failed { background: #ff4444; color: #fff; }
+  .goal-description { color: #b0b0b0; margin-bottom: 1rem; font-size: 0.95rem; }
+  .criteria-list { list-style: none; padding: 0; margin: 0; }
+  .criteria-list li {
+    padding: 0.4rem 0;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .criteria-met { color: #4caf50; }
+  .criteria-unmet { color: #888; }
+
+  .metrics-section {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+  }
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .metric-card {
+    background: #0d1b2a;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .metric-card .value { font-size: 1.8rem; font-weight: bold; color: #4fc3f7; }
+  .metric-card .label { font-size: 0.75rem; color: #888; text-transform: uppercase; margin-top: 0.25rem; }
+  .funnel { margin: 1rem 0; }
+  .funnel-step {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .funnel-label { width: 110px; font-size: 0.85rem; color: #b0b0b0; text-align: right; }
+  .funnel-bar-container { flex: 1; height: 22px; background: #0d1b2a; border-radius: 4px; overflow: hidden; }
+  .funnel-bar { height: 100%; border-radius: 4px; min-width: 2px; }
+  .funnel-count { width: 40px; font-size: 0.85rem; color: #e0e0e0; font-weight: bold; }
+  .funnel-bar-generated { background: #888; }
+  .funnel-bar-probing { background: #ffd700; }
+  .funnel-bar-confirmed { background: #4caf50; }
+  .funnel-bar-exploited { background: #4fc3f7; }
+  .historical-comparison {
+    background: #0d1b2a;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+  .historical-comparison h4 { font-size: 0.9rem; color: #888; margin-bottom: 0.75rem; }
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .comparison-table th {
+    text-align: left;
+    padding: 0.4rem 0.75rem;
+    color: #4fc3f7;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    border-bottom: 1px solid #1a2a4a;
+  }
+  .comparison-table td {
+    padding: 0.4rem 0.75rem;
+    color: #e0e0e0;
+    border-bottom: 1px solid #0f1f3a;
+  }
+  .metric-better { color: #4caf50; }
+  .metric-worse { color: #ff8c00; }
+
+  .flags-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+  .flag-item {
+    background: #0a2a1a;
+    border: 1px solid #1a5c3a;
+    border-radius: 6px;
+    padding: 0.6rem 1rem;
+    font-family: 'Courier New', monospace;
+    color: #4caf50;
+    font-weight: bold;
+    font-size: 0.95rem;
+  }
+
+  .footer { text-align: center; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #333; color: #555; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>Probe Security Report</h1>
+    <p>{{ target_url }} &mdash; {{ scan_date }}</p>
+  </div>
+
+  <h2>Executive Summary</h2>
+
+  <div class="score-container">
+    <div class="score-circle">{{ score }}/100</div>
+    <div class="score-label">Security Score</div>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="count">{{ total_findings }}</div>
+      <div class="label">Total Findings</div>
+    </div>
+    <div class="summary-card">
+      <div class="count severity-critical">{{ critical_count }}</div>
+      <div class="label">Critical</div>
+    </div>
+    <div class="summary-card">
+      <div class="count severity-high">{{ high_count }}</div>
+      <div class="label">High</div>
+    </div>
+    <div class="summary-card">
+      <div class="count severity-medium">{{ medium_count }}</div>
+      <div class="label">Medium</div>
+    </div>
+    <div class="summary-card">
+      <div class="count severity-low">{{ low_count }}</div>
+      <div class="label">Low</div>
+    </div>
+    {% if flag_count > 0 %}
+    <div class="summary-card">
+      <div class="count" style="color: #4caf50;">{{ flag_count }}</div>
+      <div class="label">Flags Captured</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if goal_type %}
+  <h2>Session Goal</h2>
+  <div class="goal-section">
+    <div class="goal-header">
+      <span class="goal-type-badge">{{ goal_type }}</span>
+      <span class="goal-status-badge goal-status-{{ goal_status_class }}">{{ goal_status }}</span>
+    </div>
+    <div class="goal-description">{{ goal_description }}</div>
+    {% if goal_criteria | length > 0 %}
+    <h3>Success Criteria</h3>
+    <ul class="criteria-list">
+      {% for c in goal_criteria %}
+      <li class="{% if c.met %}criteria-met{% else %}criteria-unmet{% endif %}">
+        {% if c.met %}&#10003;{% else %}&#10007;{% endif %} {{ c.description }}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if has_deductive_metrics %}
+  <h2>Deductive Efficiency</h2>
+  <div class="metrics-section">
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="value">{{ efficiency_score }}%</div>
+        <div class="label">Efficiency Score</div>
+      </div>
+      <div class="metric-card">
+        <div class="value">{{ probe_ratio }}%</div>
+        <div class="label">Probe Ratio</div>
+      </div>
+      <div class="metric-card">
+        <div class="value">{{ brute_force_ratio }}%</div>
+        <div class="label">Brute Force Ratio</div>
+      </div>
+      <div class="metric-card">
+        <div class="value">{{ confirmation_rate }}%</div>
+        <div class="label">Confirmation Rate</div>
+      </div>
+    </div>
+
+    <h3>Hypothesis Funnel</h3>
+    <div class="funnel">
+      <div class="funnel-step">
+        <div class="funnel-label">Generated</div>
+        <div class="funnel-bar-container"><div class="funnel-bar funnel-bar-generated" style="width: {{ funnel_generated_pct }}%;"></div></div>
+        <div class="funnel-count">{{ funnel_generated }}</div>
+      </div>
+      <div class="funnel-step">
+        <div class="funnel-label">Probing</div>
+        <div class="funnel-bar-container"><div class="funnel-bar funnel-bar-probing" style="width: {{ funnel_probing_pct }}%;"></div></div>
+        <div class="funnel-count">{{ funnel_probing }}</div>
+      </div>
+      <div class="funnel-step">
+        <div class="funnel-label">Confirmed</div>
+        <div class="funnel-bar-container"><div class="funnel-bar funnel-bar-confirmed" style="width: {{ funnel_confirmed_pct }}%;"></div></div>
+        <div class="funnel-count">{{ funnel_confirmed }}</div>
+      </div>
+      <div class="funnel-step">
+        <div class="funnel-label">Exploited</div>
+        <div class="funnel-bar-container"><div class="funnel-bar funnel-bar-exploited" style="width: {{ funnel_exploited_pct }}%;"></div></div>
+        <div class="funnel-count">{{ funnel_exploited }}</div>
+      </div>
+    </div>
+
+    {% if has_historical %}
+    <div class="historical-comparison">
+      <h4>Comparison with Historical Averages</h4>
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>This Session</th>
+            <th>Historical Avg</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cmp in historical_comparisons %}
+          <tr>
+            <td>{{ cmp.metric }}</td>
+            <td>{{ cmp.current }}</td>
+            <td class="{{ cmp.class }}">{{ cmp.historical }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <h2>Findings</h2>
+
+  {% if findings | length == 0 %}
+  <p>No vulnerabilities found.</p>
+  {% endif %}
+
+  {% for finding in findings %}
+  <div class="finding-card border-{{ finding.severity_class }}">
+    <div class="finding-header">
+      <span class="badge badge-{{ finding.severity_class }}">{{ finding.severity }}</span>
+      <h3>{{ finding.title }}</h3>
+    </div>
+    <div class="finding-endpoint">Endpoint: <code>{{ finding.endpoint }}</code></div>
+    <div class="finding-description">{{ finding.description }}</div>
+
+    {% for ev in finding.evidence %}
+    <div class="evidence-block">
+      <h4>Evidence: {{ ev.description }}</h4>
+      <pre><strong>Request:</strong>
+{{ ev.request_method }} {{ ev.request_url | escape }}
+{% for header in ev.request_headers %}{{ header.0 | escape }}: {{ header.1 | escape }}
+{% endfor %}{% if ev.request_body %}
+{{ ev.request_body | escape }}{% endif %}
+
+<strong>Response:</strong> {{ ev.response_status }}
+{{ ev.response_body | escape }}</pre>
+    </div>
+    {% endfor %}
+
+    <div class="finding-fix">
+      <strong>Fix Suggestion:</strong> {{ finding.fix_suggestion }}
+    </div>
+  </div>
+  {% endfor %}
+
+  {% if specialists | length > 0 %}
+  <h2>Specialists</h2>
+  <div class="specialists-grid">
+    {% for spec in specialists %}
+    <div class="specialist-card">
+      <div class="name">{{ spec.name }}</div>
+      <div class="findings-count">{{ spec.findings_count }} finding{{ spec.findings_suffix }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if credentials | length > 0 %}
+  <h2>Discovered Credentials</h2>
+  <table class="cred-table">
+    <thead>
+      <tr>
+        <th>Username</th>
+        <th>Password / Hash</th>
+        <th>Service</th>
+        <th>Host</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cred in credentials %}
+      <tr>
+        <td><code>{{ cred.username }}</code></td>
+        <td><code>{{ cred.secret }}</code></td>
+        <td>{{ cred.service }}</td>
+        <td>{{ cred.host }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if attack_paths | length > 0 %}
+  <h2>Attack Path</h2>
+  <div class="attack-path">
+    {% for path in attack_paths %}
+    <div class="attack-step">
+      <span class="arrow">{% if loop.index > 1 %}&#8627;{% else %}&#9654;{% endif %}</span>
+      <span class="desc">{{ path.description }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if flags | length > 0 %}
+  <h2>Captured Flags</h2>
+  <div class="flags-list">
+    {% for flag in flags %}
+    <div class="flag-item">{{ flag }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <h2>Scan Timeline</h2>
+  <div class="timeline">
+    {% for action in timeline %}
+    <div class="timeline-item">
+      <div class="step">{{ loop.index }}</div>
+      <div class="content">{{ action }}</div>
+    </div>
+    {% endfor %}
+    {% if timeline | length == 0 %}
+    <p>No timeline data available.</p>
+    {% endif %}
+  </div>
+
+  <div class="footer">
+    Generated by Probe Security Scanner
+  </div>
+
+</div>
+</body>
+</html>

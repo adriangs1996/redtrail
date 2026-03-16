@@ -1,0 +1,304 @@
+{
+  "name": "Redtrail Agent v2 — Strategist Architecture",
+  "description": "Replace redtrail's sequential DFS task tree with a Strategist + Reactor + Concurrent Scheduler architecture that makes redtrail think and act like an elite pentester. Reference: redtrail/PENTESTER_MINDSET.md",
+  "branchName": "ralph/strategist-architecture",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Task Definition Registry",
+      "description": "As a redtrail developer, I want a Task Definition Registry (TDR) that holds both built-in and custom task definitions so that the system can be extended at runtime without modifying Rust enums.",
+      "acceptanceCriteria": [
+        "New struct `TaskDefinition` in `redtrail/src/agent/task_registry.rs` with fields: `name`, `description`, `prompt_template` (with `{placeholder}` variables), `applicable_when` (conditions like `port:6379`, `service:redis`), `expected_output` (which SpecialistResult fields are relevant), `default_priority`, `estimated_duration_secs`, `builtin: bool`",
+        "New struct `TaskRegistry` with methods: `register()`, `get()`, `list()`, `is_registered()`",
+        "All existing `TaskType` variants registered as built-in definitions at startup via `TaskRegistry::with_builtins()`",
+        "`TaskRegistry` is `Serialize`/`Deserialize` for persistence",
+        "Unit tests: register a definition, retrieve it, list all, verify builtins are present",
+        "The prompt generation currently in `TaskTree::build_task_prompt()` is refactored to use `TaskDefinition::prompt_template` with parameter substitution",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Foundation story. Creates the CRD-like system inspired by Kubernetes. All existing TaskType variants (PingSweep, PortScan, WebEnum, etc.) must be registered as builtins. The prompt_template uses {placeholder} syntax for parameter substitution.",
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-002",
+      "title": "Priority System",
+      "description": "As the scheduler, I want tasks to have a priority score with confidence weighting so that I can execute the highest-value actions first instead of following DFS order.",
+      "acceptanceCriteria": [
+        "New enum `Priority` with variants: `Critical`, `High`, `Medium`, `Low`, `Background` — implements `Ord` so Critical > High > Medium > Low > Background",
+        "`TaskNode` gains fields: `priority: Priority` (default Medium), `rationale: String`, `confidence: f32` (default 1.0, range 0.0-1.0)",
+        "Effective score computed as `priority_weight * confidence` where weights are: Critical=100, High=75, Medium=50, Low=25, Background=10",
+        "New method `TaskTree::next_by_priority()` replaces `next_pending_dfs()` — returns the highest effective-score pending task whose dependencies are met",
+        "New method `TaskTree::next_ready_batch(max: usize)` returns up to N independent ready tasks sorted by effective score",
+        "A task is 'ready' when: status is Pending AND (no parent OR parent is Completed)",
+        "Unit tests: priority ordering, effective score calculation, batch selection, dependency gating",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Foundation story. Modifies `redtrail/src/agent/task_tree.rs`. The confidence-weighted scoring means a High/0.3 task (score 22.5) ranks below a Medium/0.9 task (score 45). The `next_pending_dfs()` method is replaced but not yet removed (US-010 removes it).",
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-003",
+      "title": "Enhanced Knowledge Base",
+      "description": "As the strategist, I want the Knowledge Base to track completed and failed task summaries so that I can reason about what has been tried and what to do next.",
+      "acceptanceCriteria": [
+        "New struct `TaskSummary` with fields: `task_name`, `task_type`, `target_host`, `duration_secs`, `key_findings` (brief string), `status` (completed/failed/timeout), `timestamp`",
+        "`KnowledgeBase` gains `completed_tasks: Vec<TaskSummary>` and `failed_tasks: Vec<TaskSummary>` fields (with `#[serde(default)]` for backward compat)",
+        "New method `KnowledgeBase::add_task_summary()` called after each task completion/failure",
+        "New method `KnowledgeBase::situation_report() -> String` that generates a structured text dump of the full KB state suitable for the strategist prompt (hosts, ports, services, credentials, flags, completed tasks, failed tasks, notes)",
+        "`situation_report()` omits raw output and keeps summaries concise (target <4000 tokens for the KB dump)",
+        "Existing DB serialization in `db.rs` handles the new fields (backward compatible via serde defaults)",
+        "Unit tests: add summaries, generate situation report, verify backward compat deserialization",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Foundation story. Modifies `redtrail/src/agent/knowledge.rs` and `redtrail/src/db.rs`. The situation_report() is the primary input for the strategist's reasoning. Keep it concise — summarize completed tasks as 'name + key finding + duration', never include raw output.",
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-004",
+      "title": "Reactor — Event Classification and Credential Spray",
+      "description": "As the agent, I want a reactor that instantly classifies task results into intel events and fires deterministic responses (credential spray) so that high-value findings are acted on without waiting for a strategist call.",
+      "acceptanceCriteria": [
+        "New file `redtrail/src/agent/reactor.rs`",
+        "Enum `IntelEvent` with variants: `CredentialFound`, `AccessGained`, `ObjectiveCaptured`, `AttackSurfaceExpanded`, `IntelFound`, `VulnerabilityConfirmed`, `TaskFailed`",
+        "Enum `Urgency` with variants: `InterruptAndReplan`, `InjectAndContinue`, `NoteAndContinue`",
+        "Function `classify_events(result: &SpecialistResult, source_task: &TaskType) -> Vec<(IntelEvent, Urgency)>` that inspects result fields and produces typed events",
+        "Function `credential_spray(cred: &Credential, kb: &KnowledgeBase) -> Vec<(TaskType, Priority)>` that generates `TryCredentials` tasks for every known service, skipping the source service and services where creds are already known",
+        "Function `react(events: &[(IntelEvent, Urgency)], kb: &KnowledgeBase) -> ReactorOutput` where `ReactorOutput` contains: `urgent_tasks: Vec<(TaskType, Priority)>`, `should_replan: bool`, `notes: Vec<String>`",
+        "Unit tests: classify credential result -> CredentialFound + InterruptAndReplan; classify flag result -> ObjectiveCaptured + NoteAndContinue; credential spray generates correct tasks and skips source; empty result produces no events",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Core architecture story. The credential spray is the ONE deterministic behavior so universally correct it fires without LLM reasoning (see PENTESTER_MINDSET.md 'The Credential Spray Reflex'). The reactor must fire within the same loop iteration as credential discovery — no waiting for strategist.",
+      "dependsOn": [
+        "US-002",
+        "US-003"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-005",
+      "title": "Strategist — LLM-Based Strategic Reasoning",
+      "description": "As the agent, I want a strategist module that calls Claude (with no tools) to reason about the current KB state and propose prioritized tasks so that redtrail makes intelligent pentester-level decisions.",
+      "acceptanceCriteria": [
+        "New file `redtrail/src/agent/strategist.rs`",
+        "Struct `Strategist` with method `plan(kb: &KnowledgeBase, tree: &TaskTree, registry: &TaskRegistry, running_tasks: &[String]) -> Result<StrategistPlan, ProbeError>`",
+        "`StrategistPlan` contains: `assessment: String` (situation summary), `tasks: Vec<ProposedTask>`, `new_definitions: Vec<TaskDefinition>` (custom CRDs), `is_complete: bool` (strategist says assessment is done)",
+        "`ProposedTask` contains: `definition_name: String`, `params: HashMap<String, String>`, `priority: Priority`, `rationale: String`, `confidence: f32` (0.0-1.0 score)",
+        "The confidence score modulates effective priority via formula: `effective_score = priority_weight * confidence` (weights: Critical=100, High=75, Medium=50, Low=25, Background=10)",
+        "The strategist prompt is built from `PENTESTER_MINDSET.md` thinking patterns + `kb.situation_report()` + running tasks + available task definitions from registry",
+        "Strategist is invoked via `ClaudeExecutor::spawn_claude()` with an empty allowed_tools list (no tool execution, pure reasoning)",
+        "Response is parsed from JSON between `===PROBE_STRATEGY===` markers (distinct from `===PROBE_RESULT===`)",
+        "Strategist prompt includes the full list of registered task definitions (both builtin and custom) so it can reference them or propose new ones. When overlap exists, both are shown and strategist decides",
+        "No hardcoded maximum tree depth — the strategist is trusted to manage scope and can propose arbitrarily deep attack chains",
+        "If strategist response fails to parse, log error and fall back to reactor-only task generation for that cycle (graceful degradation)",
+        "Unit test: verify prompt contains KB situation report, thinking patterns, and task definitions; verify parsing of a mock strategist response",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Core architecture story. The strategist is the 'brain' — it encodes PENTESTER_MINDSET.md patterns: 'Use What You Have', 'Go Inside Before Going Wider', 'Cheapest Test First', 'Connect the Dots', 'Passive While Active', 'Know When to Stop', 'Reassess on Every Credential', 'Map Before You Attack', 'Identify the Stack Before Testing'. Uses ===PROBE_STRATEGY=== markers (not ===PROBE_RESULT===).",
+      "dependsOn": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-006",
+      "title": "Concurrent Worker Pool",
+      "description": "As the scheduler, I want a concurrent worker pool that executes multiple claude -p tasks in parallel with adaptive scaling so that independent tasks don't wait in line.",
+      "acceptanceCriteria": [
+        "New file `redtrail/src/agent/scheduler.rs`",
+        "Struct `Scheduler` with configurable `initial_concurrency: usize` (default 2) and `max_concurrency: usize` (default 4)",
+        "Uses `tokio::task::JoinSet` to manage concurrent task executions",
+        "Method `fill_slots(tree: &TaskTree, executor: &ClaudeExecutor)` spawns tasks up to current concurrency limit from priority queue",
+        "Method `wait_next() -> (u32, Result<TaskResult, ProbeError>)` waits for any running task to complete",
+        "Adaptive scaling: after initial recon phase completes (all depth-0 and depth-1 tasks done), scale from `initial_concurrency` to `max_concurrency`",
+        "Method `running_count() -> usize` and `has_capacity() -> bool`",
+        "`ClaudeExecutor` implements `Clone` (or is wrapped in `Arc`) so it can be shared across spawned tasks",
+        "The scheduler must never execute two tasks targeting the same host AND same port concurrently (avoid race conditions on shared services)",
+        "Integration test: spawn 3 mock tasks concurrently, verify all complete, verify results are collected",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Core architecture story. Each spawned worker receives a KB snapshot at launch (for prompt building). Results merge back sequentially when tasks complete. ClaudeExecutor only holds timeout_secs: u64 and verbose: bool, so Clone is trivial.",
+      "dependsOn": [
+        "US-002"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-007",
+      "title": "Background / Passive Task Support with Interim Results",
+      "description": "As the scheduler, I want to support long-running passive tasks (like traffic capture) that run concurrently in the background without consuming an active worker slot and that emit interim results in real-time, so that the 'Passive While Active' pentester pattern is supported.",
+      "acceptanceCriteria": [
+        "`TaskNode` gains an `is_background: bool` field (default false). Tasks with `priority: Background` are automatically marked as background",
+        "Background tasks do NOT count against the active worker concurrency limit (they run in a separate slot pool)",
+        "Maximum background task count is configurable (default: 2)",
+        "Background task results are checked periodically (every time an active task completes) — if finished, results are merged into KB and reactor events fired",
+        "Background tasks have their own timeout (default: 120s) independent of active task timeout",
+        "Background tasks support interim results: the executor streams output and checks for `===PROBE_RESULT===` markers periodically during execution (not just at completion)",
+        "When an interim result is found mid-execution, it is immediately parsed, merged into KB, and the reactor fires. A traffic capture sniffing credentials at t=15 should redirect the strategist's plan while the capture continues running",
+        "Interim result flow: background stdout stream -> detect markers -> parse partial SpecialistResult -> merge into KB -> fire reactor -> if InterruptAndReplan, call strategist while background task continues",
+        "A background task can produce multiple interim results during its lifetime (e.g., sniffing FTP creds at t=15, HTTP basic auth at t=30, API key at t=45)",
+        "Unit tests: background tasks don't consume active slots, background results trigger reactor, background timeout is independent, interim results are parsed and merged before task completion",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Extends the scheduler from US-006. The interim results feature is critical — it turns traffic capture from a 'wait and pray' blocking task into a real-time intelligence feed. The existing tokio::select! streaming loop in claude_executor.rs already reads stdout line-by-line, so interim marker detection can hook into that. Background tasks use a separate JoinSet.",
+      "dependsOn": [
+        "US-004",
+        "US-006"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-008",
+      "title": "Strategist Inflection Points",
+      "description": "As the orchestrator, I want the strategist to be called at specific inflection points (not after every task) so that strategic reasoning happens when it matters without excessive overhead.",
+      "acceptanceCriteria": [
+        "Enum `StrategistTrigger` with variants: `ReconComplete` (all initial port scans done), `HighValueDiscovery` (reactor returned `InterruptAndReplan`), `WaveComplete` (all running tasks finished and queue is empty), `Stuck` (queue empty but objectives remain), `RepeatedFailure` (3+ consecutive failures on same host)",
+        "Function `should_call_strategist(trigger: &StrategistTrigger, last_call_elapsed: Duration, tasks_since_last_call: u32) -> bool` with debounce logic: don't re-call within 30 seconds of last call unless trigger is `HighValueDiscovery`",
+        "The main orchestrator loop integrates trigger detection: after each task completion, check reactor urgency -> if `InterruptAndReplan`, trigger strategist; after filling worker slots fails (empty queue), check if `WaveComplete` or `Stuck`",
+        "`ReconComplete` detection: all tasks at depth 0 and depth 1 are completed or failed",
+        "Unit tests: trigger detection for each variant, debounce logic prevents rapid re-calls, HighValueDiscovery bypasses debounce",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Connects the reactor (US-004) to the strategist (US-005). The strategist should be called 2-4 times per engagement, not after every task. Debounce prevents expensive LLM calls when multiple tasks complete in quick succession.",
+      "dependsOn": [
+        "US-004",
+        "US-005"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-009",
+      "title": "Custom Task Definition Persistence",
+      "description": "As a redtrail operator, I want custom task definitions proposed by the strategist to be auto-registered for the current run and optionally persisted globally so that redtrail gets smarter over time.",
+      "acceptanceCriteria": [
+        "When the strategist proposes a `new_definitions` entry, it is immediately registered in the in-memory `TaskRegistry` for the current run",
+        "Each proposed definition includes a `reusable: bool` flag set by the strategist (true = useful across engagements, false = session-specific)",
+        "Reusable definitions are saved to `~/.redtrail/task-definitions.json` after the run completes (append, don't overwrite existing)",
+        "On startup, `TaskRegistry::with_builtins()` also loads from `~/.redtrail/task-definitions.json` if it exists",
+        "The `KnowledgeBase` stores references to custom definitions used in the current session (for session replay/review)",
+        "When a custom definition has the same `applicable_when` conditions as a builtin, both are preserved in the registry — no automatic merging or override. The strategist sees both and decides which to use",
+        "Unit tests: persist a definition, reload it, verify it's available; verify session-specific definitions are NOT persisted; verify overlapping definitions both preserved",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Extends US-001 (TaskRegistry) with persistence. Like Kubernetes CRDs stored in etcd. The `~/.redtrail/task-definitions.json` file is a simple JSON array. The CLI subcommands for list/remove are in US-011.",
+      "dependsOn": [
+        "US-001",
+        "US-005"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-010",
+      "title": "Orchestrator Rewire — Main Execution Loop",
+      "description": "As the agent, I want the orchestrator to use the new strategist + reactor + scheduler loop instead of the sequential DFS so that redtrail operates like an elite pentester.",
+      "acceptanceCriteria": [
+        "Remove `TaskTree::generate_children()` and `TaskTree::generate_retroactive_tasks()` methods",
+        "Remove `TaskTree::next_pending_dfs()` method",
+        "Remove the sequential `TaskTree::run()` loop",
+        "New method `TaskTree::run_with_strategy()` implementing: 1) Seed PingSweep 2) After PingSweep: generate PortScan tasks for discovered hosts, skip .0/.1/self-IP 3) Start background traffic capture concurrently 4) Execute port scans concurrently via scheduler 5) On recon complete -> call strategist 6) Execute strategist plan via scheduler + reactor 7) On each task completion: merge KB -> classify events -> if InterruptAndReplan call strategist -> else fill slots 8) On wave complete -> call strategist 9) Terminate when strategist says is_complete OR queue empty + no running + strategist confirms OR max time",
+        "Verbose mode (`--verbose`) streams Claude output for ALL concurrent workers with worker-id prefix: `[WORKER-1][CLAUDE] ...`",
+        "Progress display shows concurrent status: `[SCHEDULER] 3 running (1 bg), 5 queued, 12 completed, 1 failed`",
+        "The `Orchestrator` struct in `orchestrator.rs` creates `Strategist`, `Reactor`, `Scheduler`, and `TaskRegistry` and wires them together",
+        "The existing `ExecutionMode::Orchestrator` path in `orchestrator.rs` delegates to `run_with_strategy()`",
+        "Authorization preamble (CTF lab context, docker exec pattern) included in ALL prompts — both strategist and executor calls",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Integration story. This is where everything comes together. Modifies `redtrail/src/agent/task_tree.rs` and `redtrail/src/agent/orchestrator.rs`. The old DFS code (generate_children, generate_retroactive_tasks, next_pending_dfs, run()) is removed entirely — no legacy fallback mode.",
+      "dependsOn": [
+        "US-004",
+        "US-005",
+        "US-006",
+        "US-007",
+        "US-008"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-011",
+      "title": "CLI Integration",
+      "description": "As a redtrail operator, I want CLI flags to control the new architecture so that I can tune concurrency and behavior.",
+      "acceptanceCriteria": [
+        "New flag `--concurrency <N>` (alias `-j`) sets max concurrent workers (default: 4). Adaptive scaling uses `min(2, N)` as initial and `N` as max",
+        "New flag `--strategy-timeout <secs>` sets max seconds for a strategist call (default: 60)",
+        "New flag `--task-timeout <secs>` sets max seconds per executor task (default: 300)",
+        "Existing `--verbose` flag works with concurrent output (worker-id prefixed)",
+        "`redtrail scan --hosts 172.20.1.0/24 -j 4 --verbose` runs with 4 max workers and streaming output",
+        "`redtrail definitions list` subcommand shows all registered definitions (builtin + custom) with their source",
+        "`redtrail definitions remove <name>` subcommand removes a persisted custom definition with confirmation prompt ('Remove RedisEnum globally? [y/N]')",
+        "Help text documents all new flags",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Modifies `redtrail/src/main.rs` (clap args). The definitions subcommands interact with `~/.redtrail/task-definitions.json` from US-009.",
+      "dependsOn": [
+        "US-009",
+        "US-010"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-012",
+      "title": "Integration Test — Module 01",
+      "description": "As a redtrail developer, I want an integration test that runs the new architecture against Module 01 so that we validate it finds all flags faster than the DFS baseline.",
+      "acceptanceCriteria": [
+        "Test script that: starts Module 01 lab, runs `redtrail scan --hosts 172.20.1.0/24 -j 4`, verifies all 4 flags found: FLAG{w3b_s3rv3r_3num3r4t3d} (web), FLAG{ftp_cr3d3nt14ls_sn1ff3d} (FTP via sniffed/discovered creds), FLAG{su1d_b1n4ry_pr1v3sc} (SUID privesc), FLAG{d4t4b4s3_3xf1ltr4t3d} (database bonus)",
+        "The FTP flag must be obtained through legitimate attack chain: credentials discovered via sniffing, DB dump, or other intel THEN used to access FTP — not via direct `docker exec` on the container",
+        "Test verifies background traffic capture was launched (check logs for background task with SniffTraffic or TrafficCapture)",
+        "Test captures total wall-clock time and logs it",
+        "Test verifies strategist was called at least once (check logs for `[STRATEGIST]` prefix)",
+        "Test verifies concurrent execution occurred (check logs for multiple `[WORKER-N]` prefixes)",
+        "Test verifies credential spray occurred after credential discovery (check for TryCredentials tasks in tree)",
+        "Baseline comparison: document DFS time (~28 min) vs new architecture time in test output",
+        "`cargo test` passes",
+        "`cargo clippy` passes with no warnings"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Final validation story. Module 01 has 3 required flags + 1 bonus (database). The traffic-gen container sends FTP creds (ftpuser:letmein123) every 15-30s, HTTP basic auth (webadmin:W3bP4ss!2024), and an API key header (s3cr3t_4p1_k3y_2024). Target: under 8 minutes total (vs ~28 min DFS baseline).",
+      "dependsOn": [
+        "US-010",
+        "US-011"
+      ],
+      "completionNotes": "Completed by agent"
+    }
+  ],
+  "metadata": {
+    "updatedAt": "2026-03-06T14:40:53.697Z"
+  }
+}

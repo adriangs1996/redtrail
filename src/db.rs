@@ -201,6 +201,31 @@ impl Db {
         Ok(self.conn.last_insert_rowid())
     }
 
+    pub fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error> {
+        self.conn.execute(
+            "INSERT INTO command_history (session_id, command, tool) VALUES (?1, ?2, ?3)",
+            params![session_id, command, tool],
+        ).map_err(|e| Error::Db(e.to_string()))?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn decrement_noise_budget(&self, session_id: &str, cost: f64) -> Result<(), Error> {
+        self.conn.execute(
+            "UPDATE sessions SET noise_budget = max(0, noise_budget - ?1) WHERE id = ?2",
+            rusqlite::params![cost, session_id],
+        ).map_err(|e| Error::Db(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn finish_command(&self, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error> {
+        let preview = if output.len() > 500 { &output[..500] } else { output };
+        self.conn.execute(
+            "UPDATE command_history SET exit_code = ?1, duration_ms = ?2, output = ?3, output_preview = ?4 WHERE id = ?5",
+            params![exit_code, duration_ms, output, preview, id],
+        ).map_err(|e| Error::Db(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn list_hosts(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         let mut stmt = self.conn.prepare(
             "SELECT ip, hostname, os, status FROM hosts WHERE session_id = ?1 ORDER BY ip"

@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod db;
 mod error;
+mod pipeline;
 mod workspace;
 
 fn main() {

@@ -1,7 +1,13 @@
 mod init;
+pub mod kb;
+pub mod status;
+pub mod hypothesis;
+pub mod evidence;
 
 use clap::{Parser, Subcommand};
+use crate::db::Db;
 use crate::error::Error;
+use crate::workspace;
 
 #[derive(Parser)]
 #[command(name = "rt", about = "Redtrail — pentesting workspace manager")]
@@ -20,6 +26,32 @@ enum Commands {
         #[arg(long)]
         scope: Option<String>,
     },
+    Kb {
+        #[command(subcommand)]
+        command: kb::KbCommands,
+    },
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+    Hypothesis {
+        #[command(subcommand)]
+        command: hypothesis::HypothesisCommands,
+    },
+    Evidence {
+        #[command(subcommand)]
+        command: evidence::EvidenceCommands,
+    },
+}
+
+pub fn resolve_session() -> Result<(Db, String), Error> {
+    let cwd = std::env::current_dir()?;
+    let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
+    let db = Db::open(workspace::db_path(&ws).to_str().unwrap())?;
+    let session_id: String = db.conn().query_row(
+        "SELECT id FROM sessions LIMIT 1", [], |r| r.get(0),
+    ).map_err(|_| Error::NoActiveSession)?;
+    Ok((db, session_id))
 }
 
 pub fn run() -> Result<(), Error> {
@@ -27,6 +59,18 @@ pub fn run() -> Result<(), Error> {
     match cli.command {
         Some(Commands::Init { target, goal, scope }) => {
             init::run(target, goal, scope)
+        }
+        Some(Commands::Kb { command }) => {
+            kb::run(command)
+        }
+        Some(Commands::Status { json }) => {
+            status::run(json)
+        }
+        Some(Commands::Hypothesis { command }) => {
+            hypothesis::run(command)
+        }
+        Some(Commands::Evidence { command }) => {
+            evidence::run(command)
         }
         None => {
             println!("rt: redtrail. Use --help for usage.");

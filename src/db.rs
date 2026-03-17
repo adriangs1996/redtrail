@@ -590,6 +590,22 @@ impl Db {
         Ok(result)
     }
 
+    pub fn get_command_for_extraction(&self, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error> {
+        self.conn.query_row(
+            "SELECT session_id, command, tool, output FROM command_history WHERE id = ?1",
+            rusqlite::params![id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        ).map_err(|e| Error::Db(e.to_string()))
+    }
+
+    pub fn update_extraction_status(&self, id: i64, status: &str) -> Result<(), Error> {
+        self.conn.execute(
+            "UPDATE command_history SET extraction_status = ?1 WHERE id = ?2",
+            rusqlite::params![status, id],
+        ).map_err(|e| Error::Db(e.to_string()))?;
+        Ok(())
+    }
+
     pub fn status_summary(&self, session_id: &str) -> Result<serde_json::Value, Error> {
         let (name, target, goal, phase, noise_budget): (String, Option<String>, String, String, f64) = self.conn.query_row(
             "SELECT name, target, goal, phase, noise_budget FROM sessions WHERE id = ?1",

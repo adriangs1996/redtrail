@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod db;
 mod error;
+mod extraction;
 mod pipeline;
 mod workspace;
 

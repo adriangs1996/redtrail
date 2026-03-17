@@ -88,6 +88,9 @@ pub enum KbCommands {
     AddNote {
         text: String,
     },
+    Extract {
+        id: i64,
+    },
 }
 
 pub fn run(cmd: KbCommands) -> Result<(), Error> {
@@ -265,6 +268,11 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
         KbCommands::AddNote { text } => {
             let id = db.add_note(&session_id, &text)?;
             println!("note added (id={id})");
+        }
+        KbCommands::Extract { id } => {
+            let config = crate::config::Config::resolved(&std::env::current_dir()?)?;
+            crate::extraction::extract_sync(&db, &session_id, id, &config)?;
+            println!("extraction complete for command {id}");
         }
     }
 

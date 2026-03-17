@@ -1,6 +1,7 @@
 mod cli;
 mod db;
 mod error;
+mod workspace;
 
 fn main() {
     if let Err(e) = cli::run() {

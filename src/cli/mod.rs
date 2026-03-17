@@ -6,6 +6,9 @@ pub mod evidence;
 pub mod session;
 pub mod scope;
 pub mod config_cmd;
+pub mod proxy;
+pub mod env;
+pub mod setup;
 
 use clap::{Parser, Subcommand};
 use crate::db::Db;
@@ -57,7 +60,13 @@ enum Commands {
         #[command(subcommand)]
         command: config_cmd::ConfigCommands,
     },
+    Setup {
+        #[command(subcommand)]
+        command: Option<setup::SetupCommands>,
+    },
     Pipeline,
+    Env,
+    Deactivate,
 }
 
 pub fn resolve_session() -> Result<(Db, String), Error> {
@@ -70,7 +79,23 @@ pub fn resolve_session() -> Result<(Db, String), Error> {
     Ok((db, session_id))
 }
 
+const KNOWN_SUBCOMMANDS: &[&str] = &[
+    "init", "kb", "status", "hypothesis", "evidence",
+    "session", "scope", "config", "setup", "pipeline", "env", "deactivate",
+    "help", "--help", "-h", "--version", "-V",
+];
+
 pub fn run() -> Result<(), Error> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() > 1 && args[1] == "--" {
+        return proxy::run(&args[2..]);
+    }
+
+    if args.len() > 1 && !KNOWN_SUBCOMMANDS.contains(&args[1].as_str()) {
+        return proxy::run(&args[1..]);
+    }
+
     let cli = Cli::parse();
     match cli.command {
         Some(Commands::Init { target, goal, scope }) => {
@@ -97,9 +122,22 @@ pub fn run() -> Result<(), Error> {
         Some(Commands::Config { command }) => {
             config_cmd::run(command)
         }
+        Some(Commands::Setup { command }) => {
+            match command {
+                None => setup::run_wizard(),
+                Some(setup::SetupCommands::Status { json }) => setup::run_status(json),
+                Some(setup::SetupCommands::Aliases(args)) => setup::run_aliases(args),
+            }
+        }
         Some(Commands::Pipeline) => {
             println!("pipeline configurability deferred to v2");
             Ok(())
+        }
+        Some(Commands::Env) => {
+            env::run()
+        }
+        Some(Commands::Deactivate) => {
+            env::deactivate()
         }
         None => {
             println!("rt: redtrail. Use --help for usage.");

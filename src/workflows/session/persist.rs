@@ -10,10 +10,19 @@ pub fn save(db: &DbV2, ctx: &SessionContext) -> Result<(), Error> {
         .map_err(|e| Error::Db(e.to_string()))?;
 
     db.conn().execute(
-        "INSERT OR REPLACE INTO sessions
+        "INSERT INTO sessions
             (id, name, created_at, updated_at, env_json, tool_config_json,
              llm_provider, llm_model, working_dir, prompt_template)
-         VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7, ?8, ?9)",
+         VALUES (?1, ?2, ?3, datetime('now'), ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(id) DO UPDATE SET
+             name = excluded.name,
+             updated_at = datetime('now'),
+             env_json = excluded.env_json,
+             tool_config_json = excluded.tool_config_json,
+             llm_provider = excluded.llm_provider,
+             llm_model = excluded.llm_model,
+             working_dir = excluded.working_dir,
+             prompt_template = excluded.prompt_template",
         params![
             ctx.id, ctx.name, ctx.created_at,
             env_json, tool_json,

@@ -13,6 +13,7 @@ fn make_block(content: BlockContent) -> Block {
         collapsed: false,
         started_at: std::time::Instant::now(),
         job_id: None,
+        content_scroll: 0,
     }
 }
 

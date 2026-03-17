@@ -1,3 +1,4 @@
+pub mod get_command_result;
 pub mod query_kb;
 pub mod run_command;
 

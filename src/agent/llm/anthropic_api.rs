@@ -8,7 +8,7 @@ use super::{
     ToolUseRequest,
 };
 
-const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+const DEFAULT_MODEL: &str = "claude-opus-4-6-20250612";
 const DEFAULT_MAX_TOKENS: u32 = 8192;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 const API_VERSION: &str = "2023-06-01";
@@ -436,7 +436,7 @@ mod tests {
 
     #[test]
     fn test_default_values() {
-        assert_eq!(DEFAULT_MODEL, "claude-sonnet-4-20250514");
+        assert_eq!(DEFAULT_MODEL, "claude-opus-4-6-20250612");
         assert_eq!(DEFAULT_MAX_TOKENS, 8192);
         assert_eq!(DEFAULT_TIMEOUT_SECS, 120);
     }

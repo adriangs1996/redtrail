@@ -6,11 +6,22 @@ use crate::workflows::{Block, BlockContent, BlockStatus};
 pub struct BlockView<'a> {
     block: &'a Block,
     focused: bool,
+    content_scroll: u16,
 }
 
 impl<'a> BlockView<'a> {
     pub fn new(block: &'a Block, focused: bool) -> Self {
-        Self { block, focused }
+        Self { block, focused, content_scroll: block.content_scroll }
+    }
+
+    fn effective_scroll(&self, inner_height: u16) -> u16 {
+        let total_lines = self.block.content.line_count() as u16;
+        let max_scroll = total_lines.saturating_sub(inner_height);
+        if self.content_scroll == u16::MAX {
+            max_scroll
+        } else {
+            self.content_scroll.min(max_scroll)
+        }
     }
 
     fn title_spans(&self) -> Vec<Span<'a>> {
@@ -86,8 +97,10 @@ impl<'a> Widget for BlockView<'a> {
                 }
                 BlockContent::Table(data) => super::renderers::table::render(data, inner.width),
             };
+            let scroll_y = self.effective_scroll(inner.height);
             Paragraph::new(render_lines)
                 .wrap(Wrap { trim: false })
+                .scroll((scroll_y, 0))
                 .render(inner, buf);
         }
     }

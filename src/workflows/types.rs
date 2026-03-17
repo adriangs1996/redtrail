@@ -47,6 +47,7 @@ pub struct Block {
     pub collapsed: bool,
     pub started_at: std::time::Instant,
     pub job_id: Option<u32>,
+    pub content_scroll: u16,
 }
 
 #[derive(Debug, Clone)]

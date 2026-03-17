@@ -21,7 +21,7 @@ use crate::error::Error;
 use crate::middleware::builtin::logger::LoggerListener;
 use crate::middleware::events::{EventBus, ShellEvent};
 use crate::middleware::pipeline::Pipeline;
-use crate::workflows::chat::{ChatInput, ChatWorkflow};
+use crate::workflows::chat::{ChatInput, ChatWorkflow, RecentCommand};
 use crate::workflows::command::jobs::JobTable;
 use crate::workflows::command::pty::PtyKillHandle;
 use crate::workflows::command::resolve::{self, ResolvedCommand};
@@ -40,9 +40,18 @@ use super::widgets::status_bar::{StatusBar, StatusBarData};
 struct RunningCommand {
     block_idx: usize,
     job_id: u32,
+    input_history_id: Option<i64>,
     output_rx: mpsc::UnboundedReceiver<String>,
     done_rx: oneshot::Receiver<i32>,
     kill_handle: PtyKillHandle,
+}
+
+struct RunningChat {
+    block_idx: usize,
+    user_message: String,
+    is_chat: bool,
+    token_rx: mpsc::UnboundedReceiver<String>,
+    result_rx: oneshot::Receiver<Result<crate::workflows::chat::ChatResult, Error>>,
 }
 
 pub struct App {
@@ -62,6 +71,8 @@ pub struct App {
     provider: Option<Arc<dyn LlmProvider>>,
     tools: Option<Arc<ToolRegistry>>,
     running_cmds: Vec<RunningCommand>,
+    running_chats: Vec<RunningChat>,
+    blocks_viewport_h: u16,
 }
 
 impl App {
@@ -91,10 +102,14 @@ impl App {
             provider,
             tools,
             running_cmds: vec![],
+            running_chats: vec![],
+            blocks_viewport_h: 0,
         }
     }
 
     pub async fn run(&mut self) -> Result<(), Error> {
+        self.load_persisted_state();
+
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(
@@ -115,7 +130,7 @@ impl App {
 
             match events.next().await {
                 super::events::Event::Key(key) => {
-                    self.handle_key(key).await;
+                    self.handle_key(key);
                 }
                 super::events::Event::Resize(_, _) | super::events::Event::Tick => {}
             }
@@ -146,6 +161,7 @@ impl App {
         StatusBar::new(&data).render(chunks[0], f.buffer_mut());
 
         let blocks_area = chunks[1];
+        self.blocks_viewport_h = blocks_area.height;
         let max_block_h = (blocks_area.height / 2).max(3);
         let gap: u16 = 1;
 
@@ -189,7 +205,7 @@ impl App {
         self.input.render(f, chunks[2], InputMode::Terminal);
     }
 
-    async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+    fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
         match (key.code, key.modifiers) {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                 if self.running_cmds.is_empty() {
@@ -201,16 +217,60 @@ impl App {
                 }
             }
             (KeyCode::Up, KeyModifiers::NONE) => {
-                self.block_scroll = self.block_scroll.saturating_sub(3);
+                if let Some(idx) = self.focused_block {
+                    if let Some(block) = self.blocks.get_mut(idx) {
+                        let cur = if block.content_scroll == u16::MAX {
+                            (block.content.line_count() as u16).saturating_sub(1)
+                        } else {
+                            block.content_scroll
+                        };
+                        block.content_scroll = cur.saturating_sub(3);
+                    }
+                } else {
+                    self.input.history_up();
+                }
             }
             (KeyCode::Down, KeyModifiers::NONE) => {
-                self.block_scroll = self.block_scroll.saturating_add(3);
+                if let Some(idx) = self.focused_block {
+                    if let Some(block) = self.blocks.get_mut(idx) {
+                        let cur = if block.content_scroll == u16::MAX {
+                            u16::MAX
+                        } else {
+                            block.content_scroll.saturating_add(3)
+                        };
+                        block.content_scroll = cur;
+                    }
+                } else {
+                    self.input.history_down();
+                }
             }
             (KeyCode::PageUp, _) => {
-                self.block_scroll = self.block_scroll.saturating_sub(15);
+                if let Some(idx) = self.focused_block {
+                    if let Some(block) = self.blocks.get_mut(idx) {
+                        let cur = if block.content_scroll == u16::MAX {
+                            (block.content.line_count() as u16).saturating_sub(1)
+                        } else {
+                            block.content_scroll
+                        };
+                        block.content_scroll = cur.saturating_sub(15);
+                    }
+                } else {
+                    self.block_scroll = self.block_scroll.saturating_sub(15);
+                }
             }
             (KeyCode::PageDown, _) => {
-                self.block_scroll = self.block_scroll.saturating_add(15);
+                if let Some(idx) = self.focused_block {
+                    if let Some(block) = self.blocks.get_mut(idx) {
+                        let cur = if block.content_scroll == u16::MAX {
+                            u16::MAX
+                        } else {
+                            block.content_scroll.saturating_add(15)
+                        };
+                        block.content_scroll = cur;
+                    }
+                } else {
+                    self.block_scroll = self.block_scroll.saturating_add(15);
+                }
             }
             (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
                 if let Some(idx) = self.focused_block {
@@ -220,6 +280,7 @@ impl App {
                 } else if !self.blocks.is_empty() {
                     self.focused_block = Some(self.blocks.len() - 1);
                 }
+                self.scroll_to_focused();
             }
             (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                 if let Some(idx) = self.focused_block {
@@ -229,6 +290,7 @@ impl App {
                         self.focused_block = None;
                     }
                 }
+                self.scroll_to_focused();
             }
             (KeyCode::Char('e'), KeyModifiers::CONTROL) => {
                 if let Some(idx) = self.focused_block
@@ -260,7 +322,8 @@ impl App {
                     self.should_quit = true;
                     return;
                 }
-                self.execute_command(trimmed).await;
+                let ih_id = self.save_input_history(trimmed);
+                self.execute_command(trimmed, ih_id);
             }
             (KeyCode::Tab, KeyModifiers::NONE) => {
                 let current = self.input.current_text();
@@ -346,6 +409,17 @@ impl App {
                 duration,
             };
             let _ = self.pipeline.run_post_exec(&mut cmd_output, &self.session);
+            if let Some(ih_id) = rc.input_history_id {
+                let duration_ms = duration.as_millis() as i64;
+                let preview = if output.len() > 500 { &output[..500] } else { &output };
+                let db = self.db.lock().unwrap();
+                if let Ok(ch_id) = db.save_command_result(
+                    &self.session.id, &self.blocks.get(rc.block_idx).map(|b| b.command.as_str()).unwrap_or(""),
+                    exit_code, duration_ms, preview,
+                ) {
+                    let _ = db.link_input_to_command(ih_id, ch_id);
+                }
+            }
             let event = ShellEvent::CommandFinished {
                 job_id: rc.job_id,
                 exit_code,
@@ -356,10 +430,121 @@ impl App {
         if got_output {
             self.scroll_to_bottom();
         }
+
+        let mut finished_chats = vec![];
+        let mut pending_saves: Vec<(String, String)> = vec![];
+        for (ci, rc) in self.running_chats.iter_mut().enumerate() {
+            while let Ok(token) = rc.token_rx.try_recv() {
+                got_output = true;
+                if let Some(block) = self.blocks.get_mut(rc.block_idx) {
+                    block.content.push_line(ShellOutputLine {
+                        text: token,
+                        stream: ShellOutputStream::Stdout,
+                    });
+                }
+            }
+            match rc.result_rx.try_recv() {
+                Ok(Ok(result)) => {
+                    tracing::info!(lines = result.block.content.line_count(), "chat response ok");
+                    pending_saves.push((rc.user_message.clone(), result.response_text.clone()));
+                    self.blocks[rc.block_idx] = result.block;
+                    if rc.is_chat {
+                        self.chat_history = result.updated_history;
+                    }
+                    finished_chats.push(ci);
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("chat error: {}", e);
+                    if let Some(block) = self.blocks.get_mut(rc.block_idx) {
+                        block.content = BlockContent::Plain(vec![ShellOutputLine {
+                            text: format!("LLM error: {}", e),
+                            stream: ShellOutputStream::Stderr,
+                        }]);
+                        block.status = BlockStatus::Failed(1);
+                    }
+                    finished_chats.push(ci);
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    if let Some(block) = self.blocks.get_mut(rc.block_idx) {
+                        block.status = BlockStatus::Failed(-1);
+                    }
+                    finished_chats.push(ci);
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
+        }
+        for ci in finished_chats.into_iter().rev() {
+            self.running_chats.remove(ci);
+        }
+        for (user_msg, assistant_msg) in pending_saves {
+            self.save_chat_messages(&user_msg, &assistant_msg);
+        }
+        if got_output {
+            self.scroll_to_bottom();
+        }
     }
 
     fn scroll_to_bottom(&mut self) {
         self.block_scroll = u16::MAX;
+    }
+
+    fn scroll_to_focused(&mut self) {
+        let Some(target_idx) = self.focused_block else { return };
+        let viewport = self.blocks_viewport_h;
+        if viewport == 0 { return; }
+        let gap: u16 = 1;
+        let max_block_h = (viewport / 2).max(3);
+        let mut cumulative: u16 = 0;
+        let mut target_top: u16 = 0;
+        let mut target_h: u16 = 0;
+        for (i, b) in self.blocks.iter().enumerate() {
+            let h = if b.collapsed { 3 } else { ((b.content.line_count() as u16) + 2).min(max_block_h) };
+            if i == target_idx {
+                target_top = cumulative;
+                target_h = h;
+                break;
+            }
+            cumulative += h + if i + 1 < self.blocks.len() { gap } else { 0 };
+        }
+        let target_bottom = target_top.saturating_add(target_h);
+        let view_bottom = self.block_scroll.saturating_add(viewport);
+        if target_top < self.block_scroll {
+            self.block_scroll = target_top;
+        } else if target_bottom > view_bottom {
+            self.block_scroll = target_bottom.saturating_sub(viewport);
+        }
+    }
+
+    fn load_persisted_state(&mut self) {
+        let db = self.db.lock().unwrap();
+        if let Ok(history) = db.load_chat_history(&self.session.id) {
+            self.chat_history = history.iter().map(|(role, content)| {
+                match role.as_str() {
+                    "user" => ChatMessage::user(content),
+                    _ => ChatMessage::assistant_text(content),
+                }
+            }).collect();
+            if !self.chat_history.is_empty() {
+                tracing::info!(messages = self.chat_history.len(), "restored chat history");
+            }
+        }
+        if let Ok(cmds) = db.load_input_history(&self.session.id) {
+            if !cmds.is_empty() {
+                tracing::info!(entries = cmds.len(), "restored input history");
+                self.input.load_history(cmds);
+            }
+        }
+    }
+
+    fn save_chat_messages(&self, user_msg: &str, assistant_msg: &str) {
+        let db = self.db.lock().unwrap();
+        let _ = db.save_chat_message(&self.session.id, "user", user_msg);
+        let _ = db.save_chat_message(&self.session.id, "assistant", assistant_msg);
+    }
+
+    fn save_input_history(&self, cmd: &str) -> Option<i64> {
+        let db = self.db.lock().unwrap();
+        db.save_input_history(&self.session.id, cmd).ok()
     }
 
     fn next_block_id(&mut self) -> usize {
@@ -368,7 +553,7 @@ impl App {
         id
     }
 
-    async fn execute_command(&mut self, input: &str) {
+    fn execute_command(&mut self, input: &str, input_history_id: Option<i64>) {
         tracing::info!(cmd = %input, "execute_command");
         match resolve::resolve(input) {
             ResolvedCommand::Builtin { name, .. } if name == "clear" => {
@@ -377,7 +562,8 @@ impl App {
                 self.block_scroll = 0;
             }
             ResolvedCommand::Builtin { name, args } if name == "ask" || name == "chat" => {
-                self.handle_chat_builtin(input, &args).await;
+                let is_chat = name == "chat";
+                self.handle_chat_builtin(input, &args, is_chat);
             }
             ResolvedCommand::Builtin { name, args } if name == "sql" => {
                 self.handle_sql_table(input, &args);
@@ -393,6 +579,7 @@ impl App {
                     collapsed: false,
                     started_at: std::time::Instant::now(),
                     job_id: None,
+                    content_scroll: u16::MAX,
                 };
                 for line in lines {
                     block.content.push_line(ShellOutputLine {
@@ -414,6 +601,7 @@ impl App {
                     collapsed: false,
                     started_at: std::time::Instant::now(),
                     job_id: None,
+                    content_scroll: u16::MAX,
                 };
 
                 if background {
@@ -470,6 +658,7 @@ impl App {
                             self.running_cmds.push(RunningCommand {
                                 block_idx,
                                 job_id,
+                                input_history_id,
                                 output_rx,
                                 done_rx,
                                 kill_handle,
@@ -491,7 +680,7 @@ impl App {
         }
     }
 
-    async fn handle_chat_builtin(&mut self, input: &str, args: &[String]) {
+    fn handle_chat_builtin(&mut self, input: &str, args: &[String], is_chat: bool) {
         let message = args.join(" ");
         if message.is_empty() {
             let block_id = self.next_block_id();
@@ -506,61 +695,84 @@ impl App {
                 collapsed: false,
                 started_at: std::time::Instant::now(),
                 job_id: None,
+                content_scroll: u16::MAX,
             });
             self.scroll_to_bottom();
             return;
         }
-        if let (Some(provider), Some(tools)) = (&self.provider, &self.tools) {
-            tracing::info!(history_len = self.chat_history.len(), "chat request: {}", message);
-            let workflow = ChatWorkflow {
-                provider: provider.clone(),
-                tools: tools.clone(),
-            };
-            let chat_input = ChatInput {
-                user_message: message,
-                history: self.chat_history.clone(),
-            };
-            match workflow.execute(chat_input).await {
-                Ok(result) => {
-                    tracing::info!(lines = result.block.content.line_count(), "chat response ok");
-                    self.chat_history = result.updated_history;
-                    self.blocks.push(result.block);
-                    self.scroll_to_bottom();
-                }
-                Err(e) => {
-                    tracing::error!("chat error: {}", e);
-                    let block_id = self.next_block_id();
-                    self.blocks.push(Block {
-                        id: block_id,
-                        command: input.to_string(),
-                        content: BlockContent::Plain(vec![ShellOutputLine {
-                            text: format!("LLM error: {}", e),
-                            stream: ShellOutputStream::Stderr,
-                        }]),
-                        status: BlockStatus::Failed(1),
-                        collapsed: false,
-                        started_at: std::time::Instant::now(),
-                        job_id: None,
-                    });
-                    self.scroll_to_bottom();
-                }
+        let (provider, tools) = match (&self.provider, &self.tools) {
+            (Some(p), Some(t)) => (p.clone(), t.clone()),
+            _ => {
+                let block_id = self.next_block_id();
+                self.blocks.push(Block {
+                    id: block_id,
+                    command: input.to_string(),
+                    content: BlockContent::Plain(vec![ShellOutputLine {
+                        text: "No LLM provider configured. Start with: redtrail shell --llm anthropic".into(),
+                        stream: ShellOutputStream::Stderr,
+                    }]),
+                    status: BlockStatus::Failed(1),
+                    collapsed: false,
+                    started_at: std::time::Instant::now(),
+                    job_id: None,
+                    content_scroll: u16::MAX,
+                });
+                self.scroll_to_bottom();
+                return;
             }
-        } else {
-            let block_id = self.next_block_id();
-            self.blocks.push(Block {
-                id: block_id,
-                command: input.to_string(),
-                content: BlockContent::Plain(vec![ShellOutputLine {
-                    text: "No LLM provider configured. Start with: redtrail shell --llm anthropic".into(),
-                    stream: ShellOutputStream::Stderr,
-                }]),
-                status: BlockStatus::Failed(1),
-                collapsed: false,
-                started_at: std::time::Instant::now(),
-                job_id: None,
-            });
-            self.scroll_to_bottom();
-        }
+        };
+
+        tracing::info!(history_len = self.chat_history.len(), "chat request: {}", message);
+
+        let block_id = self.next_block_id();
+        self.blocks.push(Block {
+            id: block_id,
+            command: input.to_string(),
+            content: BlockContent::Plain(vec![]),
+            status: BlockStatus::Running,
+            collapsed: false,
+            started_at: std::time::Instant::now(),
+            job_id: None,
+            content_scroll: u16::MAX,
+        });
+        self.scroll_to_bottom();
+        let block_idx = self.blocks.len() - 1;
+
+        let (token_tx, token_rx) = mpsc::unbounded_channel();
+        let (result_tx, result_rx) = oneshot::channel();
+
+        let workflow = ChatWorkflow {
+            provider,
+            tools,
+        };
+        let user_msg = message.clone();
+        let recent = {
+            let db = self.db.lock().unwrap();
+            db.load_recent_commands(&self.session.id, 20)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(cmd, ch_id)| RecentCommand { command: cmd, command_history_id: ch_id })
+                .collect()
+        };
+        let history = if is_chat { self.chat_history.clone() } else { vec![] };
+        let chat_input = ChatInput {
+            user_message: message,
+            history,
+            recent_commands: recent,
+        };
+
+        tokio::spawn(async move {
+            let result = workflow.execute_streaming(chat_input, token_tx).await;
+            let _ = result_tx.send(result);
+        });
+
+        self.running_chats.push(RunningChat {
+            block_idx,
+            user_message: user_msg,
+            is_chat,
+            token_rx,
+            result_rx,
+        });
     }
 
     fn handle_builtin(&mut self, name: &str, args: &[String]) -> Vec<String> {
@@ -626,6 +838,7 @@ impl App {
                 collapsed: false,
                 started_at: std::time::Instant::now(),
                 job_id: None,
+                content_scroll: u16::MAX,
             });
             self.scroll_to_bottom();
             return;
@@ -644,6 +857,7 @@ impl App {
                     collapsed: false,
                     started_at: std::time::Instant::now(),
                     job_id: None,
+                    content_scroll: u16::MAX,
                 });
             }
             Err(e) => {
@@ -658,6 +872,7 @@ impl App {
                     collapsed: false,
                     started_at: std::time::Instant::now(),
                     job_id: None,
+                    content_scroll: u16::MAX,
                 });
             }
         }

@@ -15,6 +15,12 @@ use std::sync::Arc;
 pub struct ChatInput {
     pub user_message: String,
     pub history: Vec<ChatMessage>,
+    pub recent_commands: Vec<RecentCommand>,
+}
+
+pub struct RecentCommand {
+    pub command: String,
+    pub command_history_id: Option<i64>,
 }
 
 pub struct ChatResult {
@@ -31,5 +37,13 @@ pub struct ChatWorkflow {
 impl ChatWorkflow {
     pub async fn execute(&self, input: ChatInput) -> Result<ChatResult, Error> {
         stream::run_chat(self, input).await
+    }
+
+    pub async fn execute_streaming(
+        &self,
+        input: ChatInput,
+        token_tx: tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<ChatResult, Error> {
+        stream::run_chat_streaming(self, input, Some(token_tx)).await
     }
 }

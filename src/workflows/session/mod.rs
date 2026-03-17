@@ -37,7 +37,7 @@ impl SessionContext {
             },
             tool_config: HashMap::new(),
             llm_provider: "anthropic-api".into(),
-            llm_model: "claude-sonnet-4-20250514".into(),
+            llm_model: "claude-opus-4-6-20250612".into(),
             working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             prompt_template: "redtrail:{session} {status}$ ".into(),
         }

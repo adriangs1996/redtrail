@@ -12,11 +12,21 @@ pub struct InputBar {
     pub input: String,
     pub cursor: usize,
     prompt: String,
+    history: Vec<String>,
+    history_idx: Option<usize>,
+    saved_input: String,
 }
 
 impl Default for InputBar {
     fn default() -> Self {
-        Self { input: String::new(), cursor: 0, prompt: "$ ".to_string() }
+        Self {
+            input: String::new(),
+            cursor: 0,
+            prompt: "$ ".to_string(),
+            history: Vec::new(),
+            history_idx: None,
+            saved_input: String::new(),
+        }
     }
 }
 
@@ -60,9 +70,49 @@ impl InputBar {
 
     pub fn take_input(&mut self) -> String {
         let text = self.input.clone();
+        if !text.trim().is_empty() {
+            self.history.push(text.clone());
+        }
         self.input.clear();
         self.cursor = 0;
+        self.history_idx = None;
+        self.saved_input.clear();
         text
+    }
+
+    pub fn load_history(&mut self, entries: Vec<String>) {
+        self.history = entries;
+    }
+
+    pub fn history_up(&mut self) {
+        if self.history.is_empty() { return; }
+        match self.history_idx {
+            None => {
+                self.saved_input = self.input.clone();
+                self.history_idx = Some(self.history.len() - 1);
+            }
+            Some(0) => return,
+            Some(idx) => {
+                self.history_idx = Some(idx - 1);
+            }
+        }
+        if let Some(idx) = self.history_idx {
+            self.input = self.history[idx].clone();
+            self.cursor = self.input.len();
+        }
+    }
+
+    pub fn history_down(&mut self) {
+        let Some(idx) = self.history_idx else { return };
+        if idx + 1 < self.history.len() {
+            self.history_idx = Some(idx + 1);
+            self.input = self.history[idx + 1].clone();
+            self.cursor = self.input.len();
+        } else {
+            self.history_idx = None;
+            self.input = self.saved_input.clone();
+            self.cursor = self.input.len();
+        }
     }
 
     pub fn set_prompt(&mut self, prompt: &str) {

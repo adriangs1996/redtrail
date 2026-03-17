@@ -10,6 +10,7 @@ pub fn create_chat_block(block_id: usize, user_message: &str) -> Block {
         collapsed: false,
         started_at: Instant::now(),
         job_id: None,
+        content_scroll: u16::MAX,
     }
 }
 

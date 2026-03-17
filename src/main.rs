@@ -60,8 +60,8 @@ enum Commands {
         #[arg(long)]
         verbose: bool,
 
-        /// LLM provider: "ollama" (default, local) or "anthropic"
-        #[arg(long, default_value = "ollama", value_parser = ["ollama", "anthropic"])]
+        /// LLM provider: "anthropic" (default) or "ollama" (local)
+        #[arg(long, default_value = "anthropic", value_parser = ["ollama", "anthropic"])]
         llm: String,
 
         /// Ollama model override (default: deepseek-r1:8b)
@@ -537,7 +537,13 @@ async fn run_shell(
     };
 
     let llm_tools: Option<std::sync::Arc<redtrail::agent::tools::ToolRegistry>> = llm_provider.as_ref().map(|_| {
-        let registry = redtrail::agent::tools::ToolRegistry::new();
+        let kb = std::sync::Arc::new(tokio::sync::RwLock::new(
+            redtrail::agent::knowledge::KnowledgeBase::default(),
+        ));
+        let mut registry = redtrail::agent::tools::ToolRegistry::new();
+        registry.register(redtrail::agent::tools::run_command::run_command(kb.clone()));
+        registry.register(redtrail::agent::tools::query_kb::query_kb(kb));
+        registry.register(redtrail::agent::tools::get_command_result::get_command_result(db.clone()));
         std::sync::Arc::new(registry)
     });
 

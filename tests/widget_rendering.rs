@@ -21,6 +21,7 @@ fn block_view_renders_command_header() {
         collapsed: false,
         started_at: Instant::now(),
         job_id: None,
+        content_scroll: 0,
     };
 
     terminal.draw(|f| {
@@ -51,6 +52,7 @@ fn block_view_collapsed_shows_summary() {
         collapsed: true,
         started_at: Instant::now(),
         job_id: None,
+        content_scroll: 0,
     };
 
     terminal.draw(|f| {
@@ -77,6 +79,7 @@ fn block_view_running_shows_spinner() {
         collapsed: false,
         started_at: Instant::now(),
         job_id: Some(1),
+        content_scroll: 0,
     };
 
     terminal.draw(|f| {
@@ -104,6 +107,7 @@ fn block_view_failed_shows_x() {
         collapsed: false,
         started_at: Instant::now(),
         job_id: None,
+        content_scroll: 0,
     };
 
     terminal.draw(|f| {

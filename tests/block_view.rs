@@ -14,6 +14,7 @@ fn block_summary_when_collapsed() {
         collapsed: true,
         started_at: Instant::now(),
         job_id: None,
+        content_scroll: 0,
     };
     assert_eq!(block.content.line_count(), 2);
     assert!(block.collapsed);
@@ -30,6 +31,7 @@ fn block_tracks_background_job() {
         collapsed: false,
         started_at: Instant::now(),
         job_id: Some(1),
+        content_scroll: 0,
     };
     assert!(block.job_id.is_some());
     assert!(matches!(block.status, BlockStatus::Running));

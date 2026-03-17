@@ -9,6 +9,7 @@ pub mod config_cmd;
 pub mod proxy;
 pub mod env;
 pub mod setup;
+pub mod ingest;
 
 use clap::{Parser, Subcommand};
 use crate::db::Db;
@@ -64,6 +65,11 @@ enum Commands {
         #[command(subcommand)]
         command: Option<setup::SetupCommands>,
     },
+    Ingest {
+        file: String,
+        #[arg(long)]
+        tool: Option<String>,
+    },
     Pipeline,
     Env,
     Deactivate,
@@ -81,7 +87,7 @@ pub fn resolve_session() -> Result<(Db, String), Error> {
 
 const KNOWN_SUBCOMMANDS: &[&str] = &[
     "init", "kb", "status", "hypothesis", "evidence",
-    "session", "scope", "config", "setup", "pipeline", "env", "deactivate",
+    "session", "scope", "config", "setup", "ingest", "pipeline", "env", "deactivate",
     "help", "--help", "-h", "--version", "-V",
 ];
 
@@ -128,6 +134,9 @@ pub fn run() -> Result<(), Error> {
                 Some(setup::SetupCommands::Status { json }) => setup::run_status(json),
                 Some(setup::SetupCommands::Aliases(args)) => setup::run_aliases(args),
             }
+        }
+        Some(Commands::Ingest { file, tool }) => {
+            ingest::run(&file, tool)
         }
         Some(Commands::Pipeline) => {
             println!("pipeline configurability deferred to v2");

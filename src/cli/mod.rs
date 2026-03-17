@@ -3,6 +3,9 @@ pub mod kb;
 pub mod status;
 pub mod hypothesis;
 pub mod evidence;
+pub mod session;
+pub mod scope;
+pub mod config_cmd;
 
 use clap::{Parser, Subcommand};
 use crate::db::Db;
@@ -42,6 +45,19 @@ enum Commands {
         #[command(subcommand)]
         command: evidence::EvidenceCommands,
     },
+    Session {
+        #[command(subcommand)]
+        command: session::SessionCommands,
+    },
+    Scope {
+        #[command(subcommand)]
+        command: scope::ScopeCommands,
+    },
+    Config {
+        #[command(subcommand)]
+        command: config_cmd::ConfigCommands,
+    },
+    Pipeline,
 }
 
 pub fn resolve_session() -> Result<(Db, String), Error> {
@@ -71,6 +87,19 @@ pub fn run() -> Result<(), Error> {
         }
         Some(Commands::Evidence { command }) => {
             evidence::run(command)
+        }
+        Some(Commands::Session { command }) => {
+            session::run(command)
+        }
+        Some(Commands::Scope { command }) => {
+            scope::run(command)
+        }
+        Some(Commands::Config { command }) => {
+            config_cmd::run(command)
+        }
+        Some(Commands::Pipeline) => {
+            println!("pipeline configurability deferred to v2");
+            Ok(())
         }
         None => {
             println!("rt: redtrail. Use --help for usage.");

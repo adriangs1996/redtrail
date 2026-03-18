@@ -204,22 +204,14 @@ pub fn search(conn: &Connection, session_id: &str, query: &str) -> Result<Vec<se
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::db::SqliteDb;
-
-    fn setup() -> SqliteDb {
-        let db = SqliteDb::open_in_memory().unwrap();
-        db.conn().execute(
-            "INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [],
-        ).unwrap();
-        db
-    }
+    use crate::db::{open_in_memory, KnowledgeBase, SessionOps};
 
     #[test]
     fn test_add_host_then_list_returns_it() {
-        let db = setup();
-        add_host(db.conn(), "s1", "10.10.10.1", Some("Linux"), Some("box1")).unwrap();
-        let hosts = list_hosts(db.conn(), "s1").unwrap();
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.add_host("s1", "10.10.10.1", Some("Linux"), Some("box1")).unwrap();
+        let hosts = db.list_hosts("s1").unwrap();
 
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0]["ip"], "10.10.10.1");
@@ -230,14 +222,15 @@ mod tests {
 
     #[test]
     fn test_add_port_auto_creates_host() {
-        let db = setup();
-        add_port(db.conn(), "s1", "10.10.10.5", 22, Some("tcp"), Some("ssh"), Some("OpenSSH 8.9")).unwrap();
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.add_port("s1", "10.10.10.5", 22, Some("tcp"), Some("ssh"), Some("OpenSSH 8.9")).unwrap();
 
-        let hosts = list_hosts(db.conn(), "s1").unwrap();
+        let hosts = db.list_hosts("s1").unwrap();
         assert_eq!(hosts.len(), 1, "port add should auto-create host");
         assert_eq!(hosts[0]["ip"], "10.10.10.5");
 
-        let ports = list_ports(db.conn(), "s1", None).unwrap();
+        let ports = db.list_ports("s1", None).unwrap();
         assert_eq!(ports.len(), 1);
         assert_eq!(ports[0]["port"], 22);
         assert_eq!(ports[0]["service"], "ssh");

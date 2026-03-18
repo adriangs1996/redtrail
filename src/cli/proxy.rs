@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::time::Instant;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use crate::db::{Db, SqliteDb};
+use crate::db::SessionOps;
 use crate::error::Error;
 use crate::workspace;
 
@@ -60,18 +60,20 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     let duration_ms = start.elapsed().as_millis() as i64;
     let output_str = String::from_utf8_lossy(&output).to_string();
 
-    if let Some(ws) = ws
-        && let Ok(db) = SqliteDb::open(workspace::db_path(&ws).to_str().unwrap())
-        && let Ok(session_id) = db.active_session_id()
-    {
-        if let Ok(result) = crate::pipeline::process_command(
-            &db, &session_id, &cmd_str, exit_code, duration_ms, &output_str, tool,
-        ) {
-            for flag in &result.flags_found {
-                eprintln!("[rt] flag captured: {flag}");
-            }
-            for warn in &result.scope_warnings {
-                eprintln!("[rt] warning: {warn}");
+    if let Some(ws) = ws {
+        let db_path = workspace::db_path(&ws);
+        if let Ok(db) = crate::db::open(db_path.to_str().unwrap())
+            && let Ok(session_id) = db.active_session_id()
+        {
+            if let Ok(result) = crate::pipeline::process_command(
+                &db, &session_id, &cmd_str, exit_code, duration_ms, &output_str, tool,
+            ) {
+                for flag in &result.flags_found {
+                    eprintln!("[rt] flag captured: {flag}");
+                }
+                for warn in &result.scope_warnings {
+                    eprintln!("[rt] warning: {warn}");
+                }
             }
         }
     }

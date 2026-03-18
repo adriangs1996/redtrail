@@ -1,7 +1,7 @@
-use crate::db::Db;
+use crate::db::{CommandLog, KnowledgeBase};
 use crate::error::Error;
 
-pub fn extract_sync(db: &dyn Db, session_id: &str, cmd_id: i64, _config: &crate::config::Config) -> Result<(), Error> {
+pub fn extract_sync(db: &(impl CommandLog + KnowledgeBase), session_id: &str, cmd_id: i64, _config: &crate::config::Config) -> Result<(), Error> {
     let (row_session_id, command, tool, output) = db.get_command_for_extraction(cmd_id)?;
     let _ = row_session_id;
 
@@ -48,7 +48,7 @@ pub fn extract_sync(db: &dyn Db, session_id: &str, cmd_id: i64, _config: &crate:
     Ok(())
 }
 
-pub fn apply_extraction(db: &dyn Db, session_id: &str, json_str: &str) -> Result<(), Error> {
+pub fn apply_extraction(db: &impl KnowledgeBase, session_id: &str, json_str: &str) -> Result<(), Error> {
     let v: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| Error::Config(format!("invalid JSON from LLM: {e}")))?;
 
@@ -146,7 +146,7 @@ fn extract_json(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Db, SqliteDb};
+    use crate::db::{open_in_memory, KnowledgeBase, SessionOps};
 
     #[test]
     fn test_extract_json_plain() {
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_apply_extraction_hosts_and_ports() {
-        let db = SqliteDb::open_in_memory().unwrap();
+        let db = open_in_memory().unwrap();
         db.create_session("s1", "test", None, None, "general").unwrap();
 
         let json = r#"{"hosts":[{"ip":"10.10.10.1","os":"Linux"}],"ports":[{"ip":"10.10.10.1","port":22,"protocol":"tcp","service":"ssh","version":"OpenSSH 8.9"}],"credentials":[],"flags":[],"access":[],"notes":["SSH found"]}"#;
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_apply_extraction_credentials() {
-        let db = SqliteDb::open_in_memory().unwrap();
+        let db = open_in_memory().unwrap();
         db.create_session("s1", "test", None, None, "general").unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[{"username":"admin","password":"secret","service":"ssh","host":"10.10.10.1"}],"flags":[],"access":[],"notes":[]}"#;

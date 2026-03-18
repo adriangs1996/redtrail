@@ -1,10 +1,8 @@
 use std::fs;
-use crate::cli;
-use crate::db::Db;
+use crate::db::CommandLog;
 use crate::error::Error;
 
-pub fn run(file: &str, tool_override: Option<String>) -> Result<(), Error> {
-    let (db, session_id) = cli::resolve_session()?;
+pub fn run(db: &impl CommandLog, session_id: &str, file: &str, tool_override: Option<String>) -> Result<(), Error> {
     let content = fs::read_to_string(file)?;
     let tool = tool_override.unwrap_or_else(|| detect_tool(&content));
     let filename = std::path::Path::new(file)
@@ -12,7 +10,7 @@ pub fn run(file: &str, tool_override: Option<String>) -> Result<(), Error> {
         .and_then(|n| n.to_str())
         .unwrap_or(file);
 
-    let cmd_id = db.insert_command(&session_id, &format!("rt ingest {filename}"), Some(&tool))?;
+    let cmd_id = db.insert_command(session_id, &format!("rt ingest {filename}"), Some(&tool))?;
     db.finish_command(cmd_id, 0, 0, &content)?;
 
     println!("ingested: {filename} (tool: {tool}, {} bytes)", content.len());

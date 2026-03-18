@@ -1,4 +1,4 @@
-use crate::db::Db;
+use crate::db::{CommandLog, KnowledgeBase, SessionOps};
 use crate::error::Error;
 use crate::net;
 
@@ -9,7 +9,7 @@ pub struct CommandResult {
 }
 
 pub fn process_command(
-    db: &dyn Db,
+    db: &(impl CommandLog + KnowledgeBase + SessionOps),
     session_id: &str,
     command: &str,
     exit_code: i32,
@@ -69,10 +69,10 @@ fn detection_cost(tool: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Db, SqliteDb};
+    use crate::db::{open_in_memory, SessionOps};
 
-    fn setup() -> (SqliteDb, String) {
-        let db = SqliteDb::open_in_memory().unwrap();
+    fn setup() -> (impl CommandLog + KnowledgeBase + SessionOps, String) {
+        let db = open_in_memory().unwrap();
         db.create_session("s1", "test", Some("10.10.10.1"), Some("10.10.10.0/24"), "general").unwrap();
         (db, "s1".to_string())
     }
@@ -132,18 +132,14 @@ mod tests {
     fn test_process_command_decrements_noise_budget() {
         let (db, sid) = setup();
 
-        let budget_before: f64 = db.conn().query_row(
-            "SELECT noise_budget FROM sessions WHERE id = ?1",
-            rusqlite::params![&sid], |r| r.get(0),
-        ).unwrap();
+        let summary = db.status_summary(&sid).unwrap();
+        let budget_before = summary["noise_budget"].as_f64().unwrap();
         assert_eq!(budget_before, 1.0);
 
         process_command(&db, &sid, "nmap 10.10.10.1", 0, 500, "", Some("nmap")).unwrap();
 
-        let budget_after: f64 = db.conn().query_row(
-            "SELECT noise_budget FROM sessions WHERE id = ?1",
-            rusqlite::params![&sid], |r| r.get(0),
-        ).unwrap();
+        let summary = db.status_summary(&sid).unwrap();
+        let budget_after = summary["noise_budget"].as_f64().unwrap();
         assert!((budget_after - 0.8).abs() < 0.001, "nmap costs 0.2, budget should be 0.8, got {budget_after}");
     }
 }

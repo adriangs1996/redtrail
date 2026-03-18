@@ -1,7 +1,6 @@
 use clap::Subcommand;
-use crate::db::Db;
+use crate::db::{CommandLog, KnowledgeBase};
 use crate::error::Error;
-use super::resolve_session;
 
 #[derive(Subcommand)]
 pub enum KbCommands {
@@ -94,12 +93,10 @@ pub enum KbCommands {
     },
 }
 
-pub fn run(cmd: KbCommands) -> Result<(), Error> {
-    let (db, session_id) = resolve_session()?;
-
+pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbCommands) -> Result<(), Error> {
     match cmd {
         KbCommands::Hosts { json, host } => {
-            let rows = db.list_hosts(&session_id)?;
+            let rows = db.list_hosts(session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else {
@@ -124,7 +121,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::Ports { json, host } => {
-            let rows = db.list_ports(&session_id, host.as_deref())?;
+            let rows = db.list_ports(session_id, host.as_deref())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -143,7 +140,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::Creds { json } => {
-            let rows = db.list_credentials(&session_id)?;
+            let rows = db.list_credentials(session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -162,7 +159,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::Flags { json } => {
-            let rows = db.list_flags(&session_id)?;
+            let rows = db.list_flags(session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -179,7 +176,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::Access { json } => {
-            let rows = db.list_access(&session_id)?;
+            let rows = db.list_access(session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -197,7 +194,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::Notes { json } => {
-            let rows = db.list_notes(&session_id)?;
+            let rows = db.list_notes(session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -209,7 +206,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::History { json, limit } => {
-            let rows = db.list_history(&session_id, limit)?;
+            let rows = db.list_history(session_id, limit)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -221,7 +218,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::Search { query, json } => {
-            let rows = db.search(&session_id, &query)?;
+            let rows = db.search(session_id, &query)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else if rows.is_empty() {
@@ -233,32 +230,32 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             }
         }
         KbCommands::AddHost { ip, os, hostname } => {
-            let id = db.add_host(&session_id, &ip, os.as_deref(), hostname.as_deref())?;
+            let id = db.add_host(session_id, &ip, os.as_deref(), hostname.as_deref())?;
             println!("host added (id={id}): {ip}");
         }
         KbCommands::AddPort { ip, port, protocol, service, version } => {
-            let id = db.add_port(&session_id, &ip, port, protocol.as_deref(), service.as_deref(), version.as_deref())?;
+            let id = db.add_port(session_id, &ip, port, protocol.as_deref(), service.as_deref(), version.as_deref())?;
             println!("port added (id={id}): {ip}:{port}");
         }
         KbCommands::AddCred { username, pass, hash, service, host, source } => {
-            let id = db.add_credential(&session_id, &username, pass.as_deref(), hash.as_deref(), service.as_deref(), host.as_deref(), source.as_deref())?;
+            let id = db.add_credential(session_id, &username, pass.as_deref(), hash.as_deref(), service.as_deref(), host.as_deref(), source.as_deref())?;
             println!("credential added (id={id}): {username}");
         }
         KbCommands::AddFlag { value, source } => {
-            let id = db.add_flag(&session_id, &value, source.as_deref())?;
+            let id = db.add_flag(session_id, &value, source.as_deref())?;
             println!("flag added (id={id}): {value}");
         }
         KbCommands::AddAccess { host, user, level, method } => {
-            let id = db.add_access(&session_id, &host, &user, &level, method.as_deref())?;
+            let id = db.add_access(session_id, &host, &user, &level, method.as_deref())?;
             println!("access added (id={id}): {user}@{host} ({level})");
         }
         KbCommands::AddNote { text } => {
-            let id = db.add_note(&session_id, &text)?;
+            let id = db.add_note(session_id, &text)?;
             println!("note added (id={id})");
         }
         KbCommands::Extract { id } => {
             let config = crate::config::Config::resolved(&std::env::current_dir()?)?;
-            crate::extraction::extract_sync(&db, &session_id, id, &config)?;
+            crate::extraction::extract_sync(db, session_id, id, &config)?;
             println!("extraction complete for command {id}");
         }
     }

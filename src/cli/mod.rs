@@ -14,7 +14,7 @@ pub mod report;
 pub mod skill;
 
 use clap::{Parser, Subcommand};
-use crate::db::{Db, SqliteDb};
+use crate::db::SessionOps;
 use crate::error::Error;
 use crate::workspace;
 
@@ -85,10 +85,11 @@ enum Commands {
     },
 }
 
-pub fn resolve_session() -> Result<(SqliteDb, String), Error> {
+fn resolve_session() -> Result<(impl crate::db::KnowledgeBase + crate::db::Hypotheses + crate::db::CommandLog + SessionOps, String), Error> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db = SqliteDb::open(workspace::db_path(&ws).to_str().unwrap())?;
+    let db_path = workspace::db_path(&ws);
+    let db = crate::db::open(db_path.to_str().unwrap())?;
     let session_id = db.active_session_id()?;
     Ok((db, session_id))
 }
@@ -116,22 +117,28 @@ pub fn run() -> Result<(), Error> {
             init::run(target, goal, scope)
         }
         Some(Commands::Kb { command }) => {
-            kb::run(command)
+            let (db, sid) = resolve_session()?;
+            kb::run(&db, &sid, command)
         }
         Some(Commands::Status { json }) => {
-            status::run(json)
+            let (db, sid) = resolve_session()?;
+            status::run(&db, &sid, json)
         }
         Some(Commands::Hypothesis { command }) => {
-            hypothesis::run(command)
+            let (db, sid) = resolve_session()?;
+            hypothesis::run(&db, &sid, command)
         }
         Some(Commands::Evidence { command }) => {
-            evidence::run(command)
+            let (db, sid) = resolve_session()?;
+            evidence::run(&db, &sid, command)
         }
         Some(Commands::Session { command }) => {
-            session::run(command)
+            let (db, sid) = resolve_session()?;
+            session::run(&db, &sid, command)
         }
         Some(Commands::Scope { command }) => {
-            scope::run(command)
+            let (db, sid) = resolve_session()?;
+            scope::run(&db, &sid, command)
         }
         Some(Commands::Config { command }) => {
             config_cmd::run(command)
@@ -144,17 +151,20 @@ pub fn run() -> Result<(), Error> {
             }
         }
         Some(Commands::Ingest { file, tool }) => {
-            ingest::run(&file, tool)
+            let (db, sid) = resolve_session()?;
+            ingest::run(&db, &sid, &file, tool)
         }
         Some(Commands::Report { command }) => {
-            report::run(command)
+            let (db, sid) = resolve_session()?;
+            report::run(&db, &sid, command)
         }
         Some(Commands::Pipeline) => {
             println!("pipeline configurability deferred to v2");
             Ok(())
         }
         Some(Commands::Env) => {
-            env::run()
+            let (db, sid) = resolve_session()?;
+            env::run(&db, &sid)
         }
         Some(Commands::Deactivate) => {
             env::deactivate()

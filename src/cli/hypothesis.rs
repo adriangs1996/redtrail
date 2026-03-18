@@ -1,7 +1,6 @@
 use clap::Subcommand;
-use crate::db::Db;
+use crate::db::Hypotheses;
 use crate::error::Error;
-use super::resolve_session;
 
 #[derive(Subcommand)]
 pub enum HypothesisCommands {
@@ -34,11 +33,10 @@ pub enum HypothesisCommands {
     },
 }
 
-pub fn run(command: HypothesisCommands) -> Result<(), Error> {
-    let (db, session_id) = resolve_session()?;
+pub fn run(db: &impl Hypotheses, session_id: &str, command: HypothesisCommands) -> Result<(), Error> {
     match command {
         HypothesisCommands::List { status, json } => {
-            let rows = db.list_hypotheses(&session_id, status.as_deref())?;
+            let rows = db.list_hypotheses(session_id, status.as_deref())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else {
@@ -55,7 +53,7 @@ pub fn run(command: HypothesisCommands) -> Result<(), Error> {
         }
         HypothesisCommands::Create { statement, category, priority, confidence, component } => {
             let id = db.create_hypothesis(
-                &session_id,
+                session_id,
                 &statement,
                 &category,
                 &priority,

@@ -36,39 +36,24 @@ pub fn update_extraction_status(conn: &Connection, id: i64, status: &str) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::db::SqliteDb;
-
-    fn setup() -> SqliteDb {
-        let db = SqliteDb::open_in_memory().unwrap();
-        db.conn().execute(
-            "INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [],
-        ).unwrap();
-        db
-    }
+    use crate::db::{open_in_memory, CommandLog, SessionOps};
 
     #[test]
     fn test_command_capture_lifecycle() {
-        let db = setup();
-        let c = db.conn();
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
 
-        let cmd_id = insert(c, "s1", "nmap -sV 10.10.10.1", Some("nmap")).unwrap();
+        let cmd_id = db.insert_command("s1", "nmap -sV 10.10.10.1", Some("nmap")).unwrap();
         assert!(cmd_id > 0);
 
-        finish(c, cmd_id, 0, 1500, "22/tcp open ssh OpenSSH 8.9").unwrap();
+        db.finish_command(cmd_id, 0, 1500, "22/tcp open ssh OpenSSH 8.9").unwrap();
 
-        let (session_id, command, tool, output) = get_for_extraction(c, cmd_id).unwrap();
+        let (session_id, command, tool, output) = db.get_command_for_extraction(cmd_id).unwrap();
         assert_eq!(session_id, "s1");
         assert_eq!(command, "nmap -sV 10.10.10.1");
         assert_eq!(tool.as_deref(), Some("nmap"));
         assert_eq!(output.as_deref(), Some("22/tcp open ssh OpenSSH 8.9"));
 
-        update_extraction_status(c, cmd_id, "done").unwrap();
-
-        let status: String = c.query_row(
-            "SELECT extraction_status FROM command_history WHERE id = ?1",
-            params![cmd_id], |r| r.get(0),
-        ).unwrap();
-        assert_eq!(status, "done");
+        db.update_extraction_status(cmd_id, "done").unwrap();
     }
 }

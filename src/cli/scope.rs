@@ -1,8 +1,7 @@
 use clap::Subcommand;
-use crate::db::Db;
+use crate::db::SessionOps;
 use crate::error::Error;
 use crate::net;
-use super::resolve_session;
 
 #[derive(Subcommand)]
 pub enum ScopeCommands {
@@ -11,11 +10,10 @@ pub enum ScopeCommands {
     },
 }
 
-pub fn run(cmd: ScopeCommands) -> Result<(), Error> {
+pub fn run(db: &impl SessionOps, session_id: &str, cmd: ScopeCommands) -> Result<(), Error> {
     match cmd {
         ScopeCommands::Check { ip } => {
-            let (db, session_id) = resolve_session()?;
-            let scope = db.load_scope(&session_id)?;
+            let scope = db.load_scope(session_id)?;
 
             let in_scope = match scope.as_deref() {
                 None | Some("") => true,

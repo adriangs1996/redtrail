@@ -200,31 +200,22 @@ pub fn export_evidence(conn: &Connection, session_id: &str) -> Result<Vec<serde_
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::db::SqliteDb;
-
-    fn setup() -> SqliteDb {
-        let db = SqliteDb::open_in_memory().unwrap();
-        db.conn().execute(
-            "INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [],
-        ).unwrap();
-        db
-    }
+    use crate::db::{open_in_memory, Hypotheses, SessionOps};
 
     #[test]
     fn test_hypothesis_lifecycle() {
-        let db = setup();
-        let c = db.conn();
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
 
-        let hid = create(c, "s1", "SSH allows root login", "vulnerability", "high", 0.7, Some("ssh")).unwrap();
+        let hid = db.create_hypothesis("s1", "SSH allows root login", "vulnerability", "high", 0.7, Some("ssh")).unwrap();
         assert!(hid > 0);
 
-        let eid = create_evidence(c, "s1", Some(hid), "root login succeeded", "critical", Some("ssh root@target")).unwrap();
+        let eid = db.create_evidence("s1", Some(hid), "root login succeeded", "critical", Some("ssh root@target")).unwrap();
         assert!(eid > 0);
 
-        update_status(c, hid, "confirmed").unwrap();
+        db.update_hypothesis(hid, "confirmed").unwrap();
 
-        let hyp = get(c, hid).unwrap();
+        let hyp = db.get_hypothesis(hid).unwrap();
         assert_eq!(hyp["statement"], "SSH allows root login");
         assert_eq!(hyp["status"], "confirmed");
         assert!(hyp["resolved_at"].as_str().is_some());

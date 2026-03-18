@@ -1,8 +1,7 @@
 use clap::Subcommand;
-use crate::db::Db;
+use crate::db::{KnowledgeBase, SessionOps};
 use crate::error::Error;
 use crate::workspace;
-use super::resolve_session;
 
 #[derive(Subcommand)]
 pub enum SessionCommands {
@@ -20,11 +19,10 @@ pub enum SessionCommands {
     },
 }
 
-pub fn run(cmd: SessionCommands) -> Result<(), Error> {
+pub fn run(db: &(impl KnowledgeBase + SessionOps), session_id: &str, cmd: SessionCommands) -> Result<(), Error> {
     match cmd {
         SessionCommands::List { json } => {
-            let (db, session_id) = resolve_session()?;
-            let row = db.get_session(&session_id)?;
+            let row = db.get_session(session_id)?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!([row])).unwrap());
@@ -41,8 +39,7 @@ pub fn run(cmd: SessionCommands) -> Result<(), Error> {
         }
 
         SessionCommands::Active { json } => {
-            let (db, session_id) = resolve_session()?;
-            let row = db.get_session(&session_id)?;
+            let row = db.get_session(session_id)?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&row).unwrap());
@@ -60,21 +57,20 @@ pub fn run(cmd: SessionCommands) -> Result<(), Error> {
         }
 
         SessionCommands::Export { format: _ } => {
-            let (db, session_id) = resolve_session()?;
             let cwd = std::env::current_dir()?;
             let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
 
-            let session_row = db.get_session(&session_id)?;
+            let session_row = db.get_session(session_id)?;
 
             let export = serde_json::json!({
                 "workspace": ws.to_string_lossy(),
                 "session": session_row,
-                "hosts": db.list_hosts(&session_id)?,
-                "ports": db.list_ports(&session_id, None)?,
-                "credentials": db.list_credentials(&session_id)?,
-                "flags": db.list_flags(&session_id)?,
-                "access": db.list_access(&session_id)?,
-                "notes": db.list_notes(&session_id)?,
+                "hosts": db.list_hosts(session_id)?,
+                "ports": db.list_ports(session_id, None)?,
+                "credentials": db.list_credentials(session_id)?,
+                "flags": db.list_flags(session_id)?,
+                "access": db.list_access(session_id)?,
+                "notes": db.list_notes(session_id)?,
             });
 
             println!("{}", serde_json::to_string_pretty(&export).unwrap());

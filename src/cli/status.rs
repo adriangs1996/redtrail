@@ -1,10 +1,8 @@
-use crate::db::Db;
+use crate::db::SessionOps;
 use crate::error::Error;
-use super::resolve_session;
 
-pub fn run(json: bool) -> Result<(), Error> {
-    let (db, session_id) = resolve_session()?;
-    let summary = db.status_summary(&session_id)?;
+pub fn run(db: &impl SessionOps, session_id: &str, json: bool) -> Result<(), Error> {
+    let summary = db.status_summary(session_id)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&summary).unwrap());

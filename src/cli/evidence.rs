@@ -1,7 +1,6 @@
 use clap::Subcommand;
-use crate::db::Db;
+use crate::db::Hypotheses;
 use crate::error::Error;
-use super::resolve_session;
 
 #[derive(Subcommand)]
 pub enum EvidenceCommands {
@@ -27,15 +26,14 @@ pub enum EvidenceCommands {
     },
 }
 
-pub fn run(command: EvidenceCommands) -> Result<(), Error> {
-    let (db, session_id) = resolve_session()?;
+pub fn run(db: &impl Hypotheses, session_id: &str, command: EvidenceCommands) -> Result<(), Error> {
     match command {
         EvidenceCommands::Add { finding, hypothesis, severity, poc } => {
-            let id = db.create_evidence(&session_id, hypothesis, &finding, &severity, poc.as_deref())?;
+            let id = db.create_evidence(session_id, hypothesis, &finding, &severity, poc.as_deref())?;
             println!("evidence added: {id}");
         }
         EvidenceCommands::List { hypothesis, json } => {
-            let rows = db.list_evidence(&session_id, hypothesis)?;
+            let rows = db.list_evidence(session_id, hypothesis)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else {
@@ -49,7 +47,7 @@ pub fn run(command: EvidenceCommands) -> Result<(), Error> {
             }
         }
         EvidenceCommands::Export { json } => {
-            let rows = db.export_evidence(&session_id)?;
+            let rows = db.export_evidence(session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else {

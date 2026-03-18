@@ -1,7 +1,6 @@
 use clap::Subcommand;
-use crate::db::Db;
+use crate::db::{KnowledgeBase, Hypotheses, SessionOps};
 use crate::error::Error;
-use super::resolve_session;
 
 #[derive(Subcommand)]
 pub enum ReportCommands {
@@ -13,11 +12,10 @@ pub enum ReportCommands {
     },
 }
 
-pub fn run(command: ReportCommands) -> Result<(), Error> {
+pub fn run(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id: &str, command: ReportCommands) -> Result<(), Error> {
     match command {
         ReportCommands::Generate { format: _, output } => {
-            let (db, session_id) = resolve_session()?;
-            let md = build_report(&db, &session_id)?;
+            let md = build_report(db, session_id)?;
             if let Some(path) = output {
                 std::fs::write(&path, &md)?;
                 println!("report written to {path}");
@@ -44,7 +42,7 @@ fn format_finding(ev: &serde_json::Value, hypotheses: &[serde_json::Value]) -> S
     }
 }
 
-fn build_report(db: &dyn Db, session_id: &str) -> Result<String, Error> {
+fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id: &str) -> Result<String, Error> {
     let summary = db.status_summary(session_id)?;
     let hosts = db.list_hosts(session_id)?;
     let ports = db.list_ports(session_id, None)?;

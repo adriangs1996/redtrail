@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use crate::config::Config;
-use crate::db::{Db, SqliteDb};
+use crate::db::SessionOps;
 use crate::error::Error;
 use crate::workspace;
 
@@ -16,7 +16,8 @@ pub fn run(target: Option<String>, goal: String, scope: Option<String>) -> Resul
 
     fs::create_dir_all(&rt_dir)?;
 
-    let db = SqliteDb::open(workspace::db_path(&cwd).to_str().unwrap())?;
+    let db_path = workspace::db_path(&cwd);
+    let db = crate::db::open(db_path.to_str().unwrap())?;
 
     let session_name = cwd.file_name()
         .and_then(|n| n.to_str())

@@ -1,5 +1,5 @@
-use regex::Regex;
 use crate::db::Db;
+use crate::net;
 
 pub struct PipelineResult {
     pub flags_found: Vec<String>,
@@ -20,7 +20,7 @@ pub fn post_exec(
 
     if let Ok(patterns) = db.load_flag_patterns(session_id) {
         for pat in &patterns {
-            if let Ok(re) = Regex::new(pat) {
+            if let Ok(re) = regex::Regex::new(pat) {
                 for m in re.find_iter(output) {
                     let flag = m.as_str().to_string();
                     let _ = db.add_flag(session_id, &flag, Some(command));
@@ -31,9 +31,8 @@ pub fn post_exec(
     }
 
     if let Ok(Some(scope)) = db.load_scope(session_id) {
-        let ips = extract_ips(command);
-        for ip in &ips {
-            if !ip_in_scope(ip, &scope) {
+        for ip in &net::extract_ips(command) {
+            if !net::ip_in_scope(ip, &scope) {
                 result.scope_warnings.push(format!("{ip} is out of scope ({scope})"));
             }
         }
@@ -47,54 +46,6 @@ pub fn post_exec(
     }
 
     result
-}
-
-fn extract_ips(command: &str) -> Vec<String> {
-    let re = Regex::new(r"\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b").unwrap();
-    re.find_iter(command)
-        .map(|m| m.as_str().to_string())
-        .filter(|ip| {
-            ip.split('.').all(|o| o.parse::<u8>().is_ok())
-        })
-        .collect()
-}
-
-fn ip_to_u32(ip: &str) -> Option<u32> {
-    let parts: Vec<&str> = ip.split('.').collect();
-    if parts.len() != 4 { return None; }
-    let mut n: u32 = 0;
-    for p in parts {
-        let octet: u32 = p.parse().ok()?;
-        if octet > 255 { return None; }
-        n = (n << 8) | octet;
-    }
-    Some(n)
-}
-
-fn ip_in_cidr(ip: &str, cidr: &str) -> bool {
-    let parts: Vec<&str> = cidr.splitn(2, '/').collect();
-    if parts.len() != 2 { return false; }
-    let prefix_len: u32 = match parts[1].parse() {
-        Ok(n) if n <= 32 => n,
-        _ => return false,
-    };
-    let base = match ip_to_u32(parts[0]) {
-        Some(n) => n,
-        None => return false,
-    };
-    let target = match ip_to_u32(ip) {
-        Some(n) => n,
-        None => return false,
-    };
-    let mask = if prefix_len == 0 { 0u32 } else { !0u32 << (32 - prefix_len) };
-    (target & mask) == (base & mask)
-}
-
-fn ip_in_scope(ip: &str, scope: &str) -> bool {
-    scope.split(',')
-        .map(str::trim)
-        .filter(|c| !c.is_empty())
-        .any(|cidr| ip_in_cidr(ip, cidr))
 }
 
 fn detection_cost(tool: &str) -> f64 {
@@ -112,30 +63,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_ips() {
-        let ips = extract_ips("nmap -sV 10.10.10.1 -p 22");
-        assert!(ips.contains(&"10.10.10.1".to_string()));
-    }
-
-    #[test]
     fn test_detection_cost() {
         assert_eq!(detection_cost("nmap"), 0.2);
         assert_eq!(detection_cost("sqlmap"), 0.5);
         assert_eq!(detection_cost("hydra"), 0.8);
         assert_eq!(detection_cost("curl"), 0.1);
-    }
-
-    #[test]
-    fn test_ip_in_scope() {
-        assert!(ip_in_scope("10.10.10.5", "10.10.10.0/24"));
-        assert!(!ip_in_scope("192.168.1.1", "10.10.10.0/24"));
-        assert!(ip_in_scope("10.10.10.5", "10.10.10.0/24, 192.168.0.0/16"));
-    }
-
-    #[test]
-    fn test_extract_ips_multiple() {
-        let ips = extract_ips("nmap 10.10.10.1 10.10.10.2");
-        assert!(ips.contains(&"10.10.10.1".to_string()));
-        assert!(ips.contains(&"10.10.10.2".to_string()));
     }
 }

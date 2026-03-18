@@ -3,6 +3,7 @@ mod config;
 mod db;
 mod error;
 mod extraction;
+mod net;
 mod pipeline;
 mod workspace;
 

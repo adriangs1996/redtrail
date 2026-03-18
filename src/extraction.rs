@@ -17,7 +17,13 @@ pub fn extract_sync(db: &Db, session_id: &str, cmd_id: i64, _config: &crate::con
         Some(o) => o,
     };
 
-    let truncated = if output.len() > 8000 { &output[..8000] } else { &output };
+    let truncated = if output.len() > 8000 {
+        let mut end = 8000;
+        while end > 0 && !output.is_char_boundary(end) { end -= 1; }
+        &output[..end]
+    } else {
+        &output
+    };
     let tool_str = tool.as_deref().unwrap_or("unknown");
 
     let prompt = format!(
@@ -104,7 +110,7 @@ pub fn apply_extraction(db: &Db, session_id: &str, json_str: &str) -> Result<(),
     Ok(())
 }
 
-fn call_llm(prompt: &str, _config: &crate::config::Config) -> Result<String, Error> {
+fn call_llm(prompt: &str, config: &crate::config::Config) -> Result<String, Error> {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .map_err(|_| Error::Config("ANTHROPIC_API_KEY not set".into()))?;
     let client = reqwest::blocking::Client::builder()
@@ -116,7 +122,7 @@ fn call_llm(prompt: &str, _config: &crate::config::Config) -> Result<String, Err
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
-            "model": "claude-3-5-haiku-20241022",
+            "model": config.general.llm_model,
             "max_tokens": 4096,
             "messages": [{"role": "user", "content": prompt}]
         }))

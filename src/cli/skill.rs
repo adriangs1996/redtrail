@@ -68,8 +68,10 @@ fn test_skill(path: &str) -> Result<(), Error> {
         let content = fs::read_to_string(&toml_path)?;
         match toml::from_str::<toml::Value>(&content) {
             Ok(val) => {
-                if val.get("skill").and_then(|s| s.get("name")).is_none() {
-                    errors.push("skill.toml missing [skill].name".to_string());
+                let has_name = val.get("skill").and_then(|s| s.get("name")).is_some()
+                    || val.get("name").is_some();
+                if !has_name {
+                    errors.push("skill.toml missing name (either [skill].name or root name)".to_string());
                 }
             }
             Err(e) => errors.push(format!("skill.toml parse error: {e}")),
@@ -115,9 +117,13 @@ fn list_skills() -> Result<(), Error> {
         }
         if let Ok(content) = fs::read_to_string(&toml_path) {
             if let Ok(val) = toml::from_str::<toml::Value>(&content) {
-                let name = val["skill"]["name"].as_str().unwrap_or("?");
-                let version = val["skill"]["version"].as_str().unwrap_or("?");
-                let desc = val["skill"]["description"].as_str().unwrap_or("");
+                let skill_section = val.get("skill");
+                let name = skill_section.and_then(|s| s.get("name")).or(val.get("name"))
+                    .and_then(|v| v.as_str()).unwrap_or("?");
+                let version = skill_section.and_then(|s| s.get("version")).or(val.get("version"))
+                    .and_then(|v| v.as_str()).unwrap_or("?");
+                let desc = skill_section.and_then(|s| s.get("description")).or(val.get("description"))
+                    .and_then(|v| v.as_str()).unwrap_or("");
                 println!("{name} ({version}) — {desc}");
                 found = true;
             }
@@ -135,7 +141,9 @@ fn install_skill(path: &str) -> Result<(), Error> {
     let toml_content = fs::read_to_string(src.join("skill.toml"))?;
     let val: toml::Value = toml::from_str(&toml_content)
         .map_err(|e| Error::Config(e.to_string()))?;
-    let name = val["skill"]["name"].as_str()
+    let skill_section = val.get("skill");
+    let name = skill_section.and_then(|s| s.get("name")).or(val.get("name"))
+        .and_then(|v| v.as_str())
         .ok_or(Error::Config("missing skill name".into()))?;
 
     let dest = skills_dir()?.join(name);

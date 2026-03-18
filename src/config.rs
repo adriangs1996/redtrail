@@ -5,6 +5,8 @@ use crate::error::Error;
 fn default_autonomy() -> String { "balanced".to_string() }
 fn default_true() -> bool { true }
 fn default_false() -> bool { false }
+fn default_llm_provider() -> String { "anthropic".to_string() }
+fn default_llm_model() -> String { "claude-sonnet-4-20250514".to_string() }
 fn default_noise_threshold() -> u8 { 5 }
 fn default_flag_patterns() -> Vec<String> {
     vec![
@@ -30,11 +32,20 @@ pub struct GeneralConfig {
     pub autonomy: String,
     #[serde(default = "default_true")]
     pub auto_extract: bool,
+    #[serde(default = "default_llm_provider")]
+    pub llm_provider: String,
+    #[serde(default = "default_llm_model")]
+    pub llm_model: String,
 }
 
 impl Default for GeneralConfig {
     fn default() -> Self {
-        Self { autonomy: default_autonomy(), auto_extract: default_true() }
+        Self {
+            autonomy: default_autonomy(),
+            auto_extract: default_true(),
+            llm_provider: default_llm_provider(),
+            llm_model: default_llm_model(),
+        }
     }
 }
 

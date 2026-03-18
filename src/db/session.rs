@@ -49,6 +49,33 @@ pub fn decrement_noise_budget(conn: &Connection, session_id: &str, cost: f64) ->
     Ok(())
 }
 
+pub fn create_session(conn: &Connection, id: &str, name: &str, target: Option<&str>, scope: Option<&str>, goal: &str) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO sessions (id, name, target, scope, goal) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, name, target, scope, goal],
+    ).map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+pub fn get_session(conn: &Connection, session_id: &str) -> Result<serde_json::Value, Error> {
+    conn.query_row(
+        "SELECT id, name, target, scope, goal, phase, autonomy, noise_budget, created_at, updated_at FROM sessions WHERE id = ?1",
+        params![session_id],
+        |r| Ok(serde_json::json!({
+            "id": r.get::<_, String>(0)?,
+            "name": r.get::<_, String>(1)?,
+            "target": r.get::<_, Option<String>>(2)?,
+            "scope": r.get::<_, Option<String>>(3)?,
+            "goal": r.get::<_, String>(4)?,
+            "phase": r.get::<_, String>(5)?,
+            "autonomy": r.get::<_, String>(6)?,
+            "noise_budget": r.get::<_, f64>(7)?,
+            "created_at": r.get::<_, String>(8)?,
+            "updated_at": r.get::<_, String>(9)?,
+        })),
+    ).map_err(|e| Error::Db(e.to_string()))
+}
+
 pub fn status_summary(conn: &Connection, session_id: &str) -> Result<serde_json::Value, Error> {
     let (name, target, goal, phase, noise_budget): (String, Option<String>, String, String, f64) = conn.query_row(
         "SELECT name, target, goal, phase, noise_budget FROM sessions WHERE id = ?1",

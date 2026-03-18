@@ -1,5 +1,6 @@
 use std::fs;
 use crate::cli;
+use crate::db::Db;
 use crate::error::Error;
 
 pub fn run(file: &str, tool_override: Option<String>) -> Result<(), Error> {

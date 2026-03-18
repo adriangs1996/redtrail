@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use crate::db::Db;
 use crate::error::Error;
 use super::resolve_session;
 
@@ -43,7 +44,7 @@ fn format_finding(ev: &serde_json::Value, hypotheses: &[serde_json::Value]) -> S
     }
 }
 
-fn build_report(db: &crate::db::Db, session_id: &str) -> Result<String, Error> {
+fn build_report(db: &dyn Db, session_id: &str) -> Result<String, Error> {
     let summary = db.status_summary(session_id)?;
     let hosts = db.list_hosts(session_id)?;
     let ports = db.list_ports(session_id, None)?;

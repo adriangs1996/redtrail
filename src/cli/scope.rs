@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use crate::db::Db;
 use crate::error::Error;
 use crate::net;
 use super::resolve_session;

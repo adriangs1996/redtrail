@@ -117,11 +117,49 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 ";
 
-pub struct Db {
+pub trait Db {
+    fn add_host(&self, session_id: &str, ip: &str, os: Option<&str>, hostname: Option<&str>) -> Result<i64, Error>;
+    fn add_port(&self, session_id: &str, host_ip: &str, port: i64, protocol: Option<&str>, service: Option<&str>, version: Option<&str>) -> Result<i64, Error>;
+    fn add_credential(&self, session_id: &str, username: &str, password: Option<&str>, hash: Option<&str>, service: Option<&str>, host: Option<&str>, source: Option<&str>) -> Result<i64, Error>;
+    fn add_flag(&self, session_id: &str, value: &str, source: Option<&str>) -> Result<i64, Error>;
+    fn add_access(&self, session_id: &str, host: &str, user: &str, level: &str, method: Option<&str>) -> Result<i64, Error>;
+    fn add_note(&self, session_id: &str, text: &str) -> Result<i64, Error>;
+    fn list_hosts(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_ports(&self, session_id: &str, host_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_credentials(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_flags(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_access(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_history(&self, session_id: &str, limit: usize) -> Result<Vec<serde_json::Value>, Error>;
+    fn search(&self, session_id: &str, query: &str) -> Result<Vec<serde_json::Value>, Error>;
+
+    fn create_hypothesis(&self, session_id: &str, statement: &str, category: &str, priority: &str, confidence: f64, target_component: Option<&str>) -> Result<i64, Error>;
+    fn list_hypotheses(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error>;
+    fn update_hypothesis(&self, id: i64, status: &str) -> Result<(), Error>;
+    fn get_hypothesis(&self, id: i64) -> Result<serde_json::Value, Error>;
+    fn create_evidence(&self, session_id: &str, hypothesis_id: Option<i64>, finding: &str, severity: &str, poc: Option<&str>) -> Result<i64, Error>;
+    fn list_evidence(&self, session_id: &str, hypothesis_id: Option<i64>) -> Result<Vec<serde_json::Value>, Error>;
+    fn export_evidence(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+
+    fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error>;
+    fn finish_command(&self, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error>;
+    fn get_command_for_extraction(&self, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error>;
+    fn update_extraction_status(&self, id: i64, status: &str) -> Result<(), Error>;
+
+    fn active_session_id(&self) -> Result<String, Error>;
+    fn create_session(&self, id: &str, name: &str, target: Option<&str>, scope: Option<&str>, goal: &str) -> Result<(), Error>;
+    fn get_session(&self, session_id: &str) -> Result<serde_json::Value, Error>;
+    fn load_flag_patterns(&self, session_id: &str) -> Result<Vec<String>, Error>;
+    fn load_scope(&self, session_id: &str) -> Result<Option<String>, Error>;
+    fn decrement_noise_budget(&self, session_id: &str, cost: f64) -> Result<(), Error>;
+    fn status_summary(&self, session_id: &str) -> Result<serde_json::Value, Error>;
+}
+
+pub struct SqliteDb {
     conn: Connection,
 }
 
-impl Db {
+impl SqliteDb {
     pub fn open(path: &str) -> Result<Self, Error> {
         let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
         let db = Self { conn };
@@ -146,98 +184,106 @@ impl Db {
     }
 
     pub(crate) fn conn(&self) -> &Connection { &self.conn }
+}
 
-    pub fn add_host(&self, session_id: &str, ip: &str, os: Option<&str>, hostname: Option<&str>) -> Result<i64, Error> {
+impl Db for SqliteDb {
+    fn add_host(&self, session_id: &str, ip: &str, os: Option<&str>, hostname: Option<&str>) -> Result<i64, Error> {
         kb::add_host(&self.conn, session_id, ip, os, hostname)
     }
-    pub fn add_port(&self, session_id: &str, host_ip: &str, port: i64, protocol: Option<&str>, service: Option<&str>, version: Option<&str>) -> Result<i64, Error> {
+    fn add_port(&self, session_id: &str, host_ip: &str, port: i64, protocol: Option<&str>, service: Option<&str>, version: Option<&str>) -> Result<i64, Error> {
         kb::add_port(&self.conn, session_id, host_ip, port, protocol, service, version)
     }
-    pub fn add_credential(&self, session_id: &str, username: &str, password: Option<&str>, hash: Option<&str>, service: Option<&str>, host: Option<&str>, source: Option<&str>) -> Result<i64, Error> {
+    fn add_credential(&self, session_id: &str, username: &str, password: Option<&str>, hash: Option<&str>, service: Option<&str>, host: Option<&str>, source: Option<&str>) -> Result<i64, Error> {
         kb::add_credential(&self.conn, session_id, username, password, hash, service, host, source)
     }
-    pub fn add_flag(&self, session_id: &str, value: &str, source: Option<&str>) -> Result<i64, Error> {
+    fn add_flag(&self, session_id: &str, value: &str, source: Option<&str>) -> Result<i64, Error> {
         kb::add_flag(&self.conn, session_id, value, source)
     }
-    pub fn add_access(&self, session_id: &str, host: &str, user: &str, level: &str, method: Option<&str>) -> Result<i64, Error> {
+    fn add_access(&self, session_id: &str, host: &str, user: &str, level: &str, method: Option<&str>) -> Result<i64, Error> {
         kb::add_access(&self.conn, session_id, host, user, level, method)
     }
-    pub fn add_note(&self, session_id: &str, text: &str) -> Result<i64, Error> {
+    fn add_note(&self, session_id: &str, text: &str) -> Result<i64, Error> {
         kb::add_note(&self.conn, session_id, text)
     }
-    pub fn list_hosts(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_hosts(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_hosts(&self.conn, session_id)
     }
-    pub fn list_ports(&self, session_id: &str, host_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_ports(&self, session_id: &str, host_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_ports(&self.conn, session_id, host_filter)
     }
-    pub fn list_credentials(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_credentials(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_credentials(&self.conn, session_id)
     }
-    pub fn list_flags(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_flags(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_flags(&self.conn, session_id)
     }
-    pub fn list_access(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_access(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_access(&self.conn, session_id)
     }
-    pub fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_notes(&self.conn, session_id)
     }
-    pub fn list_history(&self, session_id: &str, limit: usize) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_history(&self, session_id: &str, limit: usize) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_history(&self.conn, session_id, limit)
     }
-    pub fn search(&self, session_id: &str, query: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn search(&self, session_id: &str, query: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::search(&self.conn, session_id, query)
     }
 
-    pub fn create_hypothesis(&self, session_id: &str, statement: &str, category: &str, priority: &str, confidence: f64, target_component: Option<&str>) -> Result<i64, Error> {
+    fn create_hypothesis(&self, session_id: &str, statement: &str, category: &str, priority: &str, confidence: f64, target_component: Option<&str>) -> Result<i64, Error> {
         hypothesis::create(&self.conn, session_id, statement, category, priority, confidence, target_component)
     }
-    pub fn list_hypotheses(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_hypotheses(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error> {
         hypothesis::list(&self.conn, session_id, status_filter)
     }
-    pub fn update_hypothesis(&self, id: i64, status: &str) -> Result<(), Error> {
+    fn update_hypothesis(&self, id: i64, status: &str) -> Result<(), Error> {
         hypothesis::update_status(&self.conn, id, status)
     }
-    pub fn get_hypothesis(&self, id: i64) -> Result<serde_json::Value, Error> {
+    fn get_hypothesis(&self, id: i64) -> Result<serde_json::Value, Error> {
         hypothesis::get(&self.conn, id)
     }
-    pub fn create_evidence(&self, session_id: &str, hypothesis_id: Option<i64>, finding: &str, severity: &str, poc: Option<&str>) -> Result<i64, Error> {
+    fn create_evidence(&self, session_id: &str, hypothesis_id: Option<i64>, finding: &str, severity: &str, poc: Option<&str>) -> Result<i64, Error> {
         hypothesis::create_evidence(&self.conn, session_id, hypothesis_id, finding, severity, poc)
     }
-    pub fn list_evidence(&self, session_id: &str, hypothesis_id: Option<i64>) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_evidence(&self, session_id: &str, hypothesis_id: Option<i64>) -> Result<Vec<serde_json::Value>, Error> {
         hypothesis::list_evidence(&self.conn, session_id, hypothesis_id)
     }
-    pub fn export_evidence(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
+    fn export_evidence(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         hypothesis::export_evidence(&self.conn, session_id)
     }
 
-    pub fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error> {
+    fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error> {
         commands::insert(&self.conn, session_id, command, tool)
     }
-    pub fn finish_command(&self, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error> {
+    fn finish_command(&self, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error> {
         commands::finish(&self.conn, id, exit_code, duration_ms, output)
     }
-    pub fn get_command_for_extraction(&self, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error> {
+    fn get_command_for_extraction(&self, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error> {
         commands::get_for_extraction(&self.conn, id)
     }
-    pub fn update_extraction_status(&self, id: i64, status: &str) -> Result<(), Error> {
+    fn update_extraction_status(&self, id: i64, status: &str) -> Result<(), Error> {
         commands::update_extraction_status(&self.conn, id, status)
     }
 
-    pub fn active_session_id(&self) -> Result<String, Error> {
+    fn active_session_id(&self) -> Result<String, Error> {
         session::active_session_id(&self.conn)
     }
-    pub fn load_flag_patterns(&self, session_id: &str) -> Result<Vec<String>, Error> {
+    fn create_session(&self, id: &str, name: &str, target: Option<&str>, scope: Option<&str>, goal: &str) -> Result<(), Error> {
+        session::create_session(&self.conn, id, name, target, scope, goal)
+    }
+    fn get_session(&self, session_id: &str) -> Result<serde_json::Value, Error> {
+        session::get_session(&self.conn, session_id)
+    }
+    fn load_flag_patterns(&self, session_id: &str) -> Result<Vec<String>, Error> {
         session::load_flag_patterns(&self.conn, session_id)
     }
-    pub fn load_scope(&self, session_id: &str) -> Result<Option<String>, Error> {
+    fn load_scope(&self, session_id: &str) -> Result<Option<String>, Error> {
         session::load_scope(&self.conn, session_id)
     }
-    pub fn decrement_noise_budget(&self, session_id: &str, cost: f64) -> Result<(), Error> {
+    fn decrement_noise_budget(&self, session_id: &str, cost: f64) -> Result<(), Error> {
         session::decrement_noise_budget(&self.conn, session_id, cost)
     }
-    pub fn status_summary(&self, session_id: &str) -> Result<serde_json::Value, Error> {
+    fn status_summary(&self, session_id: &str) -> Result<serde_json::Value, Error> {
         session::status_summary(&self.conn, session_id)
     }
 }
@@ -249,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_open_creates_schema() {
-        let db = Db::open_in_memory().unwrap();
+        let db = SqliteDb::open_in_memory().unwrap();
         let count: i32 = db.conn.query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table'",
             [], |r| r.get(0),
@@ -259,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_wal_mode() {
-        let db = Db::open_in_memory().unwrap();
+        let db = SqliteDb::open_in_memory().unwrap();
         let mode: String = db.conn.query_row(
             "PRAGMA journal_mode", [], |r| r.get(0),
         ).unwrap();
@@ -268,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_insert_and_query_session() {
-        let db = Db::open_in_memory().unwrap();
+        let db = SqliteDb::open_in_memory().unwrap();
         db.conn.execute(
             "INSERT INTO sessions (id, name, target) VALUES (?1, ?2, ?3)",
             params!["s1", "test", "10.10.10.1"],
@@ -278,5 +324,16 @@ mod tests {
             params!["s1"], |r| r.get(0),
         ).unwrap();
         assert_eq!(name, "test");
+    }
+
+    #[test]
+    fn test_trait_object_works() {
+        let db = SqliteDb::open_in_memory().unwrap();
+        db.create_session("s1", "test", Some("10.10.10.1"), None, "general").unwrap();
+        let dyn_db: &dyn Db = &db;
+        dyn_db.add_host("s1", "10.10.10.1", Some("Linux"), None).unwrap();
+        let hosts = dyn_db.list_hosts("s1").unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0]["ip"], "10.10.10.1");
     }
 }

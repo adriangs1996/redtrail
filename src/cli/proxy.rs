@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::time::Instant;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-use crate::db::Db;
+use crate::db::{Db, SqliteDb};
 use crate::error::Error;
 use crate::workspace;
 
@@ -61,7 +61,7 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     let output_str = String::from_utf8_lossy(&output).to_string();
 
     if let Some(ws) = ws
-        && let Ok(db) = Db::open(workspace::db_path(&ws).to_str().unwrap())
+        && let Ok(db) = SqliteDb::open(workspace::db_path(&ws).to_str().unwrap())
         && let Ok(session_id) = db.active_session_id()
     {
         if let Ok(result) = crate::pipeline::process_command(

@@ -9,7 +9,7 @@ pub struct CommandResult {
 }
 
 pub fn process_command(
-    db: &Db,
+    db: &dyn Db,
     session_id: &str,
     command: &str,
     exit_code: i32,
@@ -69,14 +69,11 @@ fn detection_cost(tool: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Db;
+    use crate::db::{Db, SqliteDb};
 
-    fn setup() -> (Db, String) {
-        let db = Db::open_in_memory().unwrap();
-        db.conn().execute(
-            "INSERT INTO sessions (id, name, target, scope) VALUES ('s1', 'test', '10.10.10.1', '10.10.10.0/24')",
-            [],
-        ).unwrap();
+    fn setup() -> (SqliteDb, String) {
+        let db = SqliteDb::open_in_memory().unwrap();
+        db.create_session("s1", "test", Some("10.10.10.1"), Some("10.10.10.0/24"), "general").unwrap();
         (db, "s1".to_string())
     }
 

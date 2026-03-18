@@ -14,7 +14,7 @@ pub mod report;
 pub mod skill;
 
 use clap::{Parser, Subcommand};
-use crate::db::Db;
+use crate::db::{Db, SqliteDb};
 use crate::error::Error;
 use crate::workspace;
 
@@ -85,10 +85,10 @@ enum Commands {
     },
 }
 
-pub fn resolve_session() -> Result<(Db, String), Error> {
+pub fn resolve_session() -> Result<(SqliteDb, String), Error> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db = Db::open(workspace::db_path(&ws).to_str().unwrap())?;
+    let db = SqliteDb::open(workspace::db_path(&ws).to_str().unwrap())?;
     let session_id = db.active_session_id()?;
     Ok((db, session_id))
 }

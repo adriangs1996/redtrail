@@ -205,10 +205,10 @@ pub fn search(conn: &Connection, session_id: &str, query: &str) -> Result<Vec<se
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Db;
+    use crate::db::SqliteDb;
 
-    fn setup() -> Db {
-        let db = Db::open_in_memory().unwrap();
+    fn setup() -> SqliteDb {
+        let db = SqliteDb::open_in_memory().unwrap();
         db.conn().execute(
             "INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [],
         ).unwrap();

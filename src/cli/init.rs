@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use crate::config::Config;
-use crate::db::Db;
+use crate::db::{Db, SqliteDb};
 use crate::error::Error;
 use crate::workspace;
 
@@ -16,7 +16,7 @@ pub fn run(target: Option<String>, goal: String, scope: Option<String>) -> Resul
 
     fs::create_dir_all(&rt_dir)?;
 
-    let db = Db::open(workspace::db_path(&cwd).to_str().unwrap())?;
+    let db = SqliteDb::open(workspace::db_path(&cwd).to_str().unwrap())?;
 
     let session_name = cwd.file_name()
         .and_then(|n| n.to_str())
@@ -24,10 +24,7 @@ pub fn run(target: Option<String>, goal: String, scope: Option<String>) -> Resul
         .to_string();
     let session_id = uuid::Uuid::new_v4().to_string();
 
-    db.conn().execute(
-        "INSERT INTO sessions (id, name, target, scope, goal) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![session_id, session_name, target, scope, goal],
-    ).map_err(|e| Error::Db(e.to_string()))?;
+    db.create_session(&session_id, &session_name, target.as_deref(), scope.as_deref(), &goal)?;
 
     let mut ws_config = String::new();
     if target.is_some() || goal != "general" {

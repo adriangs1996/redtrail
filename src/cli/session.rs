@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use crate::db::Db;
 use crate::error::Error;
 use crate::workspace;
 use super::resolve_session;
@@ -23,19 +24,7 @@ pub fn run(cmd: SessionCommands) -> Result<(), Error> {
     match cmd {
         SessionCommands::List { json } => {
             let (db, session_id) = resolve_session()?;
-            let row = db.conn().query_row(
-                "SELECT id, name, target, scope, goal, phase, created_at FROM sessions WHERE id = ?1",
-                rusqlite::params![session_id],
-                |r| Ok(serde_json::json!({
-                    "id": r.get::<_, String>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "target": r.get::<_, Option<String>>(2)?,
-                    "scope": r.get::<_, Option<String>>(3)?,
-                    "goal": r.get::<_, String>(4)?,
-                    "phase": r.get::<_, String>(5)?,
-                    "created_at": r.get::<_, String>(6)?,
-                })),
-            ).map_err(|e| Error::Db(e.to_string()))?;
+            let row = db.get_session(&session_id)?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!([row])).unwrap());
@@ -53,21 +42,7 @@ pub fn run(cmd: SessionCommands) -> Result<(), Error> {
 
         SessionCommands::Active { json } => {
             let (db, session_id) = resolve_session()?;
-            let row = db.conn().query_row(
-                "SELECT id, name, target, scope, goal, phase, autonomy, created_at, updated_at FROM sessions WHERE id = ?1",
-                rusqlite::params![session_id],
-                |r| Ok(serde_json::json!({
-                    "id": r.get::<_, String>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "target": r.get::<_, Option<String>>(2)?,
-                    "scope": r.get::<_, Option<String>>(3)?,
-                    "goal": r.get::<_, String>(4)?,
-                    "phase": r.get::<_, String>(5)?,
-                    "autonomy": r.get::<_, String>(6)?,
-                    "created_at": r.get::<_, String>(7)?,
-                    "updated_at": r.get::<_, String>(8)?,
-                })),
-            ).map_err(|e| Error::Db(e.to_string()))?;
+            let row = db.get_session(&session_id)?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&row).unwrap());
@@ -89,20 +64,7 @@ pub fn run(cmd: SessionCommands) -> Result<(), Error> {
             let cwd = std::env::current_dir()?;
             let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
 
-            let session_row = db.conn().query_row(
-                "SELECT id, name, target, scope, goal, phase, autonomy, created_at FROM sessions WHERE id = ?1",
-                rusqlite::params![session_id],
-                |r| Ok(serde_json::json!({
-                    "id": r.get::<_, String>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "target": r.get::<_, Option<String>>(2)?,
-                    "scope": r.get::<_, Option<String>>(3)?,
-                    "goal": r.get::<_, String>(4)?,
-                    "phase": r.get::<_, String>(5)?,
-                    "autonomy": r.get::<_, String>(6)?,
-                    "created_at": r.get::<_, String>(7)?,
-                })),
-            ).map_err(|e| Error::Db(e.to_string()))?;
+            let session_row = db.get_session(&session_id)?;
 
             let export = serde_json::json!({
                 "workspace": ws.to_string_lossy(),

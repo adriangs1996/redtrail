@@ -1,3 +1,4 @@
+use crate::db::Db;
 use crate::error::Error;
 use super::resolve_session;
 

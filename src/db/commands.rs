@@ -37,10 +37,10 @@ pub fn update_extraction_status(conn: &Connection, id: i64, status: &str) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Db;
+    use crate::db::SqliteDb;
 
-    fn setup() -> Db {
-        let db = Db::open_in_memory().unwrap();
+    fn setup() -> SqliteDb {
+        let db = SqliteDb::open_in_memory().unwrap();
         db.conn().execute(
             "INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [],
         ).unwrap();

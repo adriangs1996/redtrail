@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::db::Db;
+use crate::db::{Db, SqliteDb};
 use crate::error::Error;
 use crate::workspace;
 
@@ -7,13 +7,12 @@ pub fn run() -> Result<(), Error> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
     let config = Config::resolved(&ws)?;
-    let db = Db::open(workspace::db_path(&ws).to_str().unwrap())?;
+    let db = SqliteDb::open(workspace::db_path(&ws).to_str().unwrap())?;
 
-    let (session_name, target) = db.conn().query_row(
-        "SELECT name, COALESCE(target, '') FROM sessions LIMIT 1",
-        [],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    ).map_err(|_| Error::NoActiveSession)?;
+    let session_id = db.active_session_id()?;
+    let session = db.get_session(&session_id)?;
+    let session_name = session["name"].as_str().unwrap_or("").to_string();
+    let target = session["target"].as_str().unwrap_or("").to_string();
 
     let aliases = &config.tools.aliases;
 

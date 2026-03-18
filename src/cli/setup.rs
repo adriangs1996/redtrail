@@ -37,7 +37,7 @@ fn global_config_path() -> Result<std::path::PathBuf, Error> {
 fn detect_shell() -> String {
     std::env::var("SHELL")
         .ok()
-        .and_then(|s| s.split('/').last().map(String::from))
+        .and_then(|s| s.split('/').next_back().map(String::from))
         .unwrap_or_else(|| "unknown".to_string())
 }
 

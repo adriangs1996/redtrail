@@ -40,7 +40,7 @@ pub fn run(cmd: SessionCommands) -> Result<(), Error> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&serde_json::json!([row])).unwrap());
             } else {
-                println!("{:<36} {:<20} {:<18} {}", "ID", "NAME", "TARGET", "PHASE");
+                println!("{:<36} {:<20} {:<18} PHASE", "ID", "NAME", "TARGET");
                 println!("{:<36} {:<20} {:<18} {}",
                     row["id"].as_str().unwrap_or(""),
                     row["name"].as_str().unwrap_or(""),

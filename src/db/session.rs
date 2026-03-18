@@ -14,9 +14,9 @@ pub fn load_flag_patterns(conn: &Connection, session_id: &str) -> Result<Vec<Str
         |r| r.get(0),
     ).map_err(|e| Error::Db(e.to_string()))?;
 
-    if let Some(m) = meta {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
-            if let Some(arr) = v.get("flag_patterns").and_then(|x| x.as_array()) {
+    if let Some(m) = meta
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(&m)
+            && let Some(arr) = v.get("flag_patterns").and_then(|x| x.as_array()) {
                 let pats: Vec<String> = arr.iter()
                     .filter_map(|x| x.as_str().map(String::from))
                     .collect();
@@ -24,8 +24,6 @@ pub fn load_flag_patterns(conn: &Connection, session_id: &str) -> Result<Vec<Str
                     return Ok(pats);
                 }
             }
-        }
-    }
 
     Ok(vec![
         r"HTB\{[^}]+\}".to_string(),

@@ -22,7 +22,7 @@ pub fn run(args: &[String]) -> Result<(), Error> {
         cols: 80,
         pixel_width: 0,
         pixel_height: 0,
-    }).map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+    }).map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
     let mut cmd = CommandBuilder::new(&args[0]);
     for arg in &args[1..] {
@@ -31,11 +31,11 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     cmd.cwd(&cwd);
 
     let mut child = pair.slave.spawn_command(cmd)
-        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader()
-        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
     let start = Instant::now();
     let mut output = Vec::new();
@@ -55,14 +55,14 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     }
 
     let status = child.wait()
-        .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
     let exit_code = status.exit_code() as i32;
     let duration_ms = start.elapsed().as_millis() as i64;
     let output_str = String::from_utf8_lossy(&output).to_string();
 
-    if let Some(ws) = ws {
-        if let Ok(db) = Db::open(workspace::db_path(&ws).to_str().unwrap()) {
-            if let Ok(session_id) = db.active_session_id() {
+    if let Some(ws) = ws
+        && let Ok(db) = Db::open(workspace::db_path(&ws).to_str().unwrap())
+            && let Ok(session_id) = db.active_session_id() {
                 let cmd_id = db.insert_command(&session_id, &cmd_str, tool)?;
                 db.finish_command(cmd_id, exit_code, duration_ms, &output_str)?;
                 let pipe_result = crate::pipeline::post_exec(&db, &session_id, &cmd_str, &output_str, tool);
@@ -73,8 +73,6 @@ pub fn run(args: &[String]) -> Result<(), Error> {
                     eprintln!("[rt] warning: {warn}");
                 }
             }
-        }
-    }
 
     std::process::exit(exit_code);
 }

@@ -110,7 +110,7 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
                 if filtered.is_empty() {
                     println!("no hosts");
                 } else {
-                    println!("{:<18} {:<20} {:<15} {}", "IP", "HOSTNAME", "OS", "STATUS");
+                    println!("{:<18} {:<20} {:<15} STATUS", "IP", "HOSTNAME", "OS");
                     for r in filtered {
                         println!("{:<18} {:<20} {:<15} {}",
                             r["ip"].as_str().unwrap_or(""),
@@ -126,20 +126,18 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.list_ports(&session_id, host.as_deref())?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no ports");
             } else {
-                if rows.is_empty() {
-                    println!("no ports");
-                } else {
-                    println!("{:<18} {:<8} {:<8} {:<15} {}", "IP", "PORT", "PROTO", "SERVICE", "VERSION");
-                    for r in &rows {
-                        println!("{:<18} {:<8} {:<8} {:<15} {}",
-                            r["ip"].as_str().unwrap_or(""),
-                            r["port"].as_i64().map(|p| p.to_string()).unwrap_or_default(),
-                            r["protocol"].as_str().unwrap_or(""),
-                            r["service"].as_str().unwrap_or("-"),
-                            r["version"].as_str().unwrap_or("-"),
-                        );
-                    }
+                println!("{:<18} {:<8} {:<8} {:<15} VERSION", "IP", "PORT", "PROTO", "SERVICE");
+                for r in &rows {
+                    println!("{:<18} {:<8} {:<8} {:<15} {}",
+                        r["ip"].as_str().unwrap_or(""),
+                        r["port"].as_i64().map(|p| p.to_string()).unwrap_or_default(),
+                        r["protocol"].as_str().unwrap_or(""),
+                        r["service"].as_str().unwrap_or("-"),
+                        r["version"].as_str().unwrap_or("-"),
+                    );
                 }
             }
         }
@@ -147,20 +145,18 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.list_credentials(&session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no credentials");
             } else {
-                if rows.is_empty() {
-                    println!("no credentials");
-                } else {
-                    println!("{:<20} {:<20} {:<15} {:<15} {}", "USERNAME", "PASSWORD", "SERVICE", "HOST", "SOURCE");
-                    for r in &rows {
-                        println!("{:<20} {:<20} {:<15} {:<15} {}",
-                            r["username"].as_str().unwrap_or(""),
-                            r["password"].as_str().unwrap_or("-"),
-                            r["service"].as_str().unwrap_or("-"),
-                            r["host"].as_str().unwrap_or("-"),
-                            r["source"].as_str().unwrap_or("-"),
-                        );
-                    }
+                println!("{:<20} {:<20} {:<15} {:<15} SOURCE", "USERNAME", "PASSWORD", "SERVICE", "HOST");
+                for r in &rows {
+                    println!("{:<20} {:<20} {:<15} {:<15} {}",
+                        r["username"].as_str().unwrap_or(""),
+                        r["password"].as_str().unwrap_or("-"),
+                        r["service"].as_str().unwrap_or("-"),
+                        r["host"].as_str().unwrap_or("-"),
+                        r["source"].as_str().unwrap_or("-"),
+                    );
                 }
             }
         }
@@ -168,18 +164,16 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.list_flags(&session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no flags");
             } else {
-                if rows.is_empty() {
-                    println!("no flags");
-                } else {
-                    println!("{:<40} {:<20} {}", "VALUE", "SOURCE", "CAPTURED_AT");
-                    for r in &rows {
-                        println!("{:<40} {:<20} {}",
-                            r["value"].as_str().unwrap_or(""),
-                            r["source"].as_str().unwrap_or("-"),
-                            r["captured_at"].as_str().unwrap_or(""),
-                        );
-                    }
+                println!("{:<40} {:<20} CAPTURED_AT", "VALUE", "SOURCE");
+                for r in &rows {
+                    println!("{:<40} {:<20} {}",
+                        r["value"].as_str().unwrap_or(""),
+                        r["source"].as_str().unwrap_or("-"),
+                        r["captured_at"].as_str().unwrap_or(""),
+                    );
                 }
             }
         }
@@ -187,19 +181,17 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.list_access(&session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no access entries");
             } else {
-                if rows.is_empty() {
-                    println!("no access entries");
-                } else {
-                    println!("{:<18} {:<20} {:<12} {}", "HOST", "USER", "LEVEL", "METHOD");
-                    for r in &rows {
-                        println!("{:<18} {:<20} {:<12} {}",
-                            r["host"].as_str().unwrap_or(""),
-                            r["user"].as_str().unwrap_or(""),
-                            r["level"].as_str().unwrap_or(""),
-                            r["method"].as_str().unwrap_or("-"),
-                        );
-                    }
+                println!("{:<18} {:<20} {:<12} METHOD", "HOST", "USER", "LEVEL");
+                for r in &rows {
+                    println!("{:<18} {:<20} {:<12} {}",
+                        r["host"].as_str().unwrap_or(""),
+                        r["user"].as_str().unwrap_or(""),
+                        r["level"].as_str().unwrap_or(""),
+                        r["method"].as_str().unwrap_or("-"),
+                    );
                 }
             }
         }
@@ -207,13 +199,11 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.list_notes(&session_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no notes");
             } else {
-                if rows.is_empty() {
-                    println!("no notes");
-                } else {
-                    for r in &rows {
-                        println!("[{}] {}", r["created_at"].as_str().unwrap_or(""), r["text"].as_str().unwrap_or(""));
-                    }
+                for r in &rows {
+                    println!("[{}] {}", r["created_at"].as_str().unwrap_or(""), r["text"].as_str().unwrap_or(""));
                 }
             }
         }
@@ -221,13 +211,11 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.list_history(&session_id, limit)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no history");
             } else {
-                if rows.is_empty() {
-                    println!("no history");
-                } else {
-                    for r in &rows {
-                        println!("[{}] {}", r["started_at"].as_str().unwrap_or(""), r["command"].as_str().unwrap_or(""));
-                    }
+                for r in &rows {
+                    println!("[{}] {}", r["started_at"].as_str().unwrap_or(""), r["command"].as_str().unwrap_or(""));
                 }
             }
         }
@@ -235,13 +223,11 @@ pub fn run(cmd: KbCommands) -> Result<(), Error> {
             let rows = db.search(&session_id, &query)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no results");
             } else {
-                if rows.is_empty() {
-                    println!("no results");
-                } else {
-                    for r in &rows {
-                        println!("[{}] {}", r["kind"].as_str().unwrap_or(""), r["value"].as_str().unwrap_or(""));
-                    }
+                for r in &rows {
+                    println!("[{}] {}", r["kind"].as_str().unwrap_or(""), r["value"].as_str().unwrap_or(""));
                 }
             }
         }

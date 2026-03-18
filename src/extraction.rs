@@ -136,11 +136,10 @@ fn call_llm(prompt: &str, config: &crate::config::Config) -> Result<String, Erro
 }
 
 fn extract_json(text: &str) -> &str {
-    if let Some(start) = text.find('{') {
-        if let Some(end) = text.rfind('}') {
+    if let Some(start) = text.find('{')
+        && let Some(end) = text.rfind('}') {
             return &text[start..=end];
         }
-    }
     text
 }
 

@@ -115,8 +115,8 @@ fn list_skills() -> Result<(), Error> {
         if !toml_path.exists() {
             continue;
         }
-        if let Ok(content) = fs::read_to_string(&toml_path) {
-            if let Ok(val) = toml::from_str::<toml::Value>(&content) {
+        if let Ok(content) = fs::read_to_string(&toml_path)
+            && let Ok(val) = toml::from_str::<toml::Value>(&content) {
                 let skill_section = val.get("skill");
                 let name = skill_section.and_then(|s| s.get("name")).or(val.get("name"))
                     .and_then(|v| v.as_str()).unwrap_or("?");
@@ -127,7 +127,6 @@ fn list_skills() -> Result<(), Error> {
                 println!("{name} ({version}) — {desc}");
                 found = true;
             }
-        }
     }
     if !found {
         println!("no skills installed");

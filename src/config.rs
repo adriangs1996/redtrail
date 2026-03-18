@@ -50,6 +50,7 @@ impl Default for GeneralConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ScopeConfig {
     #[serde(default = "default_false")]
     pub strict: bool,
@@ -57,11 +58,6 @@ pub struct ScopeConfig {
     pub allowed_hosts: Vec<String>,
 }
 
-impl Default for ScopeConfig {
-    fn default() -> Self {
-        Self { strict: false, allowed_hosts: vec![] }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoiseConfig {
@@ -165,18 +161,15 @@ impl Config {
         };
 
         if let Some(toml::Value::Table(g)) = ws_table.get("general") {
-            if let Some(v) = g.get("autonomy") {
-                if let Some(s) = v.as_str() { self.general.autonomy = s.to_string(); }
-            }
-            if let Some(v) = g.get("auto_extract") {
-                if let Some(b) = v.as_bool() { self.general.auto_extract = b; }
-            }
+            if let Some(v) = g.get("autonomy")
+                && let Some(s) = v.as_str() { self.general.autonomy = s.to_string(); }
+            if let Some(v) = g.get("auto_extract")
+                && let Some(b) = v.as_bool() { self.general.auto_extract = b; }
         }
 
         if let Some(toml::Value::Table(s)) = ws_table.get("scope") {
-            if let Some(v) = s.get("strict") {
-                if let Some(b) = v.as_bool() { self.scope.strict = b; }
-            }
+            if let Some(v) = s.get("strict")
+                && let Some(b) = v.as_bool() { self.scope.strict = b; }
             if let Some(toml::Value::Array(hosts)) = s.get("allowed_hosts") {
                 self.scope.allowed_hosts = hosts.iter()
                     .filter_map(|h| h.as_str().map(String::from))
@@ -185,12 +178,10 @@ impl Config {
         }
 
         if let Some(toml::Value::Table(n)) = ws_table.get("noise") {
-            if let Some(v) = n.get("threshold") {
-                if let Some(i) = v.as_integer() { self.noise.threshold = i as u8; }
-            }
-            if let Some(v) = n.get("filter_duplicates") {
-                if let Some(b) = v.as_bool() { self.noise.filter_duplicates = b; }
-            }
+            if let Some(v) = n.get("threshold")
+                && let Some(i) = v.as_integer() { self.noise.threshold = i as u8; }
+            if let Some(v) = n.get("filter_duplicates")
+                && let Some(b) = v.as_bool() { self.noise.filter_duplicates = b; }
         }
 
         if let Some(toml::Value::Table(f)) = ws_table.get("flags") {
@@ -199,26 +190,22 @@ impl Config {
                     .filter_map(|p| p.as_str().map(String::from))
                     .collect();
             }
-            if let Some(v) = f.get("auto_capture") {
-                if let Some(b) = v.as_bool() { self.flags.auto_capture = b; }
-            }
+            if let Some(v) = f.get("auto_capture")
+                && let Some(b) = v.as_bool() { self.flags.auto_capture = b; }
         }
 
-        if let Some(toml::Value::Table(t)) = ws_table.get("tools") {
-            if let Some(toml::Value::Array(aliases)) = t.get("aliases") {
+        if let Some(toml::Value::Table(t)) = ws_table.get("tools")
+            && let Some(toml::Value::Array(aliases)) = t.get("aliases") {
                 self.tools.aliases = aliases.iter()
                     .filter_map(|a| a.as_str().map(String::from))
                     .collect();
             }
-        }
 
         if let Some(toml::Value::Table(s)) = ws_table.get("session") {
-            if let Some(v) = s.get("max_sessions") {
-                if let Some(i) = v.as_integer() { self.session.max_sessions = i as u32; }
-            }
-            if let Some(v) = s.get("auto_save") {
-                if let Some(b) = v.as_bool() { self.session.auto_save = b; }
-            }
+            if let Some(v) = s.get("max_sessions")
+                && let Some(i) = v.as_integer() { self.session.max_sessions = i as u32; }
+            if let Some(v) = s.get("auto_save")
+                && let Some(b) = v.as_bool() { self.session.auto_save = b; }
         }
 
         Ok(self)

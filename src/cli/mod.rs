@@ -11,6 +11,7 @@ pub mod env;
 pub mod setup;
 pub mod ingest;
 pub mod report;
+pub mod skill;
 
 use clap::{Parser, Subcommand};
 use crate::db::Db;
@@ -78,6 +79,10 @@ enum Commands {
     Pipeline,
     Env,
     Deactivate,
+    Skill {
+        #[command(subcommand)]
+        command: skill::SkillCommands,
+    },
 }
 
 pub fn resolve_session() -> Result<(Db, String), Error> {
@@ -92,7 +97,7 @@ pub fn resolve_session() -> Result<(Db, String), Error> {
 
 const KNOWN_SUBCOMMANDS: &[&str] = &[
     "init", "kb", "status", "hypothesis", "evidence",
-    "session", "scope", "config", "setup", "ingest", "report", "pipeline", "env", "deactivate",
+    "session", "scope", "config", "setup", "ingest", "report", "pipeline", "env", "deactivate", "skill",
     "help", "--help", "-h", "--version", "-V",
 ];
 
@@ -155,6 +160,9 @@ pub fn run() -> Result<(), Error> {
         }
         Some(Commands::Deactivate) => {
             env::deactivate()
+        }
+        Some(Commands::Skill { command }) => {
+            skill::run(command)
         }
         None => {
             println!("rt: redtrail. Use --help for usage.");

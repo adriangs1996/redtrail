@@ -1,10 +1,10 @@
-pub mod kb;
-pub mod hypothesis;
 pub mod commands;
+pub mod hypothesis;
+pub mod kb;
 pub mod session;
 
-use rusqlite::Connection;
 use crate::error::Error;
+use rusqlite::Connection;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS sessions (
@@ -147,7 +147,6 @@ impl Db {
 
     pub(crate) fn conn(&self) -> &Connection { &self.conn }
 
-    // -- kb delegates --
     pub fn add_host(&self, session_id: &str, ip: &str, os: Option<&str>, hostname: Option<&str>) -> Result<i64, Error> {
         kb::add_host(&self.conn, session_id, ip, os, hostname)
     }
@@ -191,7 +190,6 @@ impl Db {
         kb::search(&self.conn, session_id, query)
     }
 
-    // -- hypothesis delegates --
     pub fn create_hypothesis(&self, session_id: &str, statement: &str, category: &str, priority: &str, confidence: f64, target_component: Option<&str>) -> Result<i64, Error> {
         hypothesis::create(&self.conn, session_id, statement, category, priority, confidence, target_component)
     }
@@ -214,7 +212,6 @@ impl Db {
         hypothesis::export_evidence(&self.conn, session_id)
     }
 
-    // -- commands delegates --
     pub fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error> {
         commands::insert(&self.conn, session_id, command, tool)
     }
@@ -228,7 +225,6 @@ impl Db {
         commands::update_extraction_status(&self.conn, id, status)
     }
 
-    // -- session delegates --
     pub fn active_session_id(&self) -> Result<String, Error> {
         session::active_session_id(&self.conn)
     }

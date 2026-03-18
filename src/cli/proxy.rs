@@ -62,17 +62,19 @@ pub fn run(args: &[String]) -> Result<(), Error> {
 
     if let Some(ws) = ws
         && let Ok(db) = Db::open(workspace::db_path(&ws).to_str().unwrap())
-            && let Ok(session_id) = db.active_session_id() {
-                let cmd_id = db.insert_command(&session_id, &cmd_str, tool)?;
-                db.finish_command(cmd_id, exit_code, duration_ms, &output_str)?;
-                let pipe_result = crate::pipeline::post_exec(&db, &session_id, &cmd_str, &output_str, tool);
-                for flag in &pipe_result.flags_found {
-                    eprintln!("[rt] flag captured: {flag}");
-                }
-                for warn in &pipe_result.scope_warnings {
-                    eprintln!("[rt] warning: {warn}");
-                }
+        && let Ok(session_id) = db.active_session_id()
+    {
+        if let Ok(result) = crate::pipeline::process_command(
+            &db, &session_id, &cmd_str, exit_code, duration_ms, &output_str, tool,
+        ) {
+            for flag in &result.flags_found {
+                eprintln!("[rt] flag captured: {flag}");
             }
+            for warn in &result.scope_warnings {
+                eprintln!("[rt] warning: {warn}");
+            }
+        }
+    }
 
     std::process::exit(exit_code);
 }

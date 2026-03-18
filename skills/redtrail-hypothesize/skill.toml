@@ -1,0 +1,8 @@
+name = "redtrail-hypothesize"
+description = "L1 BISCL — read KB evidence, generate grounded attack hypotheses with probe commands."
+version = "1.0.0"
+
+triggers = ["hypothesize", "hypothesis", "l1", "biscl", "attack surface", "theorize"]
+
+[deps]
+commands = ["rt status", "rt kb components", "rt kb entrypoints", "rt kb hosts"]

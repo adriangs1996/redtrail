@@ -1,0 +1,8 @@
+name = "redtrail-recon"
+description = "L0 Modeling — synthesize enumeration commands, execute, validate KB coverage."
+version = "1.0.0"
+
+triggers = ["recon", "enumerate", "scan", "discovery", "l0", "fingerprint"]
+
+[deps]
+commands = ["rt status", "rt kb hosts"]

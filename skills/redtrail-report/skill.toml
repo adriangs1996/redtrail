@@ -1,0 +1,8 @@
+name = "redtrail-report"
+description = "Generate final engagement report with evidence-linked findings and reproducible PoCs."
+version = "1.0.0"
+
+triggers = ["report", "findings", "summary", "debrief", "writeup"]
+
+[deps]
+commands = ["rt report generate", "rt evidence list", "rt hypotheses list", "rt status"]

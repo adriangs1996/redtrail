@@ -89,9 +89,7 @@ pub fn resolve_session() -> Result<(Db, String), Error> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
     let db = Db::open(workspace::db_path(&ws).to_str().unwrap())?;
-    let session_id: String = db.conn().query_row(
-        "SELECT id FROM sessions LIMIT 1", [], |r| r.get(0),
-    ).map_err(|_| Error::NoActiveSession)?;
+    let session_id = db.active_session_id()?;
     Ok((db, session_id))
 }
 

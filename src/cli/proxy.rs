@@ -62,9 +62,7 @@ pub fn run(args: &[String]) -> Result<(), Error> {
 
     if let Some(ws) = ws {
         if let Ok(db) = Db::open(workspace::db_path(&ws).to_str().unwrap()) {
-            if let Ok(session_id) = db.conn().query_row::<String, _, _>(
-                "SELECT id FROM sessions LIMIT 1", [], |r| r.get(0)
-            ) {
+            if let Ok(session_id) = db.active_session_id() {
                 let cmd_id = db.insert_command(&session_id, &cmd_str, tool)?;
                 db.finish_command(cmd_id, exit_code, duration_ms, &output_str)?;
                 let pipe_result = crate::pipeline::post_exec(&db, &session_id, &cmd_str, &output_str, tool);

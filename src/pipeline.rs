@@ -18,7 +18,7 @@ pub fn post_exec(
         scope_warnings: Vec::new(),
     };
 
-    if let Ok(patterns) = load_flag_patterns(db, session_id) {
+    if let Ok(patterns) = db.load_flag_patterns(session_id) {
         for pat in &patterns {
             if let Ok(re) = Regex::new(pat) {
                 for m in re.find_iter(output) {
@@ -30,7 +30,7 @@ pub fn post_exec(
         }
     }
 
-    if let Ok(Some(scope)) = load_scope(db, session_id) {
+    if let Ok(Some(scope)) = db.load_scope(session_id) {
         let ips = extract_ips(command);
         for ip in &ips {
             if !ip_in_scope(ip, &scope) {
@@ -47,42 +47,6 @@ pub fn post_exec(
     }
 
     result
-}
-
-fn load_flag_patterns(db: &Db, session_id: &str) -> Result<Vec<String>, crate::error::Error> {
-    let meta: Option<String> = db.conn().query_row(
-        "SELECT goal_meta FROM sessions WHERE id = ?1",
-        rusqlite::params![session_id],
-        |r| r.get(0),
-    ).map_err(|e| crate::error::Error::Db(e.to_string()))?;
-
-    if let Some(m) = meta {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m) {
-            if let Some(arr) = v.get("flag_patterns").and_then(|x| x.as_array()) {
-                let pats: Vec<String> = arr.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect();
-                if !pats.is_empty() {
-                    return Ok(pats);
-                }
-            }
-        }
-    }
-
-    Ok(vec![
-        r"HTB\{[^}]+\}".to_string(),
-        r"FLAG\{[^}]+\}".to_string(),
-        r"flag\{[^}]+\}".to_string(),
-    ])
-}
-
-fn load_scope(db: &Db, session_id: &str) -> Result<Option<String>, crate::error::Error> {
-    let scope: Option<String> = db.conn().query_row(
-        "SELECT scope FROM sessions WHERE id = ?1",
-        rusqlite::params![session_id],
-        |r| r.get(0),
-    ).map_err(|e| crate::error::Error::Db(e.to_string()))?;
-    Ok(scope.filter(|s| !s.is_empty()))
 }
 
 fn extract_ips(command: &str) -> Vec<String> {

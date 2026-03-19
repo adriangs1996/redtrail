@@ -1,3 +1,4 @@
+use std::path::Path;
 use rusqlite::Connection;
 use crate::error::Error;
 
@@ -8,45 +9,16 @@ pub struct SkillMatch {
 }
 
 pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillMatch>, Error> {
-    let host_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM hosts WHERE session_id = ?1",
-            rusqlite::params![session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
-
-    let hyp_pending: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM hypotheses WHERE session_id = ?1 AND status = 'pending'",
-            rusqlite::params![session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
-
-    let hyp_confirmed: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM hypotheses WHERE session_id = ?1 AND status = 'confirmed'",
-            rusqlite::params![session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
-
-    let hyp_refuted: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM hypotheses WHERE session_id = ?1 AND status = 'refuted'",
-            rusqlite::params![session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
-
-    let hyp_total: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM hypotheses WHERE session_id = ?1",
-            rusqlite::params![session_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
+    let (host_count, hyp_total, hyp_pending, hyp_confirmed, hyp_refuted): (i64, i64, i64, i64, i64) = conn.query_row(
+        "SELECT
+            (SELECT count(*) FROM hosts WHERE session_id = ?1),
+            (SELECT count(*) FROM hypotheses WHERE session_id = ?1),
+            (SELECT count(*) FROM hypotheses WHERE session_id = ?1 AND status = 'pending'),
+            (SELECT count(*) FROM hypotheses WHERE session_id = ?1 AND status = 'confirmed'),
+            (SELECT count(*) FROM hypotheses WHERE session_id = ?1 AND status = 'refuted')",
+        rusqlite::params![session_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    ).map_err(|e| Error::Db(e.to_string()))?;
 
     if host_count == 0 && hyp_total == 0 {
         return Ok(Some(SkillMatch {
@@ -91,10 +63,45 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
     Ok(None)
 }
 
+pub fn load_skill_prompt(skill_name: &str, workspace: Option<&Path>) -> Result<String, Error> {
+    if let Some(home) = dirs::home_dir() {
+        let installed = home.join(".redtrail/skills").join(skill_name).join("prompt.md");
+        if installed.exists() {
+            return std::fs::read_to_string(&installed).map_err(Error::Io);
+        }
+    }
+    if let Some(ws) = workspace {
+        let bundled = ws.join("skills").join(skill_name).join("prompt.md");
+        if bundled.exists() {
+            return std::fs::read_to_string(&bundled).map_err(Error::Io);
+        }
+    }
+    Err(Error::SkillNotFound(skill_name.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn test_load_skill_prompt_from_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skills/redtrail-recon");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("prompt.md"), "# Recon skill prompt").unwrap();
+        let result = load_skill_prompt("redtrail-recon", Some(tmp.path())).unwrap();
+        assert_eq!(result, "# Recon skill prompt");
+    }
+
+    #[test]
+    fn test_load_skill_prompt_not_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_skill_prompt("nonexistent-skill", Some(tmp.path()));
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("nonexistent-skill"));
+    }
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -183,6 +190,74 @@ mod tests {
         ).unwrap();
         let result = detect_phase(&conn, "s1").unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_prompt_with_skill_replaces_identity() {
+        let conn = setup_db();
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skills/redtrail-recon");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("prompt.md"), "# Recon skill\nYou are the recon advisor.").unwrap();
+
+        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+
+        assert!(prompt.contains("Recon skill"), "should contain skill content");
+        assert!(prompt.contains("Active skill: redtrail-recon"), "should have skill header");
+        assert!(!prompt.contains("You are Redtrail, a pentesting advisor"), "should NOT contain generic identity");
+    }
+
+    #[test]
+    fn test_build_prompt_no_skill_uses_generic() {
+        let conn = setup_db();
+        let tmp = tempfile::tempdir().unwrap();
+
+        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, true).unwrap();
+
+        assert!(prompt.contains("You are Redtrail, a pentesting advisor"), "should contain generic identity");
+        assert!(!prompt.contains("Active skill:"), "should NOT have skill header");
+    }
+
+    #[test]
+    fn test_build_prompt_skill_override() {
+        let conn = setup_db();
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skills/redtrail-hypothesize");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("prompt.md"), "# Hypothesize\nGenerate hypotheses.").unwrap();
+
+        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), Some("redtrail-hypothesize"), false).unwrap();
+
+        assert!(prompt.contains("Active skill: redtrail-hypothesize"), "should load overridden skill");
+        assert!(prompt.contains("Generate hypotheses"), "should contain override skill content");
+    }
+
+    #[test]
+    fn test_build_prompt_missing_skill_falls_back_to_generic() {
+        let conn = setup_db();
+        let tmp = tempfile::tempdir().unwrap();
+
+        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+
+        assert!(prompt.contains("You are Redtrail, a pentesting advisor"), "should fallback to generic");
+    }
+
+    #[test]
+    fn test_build_prompt_kb_dump_follows_skill() {
+        let conn = setup_db();
+        conn.execute("INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.10.10.1')", []).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skills/redtrail-hypothesize");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("prompt.md"), "# Hypothesize").unwrap();
+
+        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+
+        assert!(prompt.contains("=== Hosts ==="), "should contain KB dump");
+        assert!(prompt.contains("10.10.10.1"), "should contain host data");
+        let skill_pos = prompt.find("Hypothesize").unwrap();
+        let kb_pos = prompt.find("=== Hosts ===").unwrap();
+        assert!(skill_pos < kb_pos, "skill content should precede KB dump");
     }
 
     #[test]

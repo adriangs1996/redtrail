@@ -231,7 +231,7 @@ fn execute_command(command: &str, cwd: &Path) -> Result<String, Error> {
     Ok(result)
 }
 
-fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Path, skill_override: Option<&str>, no_skill: bool) -> Result<String, Error> {
+pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Path, skill_override: Option<&str>, no_skill: bool) -> Result<String, Error> {
     let skill_content: Option<(String, String)> = if no_skill {
         None
     } else if let Some(name) = skill_override {

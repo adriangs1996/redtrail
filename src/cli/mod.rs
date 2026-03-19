@@ -1,4 +1,4 @@
-mod ask;
+pub(crate) mod ask;
 mod init;
 pub mod kb;
 pub mod status;
@@ -119,6 +119,10 @@ enum Commands {
         clear: bool,
         #[arg(long, help = "Override LLM model for this request")]
         model: Option<String>,
+        #[arg(long, help = "Override auto-detected skill (e.g. redtrail-recon)")]
+        skill: Option<String>,
+        #[arg(long, help = "Suppress skill auto-detection")]
+        no_skill: bool,
     },
     #[command(about = "One-shot LLM query with session context (no history)", visible_alias = "q")]
     Query {
@@ -126,6 +130,10 @@ enum Commands {
         message: String,
         #[arg(long, help = "Override LLM model for this request")]
         model: Option<String>,
+        #[arg(long, help = "Override auto-detected skill (e.g. redtrail-recon)")]
+        skill: Option<String>,
+        #[arg(long, help = "Suppress skill auto-detection")]
+        no_skill: bool,
     },
     #[command(about = "Run SQL against the redtrail database")]
     Sql {
@@ -227,11 +235,11 @@ pub fn run() -> Result<(), Error> {
         Some(Commands::Skill { command }) => {
             skill::run(command)
         }
-        Some(Commands::Ask { message, clear, model }) => {
-            ask::run(message.as_deref(), true, clear, model.as_deref())
+        Some(Commands::Ask { message, clear, model, skill, no_skill }) => {
+            ask::run(message.as_deref(), true, clear, model.as_deref(), skill.as_deref(), no_skill)
         }
-        Some(Commands::Query { message, model }) => {
-            ask::run(Some(&message), false, false, model.as_deref())
+        Some(Commands::Query { message, model, skill, no_skill }) => {
+            ask::run(Some(&message), false, false, model.as_deref(), skill.as_deref(), no_skill)
         }
         Some(Commands::Sql { sql, file, json }) => {
             match (sql, file) {

@@ -15,7 +15,7 @@ instead of phase-specific methodology guidance.
 | Phase detection location | Rust-side (deterministic, zero latency) |
 | Orchestrator prompt.md | Untouched — stays authoritative for external agents |
 | Skill scope per request | Single matched skill only (no orchestrator prepended) |
-| ask vs query behavior | Both load skills identically, every call |
+| ask vs query behavior | Both load skills identically, every call (query remains stateless) |
 | Skill placement in prompt | Replaces generic identity block when active |
 
 ## New Module: `src/skill_loader.rs`
@@ -40,12 +40,14 @@ Rules applied in order (first match wins):
 | 2 | hosts>0 AND hypotheses=0 | Surface Mapped | redtrail-hypothesize | "{n} hosts, no hypotheses" |
 | 3 | any hypothesis pending | Hypotheses Pending | redtrail-probe | "{n} pending" |
 | 4 | any confirmed, none pending | Confirmed Available | redtrail-exploit | "{n} confirmed" |
-| 5 | goal status = achieved | Objective Met | redtrail-report | "goal achieved" |
-| 6 | all refuted, none confirmed | Surface Exhausted | redtrail-recon | "all {n} refuted, widening" |
+| 5 | pending=0 AND confirmed=0 AND refuted>0 | Surface Exhausted | redtrail-recon | "all {n} refuted, widening" |
 
-Rule 5 from the orchestrator prompt (new credentials trigger reassessment) is
-deferred — it requires tracking previous credential count across invocations,
-which the current schema doesn't support.
+Deferred rules (require schema changes):
+- **Objective Met** (goal achieved → redtrail-report): No `goal_status` column
+  exists in the sessions table. Requires adding a `goal_status TEXT DEFAULT 'active'`
+  column or inferring from flags count. Deferred to a follow-up migration.
+- **New Credentials** (credential count increased → redtrail-hypothesize): Requires
+  tracking previous credential count across invocations.
 
 If no rule matches (e.g., no session data at all), returns `None` and the
 generic identity is used as fallback.
@@ -59,10 +61,10 @@ pub fn load_skill_prompt(skill_name: &str) -> Result<String, Error>
 Resolution order:
 1. `~/.redtrail/skills/<name>/prompt.md` — installed skills (user overrides)
 2. `<workspace>/skills/<name>/prompt.md` — bundled skills (fallback)
-3. `<binary_dir>/skills/<name>/prompt.md` — shipped with binary (final fallback)
 
-Returns the raw markdown content of `prompt.md`. Returns `Error` if skill not
-found in any location.
+Returns the raw markdown content of `prompt.md`. Returns
+`Error::SkillNotFound(name)` with message "skill '{name}' not found in
+~/.redtrail/skills/ or workspace skills/" if not found in any location.
 
 ## Changes to `src/cli/ask.rs`
 
@@ -71,11 +73,14 @@ found in any location.
 Both `Ask` and `Query` commands gain:
 
 ```
---skill <name>    Override auto-detected skill (e.g. --skill redtrail-recon)
+--skill <name>      Override auto-detected skill (e.g. --skill redtrail-recon)
+--no-skill          Suppress skill auto-detection, use generic advisor prompt
 ```
 
 When `--skill` is provided, it bypasses `detect_phase()` entirely and loads the
 named skill directly. No phase guard — the operator knows better.
+
+When `--no-skill` is provided, no skill is loaded regardless of phase state.
 
 ### Modified `build_system_prompt()`
 
@@ -99,15 +104,13 @@ Logic:
 
 ```
 // When skill is active:
-Phase: {phase_name} — skill: {skill_name}
-{context}
+Active skill: {skill_name} ({phase_name} — {context})
 ---
 {skill prompt.md content}
 ---
 Target: {target}
 Scope: {scope}
 Goal: {goal}
-Phase: {phase}
 Noise budget: {noise}
 CWD: {cwd}
 
@@ -179,9 +182,8 @@ When `--skill` override is used:
 - `test_detect_phase_surface_mapped` — hosts exist, no hypotheses → redtrail-hypothesize
 - `test_detect_phase_pending` — pending hypotheses → redtrail-probe
 - `test_detect_phase_confirmed` — confirmed, no pending → redtrail-exploit
-- `test_detect_phase_objective_met` — goal achieved → redtrail-report
-- `test_detect_phase_all_refuted` — all refuted → redtrail-recon (widen)
-- `test_detect_phase_no_match` — returns None on empty session
+- `test_detect_phase_all_refuted` — pending=0, confirmed=0, refuted>0 → redtrail-recon (widen)
+- `test_detect_phase_no_match` — returns None when no rules match
 - `test_load_skill_prompt_bundled` — loads from workspace/skills/
 - `test_load_skill_prompt_not_found` — returns error for nonexistent skill
 
@@ -189,5 +191,7 @@ When `--skill` override is used:
 
 - `test_ask_auto_loads_skill` — verify system prompt contains skill content
 - `test_ask_skill_override` — `--skill` flag loads specified skill
+- `test_ask_no_skill` — `--no-skill` flag suppresses auto-detection
 - `test_query_loads_skill` — query command gets skill in system prompt
 - `test_fallback_generic_identity` — no skill match → generic prompt
+- `test_skill_not_found_error` — `--skill nonexistent` returns clear error message

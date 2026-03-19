@@ -5,12 +5,18 @@ use crate::workspace;
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
+    #[command(about = "Display the resolved configuration as TOML")]
     List,
+    #[command(about = "Get a config value by dot-notation key (e.g. general.autonomy)")]
     Get {
+        #[arg(help = "Dot-notation key (e.g. general.autonomy, tools.aliases)")]
         key: String,
     },
+    #[command(about = "Set a config value (auto-detects int, float, bool, or string)")]
     Set {
+        #[arg(help = "Dot-notation key")]
         key: String,
+        #[arg(help = "Value to set")]
         value: String,
     },
 }

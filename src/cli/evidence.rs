@@ -4,24 +4,27 @@ use crate::error::Error;
 
 #[derive(Subcommand)]
 pub enum EvidenceCommands {
+    #[command(about = "Record a new finding or piece of evidence")]
     Add {
-        #[arg(long)]
+        #[arg(long, help = "Description of the finding")]
         finding: String,
-        #[arg(long)]
+        #[arg(long, help = "Link to a hypothesis ID")]
         hypothesis: Option<i64>,
-        #[arg(long, default_value = "info")]
+        #[arg(long, default_value = "info", help = "Severity: info, low, medium, high, critical")]
         severity: String,
-        #[arg(long)]
+        #[arg(long, help = "Proof of concept command or payload")]
         poc: Option<String>,
     },
+    #[command(about = "List evidence, optionally filtered by hypothesis")]
     List {
-        #[arg(long)]
+        #[arg(long, help = "Filter by hypothesis ID")]
         hypothesis: Option<i64>,
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Export all evidence grouped by hypothesis")]
     Export {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
 }

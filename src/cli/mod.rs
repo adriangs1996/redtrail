@@ -1,3 +1,4 @@
+mod ask;
 mod init;
 pub mod kb;
 pub mod status;
@@ -12,6 +13,7 @@ pub mod setup;
 pub mod ingest;
 pub mod report;
 pub mod skill;
+pub mod sql;
 
 use clap::{Parser, Subcommand};
 use crate::db::SessionOps;
@@ -19,7 +21,17 @@ use crate::error::Error;
 use crate::workspace;
 
 #[derive(Parser)]
-#[command(name = "rt", about = "Redtrail — pentesting workspace manager")]
+#[command(
+    name = "rt",
+    about = "Redtrail — pentesting workspace manager",
+    long_about = "Redtrail — pentesting workspace manager\n\n\
+        Orchestrates pentesting workflows with a knowledge base, hypothesis tracking,\n\
+        evidence collection, and tool integration. Any unrecognized command is proxied\n\
+        to the shell with automatic output capture and extraction.\n\n\
+        Quick start:\n  rt init --target 10.10.10.1\n  eval \"$(rt env)\"\n  nmap -sV 10.10.10.1",
+    after_help = "Any command not listed above is proxied to your shell and logged.\n\
+        Use `rt -- <cmd>` to force proxy mode."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -27,61 +39,102 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Initialize a new workspace in the current directory")]
     Init {
-        #[arg(long)]
+        #[arg(long, help = "Primary target IP or hostname")]
         target: Option<String>,
-        #[arg(long, default_value = "general")]
+        #[arg(long, default_value = "general", help = "Assessment goal (e.g. general, ctf, webapp)")]
         goal: String,
-        #[arg(long)]
+        #[arg(long, help = "CIDR scope restriction (e.g. 10.10.10.0/24)")]
         scope: Option<String>,
     },
+    #[command(about = "Query and manage the knowledge base (hosts, ports, creds, flags, notes)")]
     Kb {
         #[command(subcommand)]
         command: kb::KbCommands,
     },
+    #[command(about = "Show session metrics: hosts, ports, creds, flags, hypotheses", visible_alias = "st")]
     Status {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Track and manage attack hypotheses", visible_alias = "theory")]
     Hypothesis {
         #[command(subcommand)]
         command: hypothesis::HypothesisCommands,
     },
+    #[command(about = "Record and manage evidence and findings", visible_alias = "ev")]
     Evidence {
         #[command(subcommand)]
         command: evidence::EvidenceCommands,
     },
+    #[command(about = "Manage workspace sessions", visible_alias = "sess")]
     Session {
         #[command(subcommand)]
         command: session::SessionCommands,
     },
+    #[command(about = "Check whether an IP is within the defined scope")]
     Scope {
         #[command(subcommand)]
         command: scope::ScopeCommands,
     },
+    #[command(about = "View and modify configuration (global and workspace)", visible_alias = "conf")]
     Config {
         #[command(subcommand)]
         command: config_cmd::ConfigCommands,
     },
+    #[command(about = "Run the interactive setup wizard or manage tool aliases")]
     Setup {
         #[command(subcommand)]
         command: Option<setup::SetupCommands>,
     },
+    #[command(about = "Import tool output files into the knowledge base", visible_alias = "eat")]
     Ingest {
+        #[arg(help = "Path to tool output file (nmap, gobuster, nuclei, nikto, feroxbuster)")]
         file: String,
-        #[arg(long)]
+        #[arg(long, help = "Override auto-detected tool name")]
         tool: Option<String>,
     },
+    #[command(about = "Generate a penetration test report from session data", visible_alias = "rep")]
     Report {
         #[command(subcommand)]
         command: report::ReportCommands,
     },
+    #[command(about = "Pipeline management (deferred to v2)")]
     Pipeline,
+    #[command(about = "Print shell commands to activate the redtrail environment")]
     Env,
+    #[command(about = "Print shell commands to deactivate the redtrail environment", visible_alias = "deact")]
     Deactivate,
+    #[command(about = "Manage redtrail skills (create, test, install, remove)")]
     Skill {
         #[command(subcommand)]
         command: skill::SkillCommands,
+    },
+    #[command(about = "Ask the LLM with full session context and conversation history")]
+    Ask {
+        #[arg(help = "Your question or instruction")]
+        message: Option<String>,
+        #[arg(long, help = "Clear conversation history and exit")]
+        clear: bool,
+        #[arg(long, help = "Override LLM model for this request")]
+        model: Option<String>,
+    },
+    #[command(about = "One-shot LLM query with session context (no history)", visible_alias = "q")]
+    Query {
+        #[arg(help = "Your question")]
+        message: String,
+        #[arg(long, help = "Override LLM model for this request")]
+        model: Option<String>,
+    },
+    #[command(about = "Run SQL against the redtrail database")]
+    Sql {
+        #[arg(help = "SQL statement to execute")]
+        sql: Option<String>,
+        #[arg(long, help = "Read SQL from file instead")]
+        file: Option<String>,
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
     },
 }
 
@@ -97,6 +150,8 @@ fn resolve_session() -> Result<(impl crate::db::KnowledgeBase + crate::db::Hypot
 const KNOWN_SUBCOMMANDS: &[&str] = &[
     "init", "kb", "status", "hypothesis", "evidence",
     "session", "scope", "config", "setup", "ingest", "report", "pipeline", "env", "deactivate", "skill",
+    "ask", "query", "sql",
+    "st", "theory", "ev", "sess", "conf", "eat", "rep", "deact", "q",
     "help", "--help", "-h", "--version", "-V",
 ];
 
@@ -171,6 +226,19 @@ pub fn run() -> Result<(), Error> {
         }
         Some(Commands::Skill { command }) => {
             skill::run(command)
+        }
+        Some(Commands::Ask { message, clear, model }) => {
+            ask::run(message.as_deref(), true, clear, model.as_deref())
+        }
+        Some(Commands::Query { message, model }) => {
+            ask::run(Some(&message), false, false, model.as_deref())
+        }
+        Some(Commands::Sql { sql, file, json }) => {
+            match (sql, file) {
+                (_, Some(path)) => sql::run_file(&path, json),
+                (Some(query), _) => sql::run(&query, json),
+                (None, None) => Err(Error::Config("provide SQL or --file".into())),
+            }
         }
         None => {
             println!("rt: redtrail. Use --help for usage.");

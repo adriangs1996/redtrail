@@ -11,20 +11,22 @@ const KNOWN_TOOLS: &[&str] = &[
 
 #[derive(Subcommand)]
 pub enum SetupCommands {
+    #[command(about = "Show current setup status (installed tools, config path, autonomy mode)")]
     Status {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Manage tool aliases that get proxied through rt")]
     Aliases(AliasesArgs),
 }
 
 #[derive(Args)]
 pub struct AliasesArgs {
-    #[arg(long)]
+    #[arg(long, help = "Add a tool alias (e.g. nmap, gobuster)")]
     pub add: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Remove a tool alias")]
     pub remove: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "List all configured aliases")]
     pub list: bool,
 }
 

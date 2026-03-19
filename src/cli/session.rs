@@ -5,16 +5,19 @@ use crate::workspace;
 
 #[derive(Subcommand)]
 pub enum SessionCommands {
+    #[command(about = "List all sessions in the workspace")]
     List {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Show details of the active session")]
     Active {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Export full session data (hosts, ports, creds, flags, notes)")]
     Export {
-        #[arg(long, default_value = "json")]
+        #[arg(long, default_value = "json", help = "Output format")]
         format: String,
     },
 }

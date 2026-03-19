@@ -5,11 +5,28 @@ use std::path::Path;
 
 #[derive(Subcommand)]
 pub enum SkillCommands {
-    Init { name: String },
-    Test { path: String },
+    #[command(about = "Scaffold a new skill directory with skill.toml and prompt.md")]
+    Init {
+        #[arg(help = "Skill name (becomes the directory name)")]
+        name: String,
+    },
+    #[command(about = "Validate a skill's structure and required fields")]
+    Test {
+        #[arg(help = "Path to skill directory")]
+        path: String,
+    },
+    #[command(about = "List all installed skills")]
     List,
-    Install { path: String },
-    Remove { name: String },
+    #[command(about = "Install a skill from a local directory into ~/.redtrail/skills/")]
+    Install {
+        #[arg(help = "Path to skill directory to install")]
+        path: String,
+    },
+    #[command(about = "Remove an installed skill by name")]
+    Remove {
+        #[arg(help = "Name of the skill to remove")]
+        name: String,
+    },
 }
 
 pub fn run(cmd: SkillCommands) -> Result<(), Error> {

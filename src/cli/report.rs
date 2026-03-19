@@ -4,10 +4,11 @@ use crate::error::Error;
 
 #[derive(Subcommand)]
 pub enum ReportCommands {
+    #[command(about = "Generate a full pentest report (findings, hosts, timeline, methodology)")]
     Generate {
-        #[arg(long, default_value = "md")]
+        #[arg(long, default_value = "md", help = "Output format (md)")]
         format: String,
-        #[arg(long)]
+        #[arg(long, help = "Write to file instead of stdout")]
         output: Option<String>,
     },
 }

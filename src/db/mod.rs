@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod commands;
 pub mod hypothesis;
 pub mod kb;
@@ -115,6 +116,14 @@ CREATE TABLE IF NOT EXISTS notes (
     text TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 ";
 
 pub trait KnowledgeBase {
@@ -181,6 +190,14 @@ pub fn open(path: &str) -> Result<impl KnowledgeBase + Hypotheses + CommandLog +
     let db = SqliteDb { conn };
     db.init()?;
     Ok(db)
+}
+
+pub fn open_connection(path: &str) -> Result<Connection, Error> {
+    let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;").map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA foreign_keys=ON;").map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch(SCHEMA).map_err(|e| Error::Db(e.to_string()))?;
+    Ok(conn)
 }
 
 #[cfg(test)]

@@ -5,7 +5,9 @@ use crate::net;
 
 #[derive(Subcommand)]
 pub enum ScopeCommands {
+    #[command(about = "Check if an IP is within the session's defined scope (exit 0 = in, exit 1 = out)")]
     Check {
+        #[arg(help = "IP address to check")]
         ip: String,
     },
 }

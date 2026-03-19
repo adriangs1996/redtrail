@@ -4,91 +4,117 @@ use crate::error::Error;
 
 #[derive(Subcommand)]
 pub enum KbCommands {
+    #[command(about = "List discovered hosts")]
     Hosts {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
-        #[arg(long)]
+        #[arg(long, help = "Filter by IP address")]
         host: Option<String>,
     },
+    #[command(about = "List discovered ports")]
     Ports {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
-        #[arg(long)]
+        #[arg(long, help = "Filter by host IP")]
         host: Option<String>,
     },
+    #[command(about = "List harvested credentials")]
     Creds {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "List captured flags")]
     Flags {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "List access entries (shells, sessions, privilege levels)")]
     Access {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "List operator notes")]
     Notes {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "List command execution history")]
     History {
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "50", help = "Max number of entries to show")]
         limit: usize,
     },
+    #[command(about = "Full-text search across the knowledge base")]
     Search {
+        #[arg(help = "Search query string")]
         query: String,
-        #[arg(long)]
+        #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "Register a new host in the knowledge base")]
     AddHost {
+        #[arg(help = "IP address of the host")]
         ip: String,
-        #[arg(long)]
+        #[arg(long, help = "Operating system (e.g. Linux, Windows)")]
         os: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Hostname or FQDN")]
         hostname: Option<String>,
     },
+    #[command(about = "Register a new port on a host")]
     AddPort {
+        #[arg(help = "Host IP address")]
         ip: String,
+        #[arg(help = "Port number")]
         port: i64,
-        #[arg(long)]
+        #[arg(long, help = "Protocol: tcp or udp")]
         protocol: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Service name (e.g. http, ssh, smb)")]
         service: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Service version string")]
         version: Option<String>,
     },
+    #[command(about = "Store a discovered credential")]
     AddCred {
+        #[arg(help = "Username")]
         username: String,
-        #[arg(long)]
+        #[arg(long, help = "Cleartext password")]
         pass: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Password hash")]
         hash: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Service the credential belongs to")]
         service: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Host where the credential was found")]
         host: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "How the credential was obtained")]
         source: Option<String>,
     },
+    #[command(about = "Record a captured flag")]
     AddFlag {
+        #[arg(help = "Flag value")]
         value: String,
-        #[arg(long)]
+        #[arg(long, help = "Where the flag was found")]
         source: Option<String>,
     },
+    #[command(about = "Record an access level obtained on a host")]
     AddAccess {
+        #[arg(help = "Target host IP")]
         host: String,
+        #[arg(help = "Username with access")]
         user: String,
+        #[arg(help = "Access level (e.g. user, root, admin)")]
         level: String,
-        #[arg(long)]
+        #[arg(long, help = "Access method (e.g. ssh, rdp, web-shell)")]
         method: Option<String>,
     },
+    #[command(about = "Add a free-form operator note")]
     AddNote {
+        #[arg(help = "Note text")]
         text: String,
     },
+    #[command(about = "Extract structured data from a logged command's output")]
     Extract {
+        #[arg(help = "Command history ID (from `rt kb history`)")]
         id: i64,
     },
 }

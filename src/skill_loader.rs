@@ -63,6 +63,17 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
     Ok(None)
 }
 
+fn bundled_prompt(skill_name: &str) -> Option<&'static str> {
+    match skill_name {
+        "redtrail-recon" => Some(include_str!("../skills/redtrail-recon/prompt.md")),
+        "redtrail-hypothesize" => Some(include_str!("../skills/redtrail-hypothesize/prompt.md")),
+        "redtrail-probe" => Some(include_str!("../skills/redtrail-probe/prompt.md")),
+        "redtrail-exploit" => Some(include_str!("../skills/redtrail-exploit/prompt.md")),
+        "redtrail-report" => Some(include_str!("../skills/redtrail-report/prompt.md")),
+        _ => None,
+    }
+}
+
 pub fn load_skill_prompt(skill_name: &str, workspace: Option<&Path>) -> Result<String, Error> {
     if let Some(home) = dirs::home_dir() {
         let installed = home.join(".redtrail/skills").join(skill_name).join("prompt.md");
@@ -71,10 +82,13 @@ pub fn load_skill_prompt(skill_name: &str, workspace: Option<&Path>) -> Result<S
         }
     }
     if let Some(ws) = workspace {
-        let bundled = ws.join("skills").join(skill_name).join("prompt.md");
-        if bundled.exists() {
-            return std::fs::read_to_string(&bundled).map_err(Error::Io);
+        let ws_skill = ws.join("skills").join(skill_name).join("prompt.md");
+        if ws_skill.exists() {
+            return std::fs::read_to_string(&ws_skill).map_err(Error::Io);
         }
+    }
+    if let Some(prompt) = bundled_prompt(skill_name) {
+        return Ok(prompt.to_string());
     }
     Err(Error::SkillNotFound(skill_name.to_string()))
 }
@@ -233,13 +247,32 @@ mod tests {
     }
 
     #[test]
-    fn test_build_prompt_missing_skill_falls_back_to_generic() {
+    fn test_build_prompt_uses_bundled_skill_without_workspace_files() {
         let conn = setup_db();
         let tmp = tempfile::tempdir().unwrap();
 
         let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
-        assert!(prompt.contains("You are Redtrail, a pentesting advisor"), "should fallback to generic");
+        assert!(prompt.contains("Active skill: redtrail-recon"), "should load bundled skill");
+        assert!(prompt.contains("L0 Modeling"), "should contain bundled recon content");
+        assert!(!prompt.contains("You are Redtrail, a pentesting advisor"), "should NOT use generic");
+    }
+
+    #[test]
+    fn test_load_skill_prompt_bundled_fallback() {
+        let result = load_skill_prompt("redtrail-recon", None).unwrap();
+        assert!(result.contains("L0 Modeling"), "bundled recon skill should contain L0 Modeling");
+    }
+
+    #[test]
+    fn test_load_skill_prompt_workspace_overrides_bundled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skills/redtrail-recon");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("prompt.md"), "# Custom recon override").unwrap();
+
+        let result = load_skill_prompt("redtrail-recon", Some(tmp.path())).unwrap();
+        assert_eq!(result, "# Custom recon override", "workspace should override bundled");
     }
 
     #[test]

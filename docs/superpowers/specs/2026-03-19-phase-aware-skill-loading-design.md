@@ -174,24 +174,58 @@ When `--skill` override is used:
 | `src/cli/mod.rs` | Modified — add `--skill` arg to Ask and Query variants |
 | `src/main.rs` or `src/lib.rs` | Modified — `mod skill_loader;` |
 
-## Testing Strategy
+## Testing Strategy (TDD — Red-Green-Refactor)
 
-### Unit Tests (`src/skill_loader.rs`)
+Tests are written as vertical slices: one test → one implementation → repeat.
+Each test verifies behavior through public interfaces (`detect_phase()`,
+`load_skill_prompt()`, `build_system_prompt()`), not implementation details.
+Tests should survive internal refactors.
 
-- `test_detect_phase_setup` — empty KB returns redtrail-recon
-- `test_detect_phase_surface_mapped` — hosts exist, no hypotheses → redtrail-hypothesize
-- `test_detect_phase_pending` — pending hypotheses → redtrail-probe
-- `test_detect_phase_confirmed` — confirmed, no pending → redtrail-exploit
-- `test_detect_phase_all_refuted` — pending=0, confirmed=0, refuted>0 → redtrail-recon (widen)
-- `test_detect_phase_no_match` — returns None when no rules match
-- `test_load_skill_prompt_bundled` — loads from workspace/skills/
-- `test_load_skill_prompt_not_found` — returns error for nonexistent skill
+### Tracer Bullet
 
-### Integration Tests
+Start with the simplest end-to-end path:
 
-- `test_ask_auto_loads_skill` — verify system prompt contains skill content
-- `test_ask_skill_override` — `--skill` flag loads specified skill
-- `test_ask_no_skill` — `--no-skill` flag suppresses auto-detection
-- `test_query_loads_skill` — query command gets skill in system prompt
-- `test_fallback_generic_identity` — no skill match → generic prompt
-- `test_skill_not_found_error` — `--skill nonexistent` returns clear error message
+1. **RED**: `detect_phase()` with empty KB returns `SkillMatch { skill_name: "redtrail-recon" }`
+2. **GREEN**: implement the first rule only
+
+This proves the DB query → rule evaluation → SkillMatch path works.
+
+### Incremental Behaviors (one cycle each, in order)
+
+Each behavior is a RED→GREEN cycle. Order follows dependency chain.
+
+**Phase detection behaviors** (test through `detect_phase()` public API):
+
+1. Empty KB (hosts=0, hypotheses=0) → redtrail-recon
+2. Hosts exist, no hypotheses → redtrail-hypothesize
+3. Pending hypotheses exist → redtrail-probe
+4. Confirmed hypotheses, none pending → redtrail-exploit
+5. All refuted (pending=0, confirmed=0, refuted>0) → redtrail-recon (widen)
+6. No rules match → returns None
+
+**Skill loading behaviors** (test through `load_skill_prompt()` public API):
+
+7. Loads prompt.md from workspace skills directory
+8. Loads from ~/.redtrail/skills/ when installed (takes precedence over workspace)
+9. Returns `Error::SkillNotFound` with clear message for nonexistent skill
+
+**System prompt integration behaviors** (test through `build_system_prompt()`):
+
+10. Auto-detected skill replaces generic identity in system prompt
+11. `--skill` override loads specified skill regardless of phase
+12. `--no-skill` produces generic identity prompt
+13. No skill match falls back to generic identity
+14. Skill prompt is followed by KB dump (hosts, hypotheses, etc.)
+
+### Refactor
+
+After all behaviors pass, look for:
+- Duplication between detection rules
+- Whether `build_system_prompt()` can be simplified
+- Whether skill resolution logic should be extracted
+
+### What NOT to test
+
+- Internal helper functions (test through public API)
+- Exact prompt string formatting (test that skill content is present, not exact layout)
+- API call behavior (unchanged, already covered by existing tests)

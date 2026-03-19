@@ -7,7 +7,7 @@ pub mod session;
 use crate::error::Error;
 use rusqlite::Connection;
 
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,

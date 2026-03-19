@@ -5,6 +5,7 @@ mod error;
 mod extraction;
 mod net;
 mod pipeline;
+mod skill_loader;
 mod workspace;
 
 fn main() {

@@ -4,12 +4,13 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::db;
 use crate::error::Error;
+use crate::skill_loader;
 use crate::workspace;
 
 const MAX_TOOL_ROUNDS: usize = 20;
 const MAX_OUTPUT_CHARS: usize = 12000;
 
-pub fn run(message: Option<&str>, keep_history: bool, clear: bool, model_override: Option<&str>) -> Result<(), Error> {
+pub fn run(message: Option<&str>, keep_history: bool, clear: bool, model_override: Option<&str>, skill_override: Option<&str>, no_skill: bool) -> Result<(), Error> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
     let db_path = workspace::db_path(&ws);
@@ -26,7 +27,7 @@ pub fn run(message: Option<&str>, keep_history: bool, clear: bool, model_overrid
     let message = message.ok_or(Error::Config("no message provided".into()))?;
     let config = Config::resolved(&ws)?;
     let model = model_override.unwrap_or(&config.general.llm_model);
-    let system = build_system_prompt(&conn, &session_id, &cwd)?;
+    let system = build_system_prompt(&conn, &session_id, &cwd, skill_override, no_skill)?;
 
     let mut messages: Vec<Value> = if keep_history {
         db::chat::load(&conn, &session_id)?
@@ -230,7 +231,31 @@ fn execute_command(command: &str, cwd: &Path) -> Result<String, Error> {
     Ok(result)
 }
 
-fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Path) -> Result<String, Error> {
+fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Path, skill_override: Option<&str>, no_skill: bool) -> Result<String, Error> {
+    let skill_content: Option<(String, String)> = if no_skill {
+        None
+    } else if let Some(name) = skill_override {
+        let prompt = skill_loader::load_skill_prompt(name, Some(cwd))?;
+        eprintln!("[skill] loading {name} (manual override)");
+        Some((name.to_string(), prompt))
+    } else {
+        match skill_loader::detect_phase(conn, session_id)? {
+            Some(m) => {
+                match skill_loader::load_skill_prompt(&m.skill_name, Some(cwd)) {
+                    Ok(prompt) => {
+                        eprintln!("[phase] {} ({}) — loading {}", m.phase_name, m.context, m.skill_name);
+                        Some((m.skill_name, prompt))
+                    }
+                    Err(_) => {
+                        eprintln!("[phase] {} ({}) — skill {} not found, using generic", m.phase_name, m.context, m.skill_name);
+                        None
+                    }
+                }
+            }
+            None => None,
+        }
+    };
+
     let session = db::session::get_session(conn, session_id)?;
     let summary = db::session::status_summary(conn, session_id)?;
     let hosts = db::kb::list_hosts(conn, session_id)?;
@@ -248,10 +273,22 @@ fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Path) -> Resul
     let phase = summary["phase"].as_str().unwrap_or("L0");
     let noise = summary["noise_budget"].as_f64().unwrap_or(1.0);
 
-    let mut p = String::with_capacity(4096);
-    p.push_str("You are Redtrail, a pentesting advisor embedded in a workspace. You help the operator by analyzing data, suggesting next steps, running commands, and querying the knowledge base.\n\n");
-    p.push_str("Be concise and direct. Use pentesting terminology. When suggesting commands, prefer the tools already aliased in the workspace.\n\n");
-    p.push_str(&format!("Target: {target}\nScope: {scope}\nGoal: {goal}\nPhase: {phase}\nNoise budget: {noise:.2}\nCWD: {}\n\n", cwd.display()));
+    let mut p = String::with_capacity(8192);
+
+    if let Some((skill_name, skill_prompt)) = &skill_content {
+        p.push_str(&format!("Active skill: {skill_name}\n---\n"));
+        p.push_str(skill_prompt);
+        p.push_str("\n---\n\n");
+    } else {
+        p.push_str("You are Redtrail, a pentesting advisor embedded in a workspace. You help the operator by analyzing data, suggesting next steps, running commands, and querying the knowledge base.\n\n");
+        p.push_str("Be concise and direct. Use pentesting terminology. When suggesting commands, prefer the tools already aliased in the workspace.\n\n");
+    }
+
+    p.push_str(&format!("Target: {target}\nScope: {scope}\nGoal: {goal}\n"));
+    if skill_content.is_none() {
+        p.push_str(&format!("Phase: {phase}\n"));
+    }
+    p.push_str(&format!("Noise budget: {noise:.2}\nCWD: {}\n\n", cwd.display()));
 
     if !hosts.is_empty() {
         p.push_str("=== Hosts ===\n");

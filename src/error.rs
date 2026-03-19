@@ -7,6 +7,7 @@ pub enum Error {
     Io(std::io::Error),
     NoWorkspace,
     NoActiveSession,
+    SkillNotFound(String),
 }
 
 impl fmt::Display for Error {
@@ -17,6 +18,7 @@ impl fmt::Display for Error {
             Error::Io(e) => write!(f, "io error: {e}"),
             Error::NoWorkspace => write!(f, "no redtrail workspace found (run `rt init`)"),
             Error::NoActiveSession => write!(f, "no active session"),
+            Error::SkillNotFound(name) => write!(f, "skill '{name}' not found in ~/.redtrail/skills/ or workspace skills/"),
         }
     }
 }

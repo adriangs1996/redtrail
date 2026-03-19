@@ -2,8 +2,9 @@ use rusqlite::Connection;
 use crate::error::Error;
 
 pub struct SkillMatch {
+    pub phase_name: String,
     pub skill_name: String,
-    pub phase_label: String,
+    pub context: String,
 }
 
 pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillMatch>, Error> {
@@ -49,36 +50,41 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
 
     if host_count == 0 && hyp_total == 0 {
         return Ok(Some(SkillMatch {
-            skill_name: "redtrail-recon".to_string(),
-            phase_label: "Initial Recon".to_string(),
+            phase_name: "Setup".into(),
+            skill_name: "redtrail-recon".into(),
+            context: "no hosts discovered".into(),
         }));
     }
 
     if host_count > 0 && hyp_total == 0 {
         return Ok(Some(SkillMatch {
-            skill_name: "redtrail-hypothesize".to_string(),
-            phase_label: "Surface Mapped".to_string(),
+            phase_name: "Surface Mapped".into(),
+            skill_name: "redtrail-hypothesize".into(),
+            context: format!("{host_count} hosts, no hypotheses"),
         }));
     }
 
     if hyp_pending > 0 {
         return Ok(Some(SkillMatch {
-            skill_name: "redtrail-probe".to_string(),
-            phase_label: "Hypotheses Pending".to_string(),
+            phase_name: "Hypotheses Pending".into(),
+            skill_name: "redtrail-probe".into(),
+            context: format!("{hyp_pending} pending"),
         }));
     }
 
     if hyp_confirmed > 0 && hyp_pending == 0 {
         return Ok(Some(SkillMatch {
-            skill_name: "redtrail-exploit".to_string(),
-            phase_label: "Confirmed Available".to_string(),
+            phase_name: "Confirmed Available".into(),
+            skill_name: "redtrail-exploit".into(),
+            context: format!("{hyp_confirmed} confirmed"),
         }));
     }
 
     if hyp_pending == 0 && hyp_confirmed == 0 && hyp_refuted > 0 {
         return Ok(Some(SkillMatch {
-            skill_name: "redtrail-recon".to_string(),
-            phase_label: "Surface Exhausted".to_string(),
+            phase_name: "Surface Exhausted".into(),
+            skill_name: "redtrail-recon".into(),
+            context: format!("all {hyp_refuted} refuted, widening"),
         }));
     }
 
@@ -161,7 +167,7 @@ mod tests {
         ).unwrap();
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-recon");
-        assert_eq!(m.phase_label, "Surface Exhausted");
+        assert_eq!(m.phase_name, "Surface Exhausted");
     }
 
     #[test]
@@ -213,6 +219,6 @@ mod tests {
         ).unwrap();
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-recon");
-        assert_eq!(m.phase_label, "Surface Exhausted");
+        assert_eq!(m.phase_name, "Surface Exhausted");
     }
 }

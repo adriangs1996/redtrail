@@ -73,11 +73,12 @@
         "npm run build succeeds in docs-site/"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "dependsOn": [
         "US-003"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-005",
@@ -455,6 +456,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-20T11:51:11.219Z"
+    "updatedAt": "2026-03-20T11:51:59.610Z"
   }
 }

@@ -1,0 +1,65 @@
+services:
+  web01:
+    build: ./web01
+    container_name: complex-web01
+    ports:
+      - "8080:80"
+    networks:
+      - external
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  app01:
+    build: ./app01
+    container_name: complex-app01
+    networks:
+      - internal
+    restart: unless-stopped
+    depends_on:
+      db01:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  db01:
+    build: ./db01
+    container_name: complex-db01
+    networks:
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pr00t_TechPulse_S3cret"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  dc01:
+    build: ./dc01
+    container_name: complex-dc01
+    networks:
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "sshd"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  external:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true

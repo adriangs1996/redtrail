@@ -1,0 +1,11 @@
+services:
+  web01:
+    ports:
+      - "0:80"
+    restart: "no"
+  app01:
+    restart: "no"
+  db01:
+    restart: "no"
+  dc01:
+    restart: "no"

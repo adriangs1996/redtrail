@@ -38,6 +38,22 @@ pub enum KbCommands {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
+    #[command(about = "List discovered web paths and directories")]
+    Paths {
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+        #[arg(long, help = "Filter by host IP")]
+        host: Option<String>,
+    },
+    #[command(about = "List discovered vulnerabilities")]
+    Vulns {
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+        #[arg(long, help = "Filter by host IP")]
+        host: Option<String>,
+        #[arg(long, help = "Filter by severity (critical, high, medium, low, info)")]
+        severity: Option<String>,
+    },
     #[command(about = "List command execution history")]
     History {
         #[arg(long, help = "Output as JSON")]
@@ -249,6 +265,55 @@ pub fn run(
                         "[{}] {}",
                         r["created_at"].as_str().unwrap_or(""),
                         r["text"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+        KbCommands::Paths { json, host } => {
+            let rows = db.list_web_paths(session_id, host.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no paths");
+            } else {
+                println!(
+                    "{:<18} {:<6} {:<8} {:<30} {:<6} {:<8} TYPE",
+                    "IP", "PORT", "SCHEME", "PATH", "STATUS", "LENGTH"
+                );
+                for r in &rows {
+                    println!(
+                        "{:<18} {:<6} {:<8} {:<30} {:<6} {:<8} {}",
+                        r["ip"].as_str().unwrap_or(""),
+                        r["port"].as_i64().map(|p| p.to_string()).unwrap_or_default(),
+                        r["scheme"].as_str().unwrap_or("http"),
+                        r["path"].as_str().unwrap_or(""),
+                        r["status_code"].as_i64().map(|s| s.to_string()).unwrap_or("-".into()),
+                        r["content_length"].as_i64().map(|l| l.to_string()).unwrap_or("-".into()),
+                        r["content_type"].as_str().unwrap_or("-"),
+                    );
+                }
+            }
+        }
+        KbCommands::Vulns { json, host, severity } => {
+            let rows = db.list_vulns(session_id, host.as_deref(), severity.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+            } else if rows.is_empty() {
+                println!("no vulns");
+            } else {
+                println!(
+                    "{:<18} {:<6} {:<30} {:<10} {:<18} URL",
+                    "IP", "PORT", "NAME", "SEVERITY", "CVE"
+                );
+                for r in &rows {
+                    println!(
+                        "{:<18} {:<6} {:<30} {:<10} {:<18} {}",
+                        r["ip"].as_str().unwrap_or(""),
+                        r["port"].as_i64().map(|p| p.to_string()).unwrap_or_default(),
+                        r["name"].as_str().unwrap_or(""),
+                        r["severity"].as_str().unwrap_or("-"),
+                        r["cve"].as_str().unwrap_or("-"),
+                        r["url"].as_str().unwrap_or("-"),
                     );
                 }
             }

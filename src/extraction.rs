@@ -34,7 +34,10 @@ pub fn extract_sync(
     let tool_str = tool.as_deref().unwrap_or("unknown");
 
     let prompt = format!(
-        "You are a pentesting data extractor. Given command output, extract structured data.\n\nCommand: {command}\nTool: {tool_str}\n\nOutput:\n{truncated}\n\nReturn ONLY valid JSON:\n{{\"hosts\":[{{\"ip\":\"...\",\"hostname\":\"...\",\"os\":\"...\"}}],\"ports\":[{{\"ip\":\"...\",\"port\":22,\"protocol\":\"tcp\",\"service\":\"ssh\",\"version\":\"...\"}}],\"credentials\":[{{\"username\":\"...\",\"password\":\"...\",\"service\":\"...\",\"host\":\"...\"}}],\"flags\":[{{\"value\":\"...\",\"source\":\"...\"}}],\"access\":[{{\"host\":\"...\",\"user\":\"...\",\"level\":\"...\",\"method\":\"...\"}}],\"notes\":[\"...\"]}}\n\nEmpty arrays for categories with no data found."
+        "You are a pentesting data extractor. Given command output, extract structured data.\n\nCommand: {command}\nTool: {tool_str}\n\nOutput:\n{truncated}\n\nReturn ONLY valid JSON:\n{{\"hosts\":[{{\"ip\":\"...\",\"hostname\":\"...\",\"os\":\"...\"}}],\"ports\":[{{\"ip\":\"...\",\"port\":22,\"protocol\":\"tcp\",\"service\":\"ssh\",\"version\":\"...\"}}],\"credentials\":[{{\"username\":\"...\",\"password\":\"...\",\"service\":\"...\",\"host\":\"...\"}}],\"flags\":[{{\"value\":\"...\",\"source\":\"...\"}}],\"access\":[{{\"host\":\"...\",\"user\":\"...\",\"level\":\"...\",\"method\":\"...\"}}],\
+\"web_paths\":[{{\"ip\":\"...\",\"port\":80,\"scheme\":\"http\",\"path\":\"/admin\",\"status_code\":200,\"content_length\":1234,\"content_type\":\"text/html\",\"redirect_to\":\"\"}}],\
+\"vulns\":[{{\"ip\":\"...\",\"port\":80,\"name\":\"...\",\"severity\":\"high\",\"cve\":\"CVE-...\",\"url\":\"...\",\"detail\":\"...\"}}],\
+\"notes\":[\"...\"]}}\n\nEmpty arrays for categories with no data found."
     );
 
     let config = _config;
@@ -159,6 +162,65 @@ pub fn apply_extraction(
         }
     }
 
+    if let Some(web_paths) = v["web_paths"].as_array() {
+        for w in web_paths {
+            let ip = match w["ip"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let path = match w["path"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let port = w["port"].as_i64().unwrap_or(80);
+            let scheme = w["scheme"].as_str().unwrap_or("http");
+            let status_code = w["status_code"].as_i64();
+            let content_length = w["content_length"].as_i64();
+            let content_type = w["content_type"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let redirect_to = w["redirect_to"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            db.add_web_path(
+                session_id, ip, port, scheme, path,
+                status_code, content_length, content_type, redirect_to,
+                Some("llm-extraction"),
+            )?;
+        }
+    }
+
+    if let Some(vulns) = v["vulns"].as_array() {
+        for vl in vulns {
+            let ip = match vl["ip"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let name = match vl["name"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let port = vl["port"].as_i64().unwrap_or(0);
+            let severity = vl["severity"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let cve = vl["cve"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let url = vl["url"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let detail = vl["detail"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            db.add_vuln(
+                session_id, ip, port, name,
+                severity, cve, url, detail,
+                Some("llm-extraction"),
+            )?;
+        }
+    }
+
     if let Some(notes) = v["notes"].as_array() {
         for n in notes {
             let text = match n.as_str() {
@@ -258,5 +320,76 @@ mod tests {
         let creds = db.list_credentials("s1").unwrap();
         assert_eq!(creds.len(), 1);
         assert_eq!(creds[0]["username"], "admin");
+    }
+
+    #[test]
+    fn test_apply_extraction_web_paths() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+
+        let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[{"ip":"10.10.10.1","port":80,"scheme":"http","path":"/admin","status_code":200,"content_length":1234,"content_type":"text/html","redirect_to":""}],"vulns":[],"notes":[]}"#;
+        apply_extraction(&db, "s1", json).unwrap();
+
+        let paths = db.list_web_paths("s1", None).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0]["path"], "/admin");
+        assert_eq!(paths[0]["status_code"], 200);
+
+        let hosts = db.list_hosts("s1").unwrap();
+        assert_eq!(hosts.len(), 1, "web_path should auto-create host");
+    }
+
+    #[test]
+    fn test_apply_extraction_vulns() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+
+        let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[],"vulns":[{"ip":"10.10.10.1","port":80,"name":"Apache Path Traversal","severity":"high","cve":"CVE-2021-41773","url":"http://10.10.10.1/cgi-bin/..","detail":"traversal"}],"notes":[]}"#;
+        apply_extraction(&db, "s1", json).unwrap();
+
+        let vulns = db.list_vulns("s1", None, None).unwrap();
+        assert_eq!(vulns.len(), 1);
+        assert_eq!(vulns[0]["name"], "Apache Path Traversal");
+        assert_eq!(vulns[0]["cve"], "CVE-2021-41773");
+
+        let hosts = db.list_hosts("s1").unwrap();
+        assert_eq!(hosts.len(), 1, "vuln should auto-create host");
+    }
+
+    #[test]
+    fn test_apply_extraction_skips_invalid_web_path() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+
+        let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[{"ip":"","port":80,"path":"/admin"},{"ip":"10.10.10.1","port":80,"path":""}],"vulns":[],"notes":[]}"#;
+        apply_extraction(&db, "s1", json).unwrap();
+
+        let paths = db.list_web_paths("s1", None).unwrap();
+        assert_eq!(paths.len(), 0, "both invalid entries should be skipped");
+    }
+
+    #[test]
+    fn test_apply_extraction_skips_invalid_vuln() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+
+        let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[],"vulns":[{"ip":"...","port":80,"name":"XSS"},{"ip":"10.10.10.1","port":80,"name":""}],"notes":[]}"#;
+        apply_extraction(&db, "s1", json).unwrap();
+
+        let vulns = db.list_vulns("s1", None, None).unwrap();
+        assert_eq!(vulns.len(), 0, "both invalid entries should be skipped");
+    }
+
+    #[test]
+    fn test_apply_extraction_vuln_no_port_defaults_zero() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+
+        let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[],"vulns":[{"ip":"10.10.10.1","name":"Outdated OS","severity":"medium"}],"notes":[]}"#;
+        apply_extraction(&db, "s1", json).unwrap();
+
+        let vulns = db.list_vulns("s1", None, None).unwrap();
+        assert_eq!(vulns.len(), 1);
+        assert_eq!(vulns[0]["port"], 0);
     }
 }

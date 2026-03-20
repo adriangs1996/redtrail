@@ -1,0 +1,41 @@
+/* Catppuccin Mocha (dark) / Latte (light) theme for Starlight */
+
+/* Dark mode — Catppuccin Mocha */
+:root {
+	--sl-color-accent-low: #45243a;
+	--sl-color-accent: #f38ba8;
+	--sl-color-accent-high: #fcdce5;
+
+	--sl-color-white: #cdd6f4;
+	--sl-color-gray-1: #bac2de;
+	--sl-color-gray-2: #a6adc8;
+	--sl-color-gray-3: #6c7086;
+	--sl-color-gray-4: #45475a;
+	--sl-color-gray-5: #313244;
+	--sl-color-gray-6: #1e1e2e;
+	--sl-color-black: #11111b;
+
+	--sl-color-green-low: #1a3a27;
+	--sl-color-green: #a6e3a1;
+	--sl-color-green-high: #d5f5d3;
+}
+
+/* Light mode — Catppuccin Latte */
+:root[data-theme='light'] {
+	--sl-color-accent-low: #fcdce5;
+	--sl-color-accent: #d20f39;
+	--sl-color-accent-high: #5c0f1f;
+
+	--sl-color-white: #4c4f69;
+	--sl-color-gray-1: #5c5f77;
+	--sl-color-gray-2: #6c6f85;
+	--sl-color-gray-3: #9ca0b0;
+	--sl-color-gray-4: #bcc0cc;
+	--sl-color-gray-5: #ccd0da;
+	--sl-color-gray-6: #e6e9ef;
+	--sl-color-black: #eff1f5;
+
+	--sl-color-green-low: #d5f5d3;
+	--sl-color-green: #40a02b;
+	--sl-color-green-high: #1a3a1a;
+}

@@ -1,0 +1,186 @@
+---
+import TerminalFrame from './TerminalFrame.astro';
+
+interface Props {
+  locale: string;
+  tagline: string;
+  terminalTitle?: string;
+  quickStartLabel: string;
+  quickStartDesc: string;
+  methodologyLabel: string;
+  methodologyDesc: string;
+  tutorialLabel: string;
+  tutorialDesc: string;
+}
+
+const {
+  locale,
+  tagline,
+  terminalTitle = 'redtrail',
+  quickStartLabel,
+  quickStartDesc,
+  methodologyLabel,
+  methodologyDesc,
+  tutorialLabel,
+  tutorialDesc,
+} = Astro.props;
+
+const prefix = `/${locale}`;
+---
+
+<section class="hero">
+  <div class="hero-inner">
+    <h1 class="hero-logo">redtrail</h1>
+    <p class="hero-tagline">{tagline}</p>
+
+    <div class="hero-terminal">
+      <TerminalFrame title={terminalTitle}>
+        <pre><span class="prompt">$</span> rt scan --target 10.10.14.7{'\n'}<span class="dim">[L0] Recon started on 10.10.14.7</span>{'\n'}<span class="dim">[L1] Open ports: 22/ssh, 80/http, 443/https</span>{'\n'}<span class="dim">[L1] HTTP title: "Admin Portal v2.1"</span>{'\n'}<span class="accent">[L2] Hypothesis: default credentials on /admin</span>{'\n'}<span class="green">[L3] Confirmed: admin:admin grants access to /admin/dashboard</span>{'\n'}<span class="prompt">$</span> rt suggest{'\n'}<span class="accent">→ Escalate: enumerate /admin/dashboard for file upload or command injection</span>{'\n'}<span class="accent">→ Pivot: check if SSH accepts the same credentials</span>{'\n'}<span class="accent">→ Document: flag default-creds finding for report</span></pre>
+      </TerminalFrame>
+    </div>
+
+    <div class="path-cards">
+      <a class="path-card" href={`${prefix}/getting-started/quickstart/`}>
+        <span class="card-icon">⚡</span>
+        <h3>{quickStartLabel}</h3>
+        <p>{quickStartDesc}</p>
+      </a>
+      <a class="path-card" href={`${prefix}/core-concepts/overview/`}>
+        <span class="card-icon">🧠</span>
+        <h3>{methodologyLabel}</h3>
+        <p>{methodologyDesc}</p>
+      </a>
+      <a class="path-card" href={`${prefix}/guides/simple-lab/`}>
+        <span class="card-icon">🎯</span>
+        <h3>{tutorialLabel}</h3>
+        <p>{tutorialDesc}</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero {
+    padding: 4rem 1rem 3rem;
+    text-align: center;
+    max-width: 52rem;
+    margin: 0 auto;
+  }
+
+  .hero-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .hero-logo {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: clamp(2.5rem, 8vw, 4.5rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--sl-color-accent);
+    margin: 0;
+    line-height: 1.1;
+  }
+
+  .hero-tagline {
+    font-size: clamp(1rem, 2.5vw, 1.25rem);
+    color: var(--sl-color-gray-1);
+    max-width: 36rem;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .hero-terminal {
+    width: 100%;
+    max-width: 40rem;
+    text-align: left;
+  }
+
+  .hero-terminal :global(.terminal-frame) {
+    margin: 0;
+  }
+
+  .hero-terminal :global(pre) {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.7;
+  }
+
+  .hero-terminal :global(.prompt) {
+    color: var(--sl-color-green);
+    font-weight: 700;
+  }
+
+  .hero-terminal :global(.dim) {
+    color: var(--sl-color-gray-3);
+  }
+
+  .hero-terminal :global(.accent) {
+    color: var(--sl-color-accent);
+  }
+
+  .hero-terminal :global(.green) {
+    color: var(--sl-color-green);
+  }
+
+  .path-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem;
+    width: 100%;
+    margin-top: 1rem;
+  }
+
+  .path-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .path-card:hover {
+    border-color: var(--sl-color-accent);
+    box-shadow: 0 0 0 1px var(--sl-color-accent);
+  }
+
+  .card-icon {
+    font-size: 1.75rem;
+  }
+
+  .path-card h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+  }
+
+  .path-card p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-2);
+    line-height: 1.4;
+  }
+
+  @media (max-width: 40rem) {
+    .hero {
+      padding: 2.5rem 1rem 2rem;
+    }
+
+    .path-cards {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-terminal :global(pre) {
+      font-size: 0.7rem;
+    }
+  }
+</style>

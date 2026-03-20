@@ -3,34 +3,20 @@ title: Redtrail
 description: Un orquestador de pentesting que empodera al operador con metodología deductiva, seguimiento de conocimiento y sugerencias impulsadas por IA.
 template: splash
 hero:
-  tagline: Orquestador de pentesting con metodología deductiva. RT no te reemplaza — te hace más efectivo.
-  actions:
-    - text: Comenzar
-      link: /es/getting-started/installation/
-      icon: right-arrow
-    - text: Ver en GitHub
-      link: https://github.com/adriangs1996/redtrail
-      icon: external
-      variant: minimal
+  title: ' '
+  tagline: ' '
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import Hero from '../../../components/Hero.astro';
 
-## ¿Qué es Redtrail?
-
-Redtrail (RT) es un orquestador de pentesting. Envuelve tus herramientas y metodología existentes en un flujo de trabajo estructurado basado en hipótesis — rastreando lo que sabes, lo que sospechas y lo que has descartado en cada host de un engagement.
-
-<CardGrid>
-	<Card title="Capas Deductivas (L0–L4)" icon="star">
-		Progresión estructurada del conocimiento desde datos de reconocimiento hasta rutas de ataque confirmadas.
-	</Card>
-	<Card title="Seguimiento de Hipótesis" icon="magnifier">
-		Formula, prueba, confirma o refuta hipótesis. RT recuerda lo que has intentado.
-	</Card>
-	<Card title="Sistema de Skills" icon="puzzle">
-		Extiende RT con skills personalizados para flujos de trabajo especializados e integraciones de herramientas.
-	</Card>
-	<Card title="Asesor con IA" icon="rocket">
-		Obtén sugerencias contextuales basadas en tu base de conocimiento y superficie de ataque actual.
-	</Card>
-</CardGrid>
+<Hero
+  locale="es"
+  tagline="Orquestador de pentesting con metodología deductiva. RT no te reemplaza — te hace más efectivo."
+  terminalTitle="redtrail"
+  quickStartLabel="Inicio Rápido"
+  quickStartDesc="Ve directo al grano. Instala RT y ejecuta tu primer escaneo en minutos."
+  methodologyLabel="Entiende la Metodología"
+  methodologyDesc="Aprende las capas deductivas (L0–L4) y cómo RT estructura tu engagement."
+  tutorialLabel="Tutorial Práctico"
+  tutorialDesc="Recorre un laboratorio guiado desde reconocimiento hasta reporte, paso a paso."
+/>

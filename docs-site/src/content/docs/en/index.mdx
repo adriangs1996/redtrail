@@ -3,34 +3,20 @@ title: Redtrail
 description: A pentesting orchestrator that empowers the human driver with deductive methodology, knowledge tracking, and AI-powered suggestions.
 template: splash
 hero:
-  tagline: Pentesting orchestrator powered by deductive methodology. RT doesn't replace you — it makes you sharper.
-  actions:
-    - text: Get Started
-      link: /en/getting-started/installation/
-      icon: right-arrow
-    - text: View on GitHub
-      link: https://github.com/adriangs1996/redtrail
-      icon: external
-      variant: minimal
+  title: ' '
+  tagline: ' '
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import Hero from '../../../components/Hero.astro';
 
-## What is Redtrail?
-
-Redtrail (RT) is a pentesting orchestrator. It wraps your existing tools and methodology in a structured, hypothesis-driven workflow — tracking what you know, what you suspect, and what you've disproven across every host in an engagement.
-
-<CardGrid>
-	<Card title="Deductive Layers (L0–L4)" icon="star">
-		Structured knowledge progression from raw recon data to confirmed attack paths.
-	</Card>
-	<Card title="Hypothesis Tracking" icon="magnifier">
-		Form, test, confirm, or refute hypotheses. RT remembers what you've tried.
-	</Card>
-	<Card title="Skill System" icon="puzzle">
-		Extend RT with custom skills for specialized workflows and tool integrations.
-	</Card>
-	<Card title="AI-Powered Advisor" icon="rocket">
-		Get contextual suggestions based on your current knowledge base and attack surface.
-	</Card>
-</CardGrid>
+<Hero
+  locale="en"
+  tagline="Pentesting orchestrator powered by deductive methodology. RT doesn't replace you — it makes you sharper."
+  terminalTitle="redtrail"
+  quickStartLabel="Quick Start"
+  quickStartDesc="Jump straight in. Install RT and run your first scan in minutes."
+  methodologyLabel="Understand the Methodology"
+  methodologyDesc="Learn the deductive layers (L0–L4) and how RT structures your engagement."
+  tutorialLabel="Hands-On Tutorial"
+  tutorialDesc="Walk through a guided lab from recon to report, step by step."
+/>

@@ -117,6 +117,37 @@ CREATE TABLE IF NOT EXISTS notes (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS web_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    host_id INTEGER NOT NULL REFERENCES hosts(id),
+    port INTEGER NOT NULL DEFAULT 80,
+    scheme TEXT NOT NULL DEFAULT 'http',
+    path TEXT NOT NULL,
+    status_code INTEGER,
+    content_length INTEGER,
+    content_type TEXT,
+    redirect_to TEXT,
+    source TEXT,
+    found_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(session_id, host_id, port, path)
+);
+
+CREATE TABLE IF NOT EXISTS vulns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    host_id INTEGER NOT NULL REFERENCES hosts(id),
+    port INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL,
+    severity TEXT,
+    cve TEXT,
+    url TEXT,
+    detail TEXT,
+    source TEXT,
+    found_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(session_id, host_id, port, name)
+);
+
 CREATE TABLE IF NOT EXISTS chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL REFERENCES sessions(id),
@@ -173,6 +204,42 @@ pub trait KnowledgeBase {
     fn list_flags(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
     fn list_access(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
     fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
+    fn add_web_path(
+        &self,
+        session_id: &str,
+        host_ip: &str,
+        port: i64,
+        scheme: &str,
+        path: &str,
+        status_code: Option<i64>,
+        content_length: Option<i64>,
+        content_type: Option<&str>,
+        redirect_to: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn add_vuln(
+        &self,
+        session_id: &str,
+        host_ip: &str,
+        port: i64,
+        name: &str,
+        severity: Option<&str>,
+        cve: Option<&str>,
+        url: Option<&str>,
+        detail: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn list_web_paths(
+        &self,
+        session_id: &str,
+        host_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_vulns(
+        &self,
+        session_id: &str,
+        host_filter: Option<&str>,
+        severity_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error>;
     fn list_history(&self, session_id: &str, limit: usize)
     -> Result<Vec<serde_json::Value>, Error>;
     fn search(&self, session_id: &str, query: &str) -> Result<Vec<serde_json::Value>, Error>;
@@ -370,6 +437,56 @@ impl KnowledgeBase for SqliteDb {
     }
     fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_notes(&self.conn, session_id)
+    }
+    fn add_web_path(
+        &self,
+        session_id: &str,
+        host_ip: &str,
+        port: i64,
+        scheme: &str,
+        path: &str,
+        status_code: Option<i64>,
+        content_length: Option<i64>,
+        content_type: Option<&str>,
+        redirect_to: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<i64, Error> {
+        kb::add_web_path(
+            &self.conn, session_id, host_ip, port, scheme, path,
+            status_code, content_length, content_type, redirect_to, source,
+        )
+    }
+    fn add_vuln(
+        &self,
+        session_id: &str,
+        host_ip: &str,
+        port: i64,
+        name: &str,
+        severity: Option<&str>,
+        cve: Option<&str>,
+        url: Option<&str>,
+        detail: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<i64, Error> {
+        kb::add_vuln(
+            &self.conn, session_id, host_ip, port, name,
+            severity, cve, url, detail, source,
+        )
+    }
+    fn list_web_paths(
+        &self,
+        session_id: &str,
+        host_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error> {
+        kb::list_web_paths(&self.conn, session_id, host_filter)
+    }
+    fn list_vulns(
+        &self,
+        session_id: &str,
+        host_filter: Option<&str>,
+        severity_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error> {
+        kb::list_vulns(&self.conn, session_id, host_filter, severity_filter)
     }
     fn list_history(
         &self,

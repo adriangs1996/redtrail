@@ -1,0 +1,1 @@
+FLAG{app01_cmd_inj3ct10n_pwn3d}

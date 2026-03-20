@@ -1,0 +1,1 @@
+FLAG{dc01_domain_admin_compromised}

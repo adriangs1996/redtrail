@@ -1,0 +1,6 @@
+services:
+  dc01:
+    build: .
+    ports:
+      - "2223:22"
+    restart: unless-stopped

@@ -1,0 +1,4 @@
+services:
+  dc01:
+    ports:
+      - "0:22"

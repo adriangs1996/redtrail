@@ -1,0 +1,9 @@
+services:
+  target:
+    ports:
+      - "80"
+      - "21"
+      - "20"
+      - "22"
+      - "40000-40100"
+    restart: "no"

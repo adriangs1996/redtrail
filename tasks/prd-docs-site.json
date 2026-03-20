@@ -1,0 +1,458 @@
+{
+  "name": "Redtrail Documentation Site",
+  "description": "Documentation site using Astro Starlight with Catppuccin theming, terminal frame components, hands-on Docker labs, and bilingual content (en/es)",
+  "branchName": "ralph/docs-site",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Initialize Astro Starlight project",
+      "description": "As a developer, I want the docs-site/ directory initialized with Astro Starlight so that I have a working foundation to build the documentation site on.",
+      "acceptanceCriteria": [
+        "Astro Starlight project initialized in docs-site/ with package.json, astro.config.mjs, and tsconfig.json",
+        "Sidebar configured with all 8 content sections: Getting Started, Core Concepts, Guides, CLI Reference, Skills, Configuration, Contributing",
+        "A placeholder index page exists and renders",
+        "npm run build succeeds in docs-site/",
+        "npm run dev starts a local dev server that serves the site"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "",
+      "dependsOn": [],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-002",
+      "title": "Configure Catppuccin Mocha/Latte theming",
+      "description": "As a user, I want the site themed with Catppuccin Mocha (dark) and Latte (light) with red primary accent and green secondary accent, so that the site looks modern and on-brand.",
+      "acceptanceCriteria": [
+        "Starlight CSS custom properties overridden with Catppuccin Mocha hex values for dark mode",
+        "Starlight CSS custom properties overridden with Catppuccin Latte hex values for light mode",
+        "Red (Catppuccin red) used as primary accent color on links and highlights",
+        "Green (Catppuccin green) used as secondary accent on success-styled elements",
+        "Dark/light toggle works and persists user preference",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-001"
+      ]
+    },
+    {
+      "id": "US-003",
+      "title": "Set up i18n for English and Spanish",
+      "description": "As a Spanish-speaking user, I want the site available in both English and Spanish so that I can read documentation in my native language.",
+      "acceptanceCriteria": [
+        "Starlight i18n configured with English as default locale and Spanish as secondary",
+        "Directory structure uses src/content/docs/en/ and src/content/docs/es/",
+        "Placeholder index page exists in both /en/ and /es/ routes",
+        "Language switcher is visible in the site header",
+        "Both locale routes resolve and render correctly",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-002"
+      ]
+    },
+    {
+      "id": "US-004",
+      "title": "Create GitHub Actions workflow for Pages deploy",
+      "description": "As a developer, I want the docs site to automatically build and deploy to GitHub Pages on push to main, so that the live site stays up to date.",
+      "acceptanceCriteria": [
+        ".github/workflows/docs.yml workflow file exists",
+        "Workflow triggers on push to main",
+        "Workflow installs dependencies, runs npm run build in docs-site/",
+        "Workflow deploys the built output to GitHub Pages",
+        "Workflow only runs when docs-site/ or .github/workflows/docs.yml files change (path filter)",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-003"
+      ]
+    },
+    {
+      "id": "US-005",
+      "title": "Set up Vitest for component testing",
+      "description": "As a developer, I want Vitest configured in docs-site/ so that I can write and run unit tests for custom Astro components.",
+      "acceptanceCriteria": [
+        "Vitest installed and configured in docs-site/ with Astro component testing support",
+        "npx vitest run executes successfully (even with zero tests)",
+        "A sample smoke test exists to verify the setup works",
+        "npm run build succeeds in docs-site/",
+        "npx vitest run passes"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-003"
+      ]
+    },
+    {
+      "id": "US-006",
+      "title": "Build Terminal Frame MDX component",
+      "description": "As a user, I want code examples displayed in a terminal-like UI so that I can clearly see what commands to run and what output to expect.",
+      "acceptanceCriteria": [
+        "Terminal Frame MDX component exists in docs-site/src/components/",
+        "Component accepts props: title (window title), prompt (prompt string), content (command + output)",
+        "Component renders terminal chrome: title bar with traffic light dots, rounded corners, subtle shadow",
+        "Component applies Catppuccin Mocha styles in dark mode and Latte styles in light mode",
+        "Component handles edge cases: empty content, very long output, multiline commands",
+        "A demo page exists in the docs showcasing the component with various configurations",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-005"
+      ]
+    },
+    {
+      "id": "US-007",
+      "title": "Write Vitest tests for Terminal Frame component",
+      "description": "As a developer, I want unit tests for the Terminal Frame component so that regressions are caught automatically.",
+      "acceptanceCriteria": [
+        "Tests cover rendering with all prop combinations (title, prompt, content)",
+        "Tests verify theme-aware class application for Mocha and Latte",
+        "Tests cover edge cases: empty content, long output, multiline commands",
+        "npm run build succeeds in docs-site/",
+        "npx vitest run passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-006"
+      ]
+    },
+    {
+      "id": "US-008",
+      "title": "Build Hero landing page component",
+      "description": "As a user, I want a visually appealing landing page that communicates what RT does and lets me self-select a learning path based on my experience level.",
+      "acceptanceCriteria": [
+        "Custom Hero component replaces the default Starlight index page",
+        "Text logo 'redtrail' displayed prominently in the hero section",
+        "One-line value proposition rendered below the logo",
+        "Terminal Frame component embedded showing a brief realistic RT session snippet",
+        "Three audience path cards rendered: Quick Start (experienced), Understand the Methodology (intermediate), Hands-On Tutorial (beginners)",
+        "Each card has a short description and links to the correct section",
+        "Links point to locale-prefixed routes (/en/getting-started/, /es/getting-started/, etc.)",
+        "Hero content is localized — English and Spanish versions render correctly",
+        "Responsive layout works on mobile and desktop viewports",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-006"
+      ]
+    },
+    {
+      "id": "US-009",
+      "title": "Write Vitest tests for Hero component",
+      "description": "As a developer, I want unit tests for the Hero component so that the landing page rendering and navigation are validated automatically.",
+      "acceptanceCriteria": [
+        "Tests verify three audience path cards render with correct labels",
+        "Tests verify links point to correct locale-prefixed routes",
+        "Tests verify hero renders in both English and Spanish contexts",
+        "npm run build succeeds in docs-site/",
+        "npx vitest run passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-008"
+      ]
+    },
+    {
+      "id": "US-010",
+      "title": "Write Getting Started guide in English",
+      "description": "As an experienced pentester, I want a quick start guide that shows me the RT workflow in under 10 minutes so that I can decide if the tool is worth adopting.",
+      "acceptanceCriteria": [
+        "Getting Started page exists at /en/getting-started/",
+        "Covers full flow: install → rt setup → rt init → recon → rt kb → rt hypothesis → rt ask → rt report",
+        "Every RT command example uses the Terminal Frame component with realistic output",
+        "Assumes reader knows pentesting but not RT — no hand-holding on external tools",
+        "Ends with a Next Steps section linking to Core Concepts and Tutorials",
+        "Completable in under 10 minutes of reading",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-007"
+      ]
+    },
+    {
+      "id": "US-011",
+      "title": "Translate Getting Started guide to Spanish",
+      "description": "As a Spanish-speaking user, I want the Getting Started guide in Spanish so that I can learn the RT workflow in my native language.",
+      "acceptanceCriteria": [
+        "Getting Started page exists at /es/getting-started/",
+        "Full translation of the English Getting Started content",
+        "Terminal Frame component examples preserved (commands stay in English, descriptions in Spanish)",
+        "Next Steps links point to /es/ prefixed routes",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-010"
+      ]
+    },
+    {
+      "id": "US-012",
+      "title": "Build simple lab web application",
+      "description": "As a developer, I want the vulnerable web application for the simple lab so that users have a realistic target to practice against.",
+      "acceptanceCriteria": [
+        "Minimal web application (Flask or Express) in docs-site/labs/simple/",
+        "Login page with default admin credentials (admin/admin or similar)",
+        "Admin panel accessible after login with a command injection vulnerability in a form field",
+        "A flag file readable only through the command injection → shell path",
+        "Application serves on port 80"
+      ],
+      "priority": 12,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-013",
+      "title": "Configure simple lab Docker Compose with FTP, SSH, and HTTP",
+      "description": "As a user, I want to spin up the simple lab with docker compose up so that I can practice RT commands against a real target.",
+      "acceptanceCriteria": [
+        "docker-compose.yml in docs-site/labs/simple/ defines a single container",
+        "HTTP service responds on port 80 with the vulnerable web app",
+        "FTP service allows anonymous login and lists decoy files (backup.sql.gz with junk, credentials.txt with fake/expired creds)",
+        "SSH service accepts connections",
+        "docker compose up boots the environment successfully",
+        "docker compose down cleanly tears down",
+        "README.md documents setup, teardown, and resource requirements"
+      ],
+      "priority": 13,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-012"
+      ]
+    },
+    {
+      "id": "US-014",
+      "title": "Write simple lab smoke tests",
+      "description": "As a developer, I want smoke tests for the simple lab so that I know the environment works as designed.",
+      "acceptanceCriteria": [
+        "Smoke tests verify container boots successfully",
+        "Tests verify HTTP returns 200 on port 80",
+        "Tests verify FTP allows anonymous login and lists files",
+        "Tests verify SSH accepts connections",
+        "Tests can run in CI",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 14,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-013"
+      ]
+    },
+    {
+      "id": "US-015",
+      "title": "Write simple lab tutorial in English",
+      "description": "As a beginner, I want a step-by-step tutorial walking through the simple lab with RT so that I can learn both pentesting methodology and RT simultaneously.",
+      "acceptanceCriteria": [
+        "Tutorial page exists at /en/guides/simple-lab/",
+        "Starts with docker compose up to spin up the lab",
+        "Walks through: rt init → nmap recon → ingest results → discover services",
+        "FTP red herring section: form hypothesis → inspect decoy files → add evidence → refute hypothesis",
+        "Real path: discover default web creds → access admin panel → find command injection → exploit → capture flag",
+        "Ends with rt report to generate the engagement narrative",
+        "Every RT command shown with Terminal Frame component and expected output",
+        "Explains the why at each step — not just the commands",
+        "Completable in ~30 minutes hands-on",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 15,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-014",
+        "US-010"
+      ]
+    },
+    {
+      "id": "US-016",
+      "title": "Translate simple lab tutorial to Spanish",
+      "description": "As a Spanish-speaking beginner, I want the simple lab tutorial in Spanish so that I can follow along in my native language.",
+      "acceptanceCriteria": [
+        "Tutorial page exists at /es/guides/simple-lab/",
+        "Full translation of the English tutorial content",
+        "Terminal Frame examples preserved (commands in English, explanations in Spanish)",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-015"
+      ]
+    },
+    {
+      "id": "US-017",
+      "title": "Create English stub pages for remaining sections",
+      "description": "As a user, I want to see all documentation sections in the sidebar even if not yet written, so that I know the full scope of what the docs will cover.",
+      "acceptanceCriteria": [
+        "Core Concepts stub at /en/core-concepts/ with description of workspace model, KB, hypotheses, deductive layers, BISCL",
+        "CLI Reference stub at /en/cli-reference/ listing all rt subcommands with one-line descriptions from --help",
+        "Skills stub at /en/skills/ with overview of skill system, built-in list, custom development",
+        "Configuration stub at /en/configuration/ with description of global config, workspace config, LLM providers",
+        "Contributing stub at /en/contributing/ with architecture overview placeholder",
+        "Each stub has a clear Coming Soon indicator",
+        "All stubs appear correctly in sidebar navigation",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-003"
+      ]
+    },
+    {
+      "id": "US-018",
+      "title": "Translate stub pages to Spanish",
+      "description": "As a Spanish-speaking user, I want the stub pages available in Spanish so that the site feels complete in both languages.",
+      "acceptanceCriteria": [
+        "All 5 stub pages translated and available under /es/ routes",
+        "Coming Soon indicators translated",
+        "Sidebar navigation correct in Spanish locale",
+        "npm run build succeeds in docs-site/"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-017"
+      ]
+    },
+    {
+      "id": "US-019",
+      "title": "Build web01 container for complex lab",
+      "description": "As a user working through the complex lab, I want web01 to be a deep multi-step challenge with red herrings so that I experience the full depth of hypothesis-driven testing.",
+      "acceptanceCriteria": [
+        "Web application with a hidden admin panel discoverable via directory enumeration",
+        "Main application has a stored XSS vulnerability",
+        "A bot/script periodically visits pages with a valid admin session cookie (simulates victim for XSS exfiltration)",
+        "Admin panel accessible with stolen cookie has RCE via file upload or template rendering",
+        "Red herrings present: outdated version header suggesting inapplicable CVE, /api/debug endpoint returning nothing useful, misleading robots.txt",
+        "Dockerfile builds successfully"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-020",
+      "title": "Build app01 container for complex lab",
+      "description": "As a user working through the complex lab, I want to pivot from web01 to app01 using reused credentials and find a command injection vulnerability.",
+      "acceptanceCriteria": [
+        "SSH service accepts the same credentials found on web01",
+        "HTTP application on port 8080 with a command injection in search or export feature",
+        "Config file on disk contains plaintext database credentials for db01",
+        "Dockerfile builds successfully"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-021",
+      "title": "Build db01 container for complex lab",
+      "description": "As a user working through the complex lab, I want to access db01 using credentials from app01 and find dc01 admin credentials in a database dump.",
+      "acceptanceCriteria": [
+        "MySQL service accepts credentials found in app01's config file",
+        "Database contains a users table with dc01 admin credentials in plaintext or easily crackable hash",
+        "File-read privilege escalation path exists (LOAD_FILE or similar)",
+        "Dockerfile builds successfully"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-022",
+      "title": "Build dc01 container for complex lab",
+      "description": "As a user working through the complex lab, I want dc01 to be the final target where credentials from db01 grant admin access to capture the flag.",
+      "acceptanceCriteria": [
+        "SSH service accepts credentials found in db01's user dump",
+        "Flag file readable only with admin access",
+        "Dockerfile builds successfully"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-023",
+      "title": "Configure complex lab Docker Compose networking",
+      "description": "As a user, I want the complex lab to simulate a corporate network topology where only the DMZ host is directly reachable from my machine.",
+      "acceptanceCriteria": [
+        "docker-compose.yml in docs-site/labs/complex/ defines all 4 containers",
+        "Two Docker networks: external (host-accessible) and internal (isolated)",
+        "web01 connected to both networks (DMZ pivot point)",
+        "app01, db01, dc01 connected only to internal network — not reachable from host",
+        "Health checks ensure services are ready before dependent containers start",
+        "docker compose up boots all containers and networks successfully",
+        "docker compose down cleanly tears down everything",
+        "README documents topology diagram, setup, teardown, and resource requirements"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-019",
+        "US-020",
+        "US-021",
+        "US-022"
+      ]
+    },
+    {
+      "id": "US-024",
+      "title": "Write complex lab smoke tests",
+      "description": "As a developer, I want smoke tests for the complex lab so that I know the full attack chain works as designed.",
+      "acceptanceCriteria": [
+        "Tests verify all 4 containers boot successfully",
+        "Tests verify web01 HTTP responds from host, app01/db01/dc01 are not directly reachable",
+        "Tests verify web01 services: HTTP 200, hidden admin panel exists, XSS injectable",
+        "Tests verify app01 SSH accepts expected credentials, HTTP responds on 8080",
+        "Tests verify db01 MySQL accepts expected credentials",
+        "Tests verify dc01 SSH accepts expected credentials and flag is readable",
+        "Tests can run in CI"
+      ],
+      "priority": 24,
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-023"
+      ]
+    }
+  ],
+  "metadata": {
+    "updatedAt": "2026-03-20T11:47:48.160Z"
+  }
+}

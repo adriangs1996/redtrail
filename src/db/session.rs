@@ -77,10 +77,10 @@ pub fn get_session(conn: &Connection, session_id: &str) -> Result<serde_json::Va
 }
 
 pub fn status_summary(conn: &Connection, session_id: &str) -> Result<serde_json::Value, Error> {
-    let (name, target, goal, phase, noise_budget): (String, Option<String>, String, String, f64) = conn.query_row(
-        "SELECT name, target, goal, phase, noise_budget FROM sessions WHERE id = ?1",
+    let (name, target, goal, noise_budget): (String, Option<String>, String, f64) = conn.query_row(
+        "SELECT name, target, goal, noise_budget FROM sessions WHERE id = ?1",
         params![session_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     ).map_err(|e| Error::Db(e.to_string()))?;
 
     let count = |table: &str, extra: &str| -> Result<i64, Error> {
@@ -89,19 +89,36 @@ pub fn status_summary(conn: &Connection, session_id: &str) -> Result<serde_json:
             .map_err(|e| Error::Db(e.to_string()))
     };
 
+    let hosts = count("hosts", "")?;
+    let hyp_pending = count("hypotheses", " AND status = 'pending'")?;
+    let hyp_confirmed = count("hypotheses", " AND status = 'confirmed'")?;
+    let hyp_refuted = count("hypotheses", " AND status = 'refuted'")?;
+    let hyp_total = hyp_pending + hyp_confirmed + hyp_refuted;
+
+    let phase = derive_phase(hosts, hyp_total, hyp_pending, hyp_confirmed, hyp_refuted);
+
     Ok(serde_json::json!({
         "session_name": name,
         "target": target,
         "goal": goal,
         "phase": phase,
-        "hosts": count("hosts", "")?,
+        "hosts": hosts,
         "ports": count("ports", "")?,
         "creds": count("credentials", "")?,
         "flags": count("flags", "")?,
         "access": count("access_levels", "")?,
-        "hypotheses_pending": count("hypotheses", " AND status = 'pending'")?,
-        "hypotheses_confirmed": count("hypotheses", " AND status = 'confirmed'")?,
-        "hypotheses_refuted": count("hypotheses", " AND status = 'refuted'")?,
+        "hypotheses_pending": hyp_pending,
+        "hypotheses_confirmed": hyp_confirmed,
+        "hypotheses_refuted": hyp_refuted,
         "noise_budget": noise_budget,
     }))
+}
+
+pub fn derive_phase(hosts: i64, hyp_total: i64, hyp_pending: i64, hyp_confirmed: i64, hyp_refuted: i64) -> &'static str {
+    if hosts == 0 && hyp_total == 0 { return "L0 — Setup"; }
+    if hosts > 0 && hyp_total == 0 { return "L1 — Surface Mapped"; }
+    if hyp_pending > 0 { return "L2 — Hypotheses Pending"; }
+    if hyp_confirmed > 0 && hyp_pending == 0 { return "L3 — Confirmed Available"; }
+    if hyp_pending == 0 && hyp_confirmed == 0 && hyp_refuted > 0 { return "L0 — Surface Exhausted"; }
+    "L0"
 }

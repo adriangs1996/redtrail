@@ -20,22 +20,24 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
     ).map_err(|e| Error::Db(e.to_string()))?;
 
-    if host_count == 0 && hyp_total == 0 {
+    phase_from_counts(host_count, hyp_total, hyp_pending, hyp_confirmed, hyp_refuted)
+}
+
+fn phase_from_counts(hosts: i64, hyp_total: i64, hyp_pending: i64, hyp_confirmed: i64, hyp_refuted: i64) -> Result<Option<SkillMatch>, Error> {
+    if hosts == 0 && hyp_total == 0 {
         return Ok(Some(SkillMatch {
             phase_name: "Setup".into(),
             skill_name: "redtrail-recon".into(),
             context: "no hosts discovered".into(),
         }));
     }
-
-    if host_count > 0 && hyp_total == 0 {
+    if hosts > 0 && hyp_total == 0 {
         return Ok(Some(SkillMatch {
             phase_name: "Surface Mapped".into(),
             skill_name: "redtrail-hypothesize".into(),
-            context: format!("{host_count} hosts, no hypotheses"),
+            context: format!("{hosts} hosts, no hypotheses"),
         }));
     }
-
     if hyp_pending > 0 {
         return Ok(Some(SkillMatch {
             phase_name: "Hypotheses Pending".into(),
@@ -43,7 +45,6 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
             context: format!("{hyp_pending} pending"),
         }));
     }
-
     if hyp_confirmed > 0 && hyp_pending == 0 {
         return Ok(Some(SkillMatch {
             phase_name: "Confirmed Available".into(),
@@ -51,7 +52,6 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
             context: format!("{hyp_confirmed} confirmed"),
         }));
     }
-
     if hyp_pending == 0 && hyp_confirmed == 0 && hyp_refuted > 0 {
         return Ok(Some(SkillMatch {
             phase_name: "Surface Exhausted".into(),
@@ -59,7 +59,6 @@ pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillM
             context: format!("all {hyp_refuted} refuted, widening"),
         }));
     }
-
     Ok(None)
 }
 

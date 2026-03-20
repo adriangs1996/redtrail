@@ -87,6 +87,11 @@ pub fn run(args: &[String]) -> Result<(), Error> {
             for warn in &result.scope_warnings {
                 eprintln!("[rt] warning: {warn}");
             }
+            if let Ok(config) = crate::config::Config::resolved(&ws) {
+                if config.general.auto_extract {
+                    crate::spawn::spawn_extraction(result.command_id);
+                }
+            }
         }
     }
 

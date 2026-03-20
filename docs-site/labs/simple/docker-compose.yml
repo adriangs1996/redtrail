@@ -1,0 +1,10 @@
+services:
+  target:
+    build: .
+    ports:
+      - "80:80"
+      - "21:21"
+      - "20:20"
+      - "22:22"
+      - "40000-40100:40000-40100"
+    restart: unless-stopped

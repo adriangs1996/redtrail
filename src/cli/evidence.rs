@@ -1,6 +1,6 @@
-use clap::Subcommand;
 use crate::db::Hypotheses;
 use crate::error::Error;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum EvidenceCommands {
@@ -10,7 +10,11 @@ pub enum EvidenceCommands {
         finding: String,
         #[arg(long, help = "Link to a hypothesis ID")]
         hypothesis: Option<i64>,
-        #[arg(long, default_value = "info", help = "Severity: info, low, medium, high, critical")]
+        #[arg(
+            long,
+            default_value = "info",
+            help = "Severity: info, low, medium, high, critical"
+        )]
         severity: String,
         #[arg(long, help = "Proof of concept command or payload")]
         poc: Option<String>,
@@ -31,8 +35,14 @@ pub enum EvidenceCommands {
 
 pub fn run(db: &impl Hypotheses, session_id: &str, command: EvidenceCommands) -> Result<(), Error> {
     match command {
-        EvidenceCommands::Add { finding, hypothesis, severity, poc } => {
-            let id = db.create_evidence(session_id, hypothesis, &finding, &severity, poc.as_deref())?;
+        EvidenceCommands::Add {
+            finding,
+            hypothesis,
+            severity,
+            poc,
+        } => {
+            let id =
+                db.create_evidence(session_id, hypothesis, &finding, &severity, poc.as_deref())?;
             println!("evidence added: {id}");
         }
         EvidenceCommands::List { hypothesis, json } => {
@@ -45,7 +55,13 @@ pub fn run(db: &impl Hypotheses, session_id: &str, command: EvidenceCommands) ->
                         Some(h) => format!("hyp={h}"),
                         None => "unlinked".to_string(),
                     };
-                    println!("[{}] {} ({}) {}", e["id"], e["finding"].as_str().unwrap_or(""), e["severity"].as_str().unwrap_or(""), hyp);
+                    println!(
+                        "[{}] {} ({}) {}",
+                        e["id"],
+                        e["finding"].as_str().unwrap_or(""),
+                        e["severity"].as_str().unwrap_or(""),
+                        hyp
+                    );
                 }
             }
         }
@@ -60,7 +76,12 @@ pub fn run(db: &impl Hypotheses, session_id: &str, command: EvidenceCommands) ->
                     println!("hypothesis {hyp_id}: {statement}");
                     if let Some(evidence) = group["evidence"].as_array() {
                         for e in evidence {
-                            println!("  [{}] {} ({})", e["id"], e["finding"].as_str().unwrap_or(""), e["severity"].as_str().unwrap_or(""));
+                            println!(
+                                "  [{}] {} ({})",
+                                e["id"],
+                                e["finding"].as_str().unwrap_or(""),
+                                e["severity"].as_str().unwrap_or("")
+                            );
                             if let Some(poc) = e["poc"].as_str() {
                                 println!("    poc: {poc}");
                             }

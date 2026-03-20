@@ -1,7 +1,7 @@
-use clap::Subcommand;
 use crate::db::{KnowledgeBase, SessionOps};
 use crate::error::Error;
 use crate::workspace;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum SessionCommands {
@@ -22,16 +22,24 @@ pub enum SessionCommands {
     },
 }
 
-pub fn run(db: &(impl KnowledgeBase + SessionOps), session_id: &str, cmd: SessionCommands) -> Result<(), Error> {
+pub fn run(
+    db: &(impl KnowledgeBase + SessionOps),
+    session_id: &str,
+    cmd: SessionCommands,
+) -> Result<(), Error> {
     match cmd {
         SessionCommands::List { json } => {
             let row = db.get_session(session_id)?;
 
             if json {
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!([row])).unwrap());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!([row])).unwrap()
+                );
             } else {
                 println!("{:<36} {:<20} {:<18} PHASE", "ID", "NAME", "TARGET");
-                println!("{:<36} {:<20} {:<18} {}",
+                println!(
+                    "{:<36} {:<20} {:<18} {}",
                     row["id"].as_str().unwrap_or(""),
                     row["name"].as_str().unwrap_or(""),
                     row["target"].as_str().unwrap_or("-"),
@@ -50,7 +58,10 @@ pub fn run(db: &(impl KnowledgeBase + SessionOps), session_id: &str, cmd: Sessio
                 println!("id:         {}", row["id"].as_str().unwrap_or(""));
                 println!("name:       {}", row["name"].as_str().unwrap_or(""));
                 println!("target:     {}", row["target"].as_str().unwrap_or("-"));
-                println!("scope:      {}", row["scope"].as_str().unwrap_or("(unrestricted)"));
+                println!(
+                    "scope:      {}",
+                    row["scope"].as_str().unwrap_or("(unrestricted)")
+                );
                 println!("goal:       {}", row["goal"].as_str().unwrap_or(""));
                 println!("phase:      {}", row["phase"].as_str().unwrap_or(""));
                 println!("autonomy:   {}", row["autonomy"].as_str().unwrap_or(""));

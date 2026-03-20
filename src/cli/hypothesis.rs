@@ -1,6 +1,6 @@
-use clap::Subcommand;
 use crate::db::Hypotheses;
 use crate::error::Error;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum HypothesisCommands {
@@ -17,9 +17,17 @@ pub enum HypothesisCommands {
         statement: String,
         #[arg(long, help = "Category (e.g. auth, injection, misconfig, privesc)")]
         category: String,
-        #[arg(long, default_value = "medium", help = "Priority: low, medium, high, critical")]
+        #[arg(
+            long,
+            default_value = "medium",
+            help = "Priority: low, medium, high, critical"
+        )]
         priority: String,
-        #[arg(long, default_value_t = 0.5, help = "Initial confidence score (0.0 to 1.0)")]
+        #[arg(
+            long,
+            default_value_t = 0.5,
+            help = "Initial confidence score (0.0 to 1.0)"
+        )]
         confidence: f64,
         #[arg(long, help = "Target component (e.g. host:port, service name)")]
         component: Option<String>,
@@ -40,7 +48,11 @@ pub enum HypothesisCommands {
     },
 }
 
-pub fn run(db: &impl Hypotheses, session_id: &str, command: HypothesisCommands) -> Result<(), Error> {
+pub fn run(
+    db: &impl Hypotheses,
+    session_id: &str,
+    command: HypothesisCommands,
+) -> Result<(), Error> {
     match command {
         HypothesisCommands::List { status, json } => {
             let rows = db.list_hypotheses(session_id, status.as_deref())?;
@@ -48,8 +60,10 @@ pub fn run(db: &impl Hypotheses, session_id: &str, command: HypothesisCommands) 
                 println!("{}", serde_json::to_string_pretty(&rows).unwrap());
             } else {
                 for h in &rows {
-                    println!("[{}] {} ({}) — {} priority={} conf={:.1}",
-                        h["id"], h["statement"].as_str().unwrap_or(""),
+                    println!(
+                        "[{}] {} ({}) — {} priority={} conf={:.1}",
+                        h["id"],
+                        h["statement"].as_str().unwrap_or(""),
                         h["category"].as_str().unwrap_or(""),
                         h["status"].as_str().unwrap_or(""),
                         h["priority"].as_str().unwrap_or(""),
@@ -58,7 +72,13 @@ pub fn run(db: &impl Hypotheses, session_id: &str, command: HypothesisCommands) 
                 }
             }
         }
-        HypothesisCommands::Create { statement, category, priority, confidence, component } => {
+        HypothesisCommands::Create {
+            statement,
+            category,
+            priority,
+            confidence,
+            component,
+        } => {
             let id = db.create_hypothesis(
                 session_id,
                 &statement,
@@ -82,7 +102,10 @@ pub fn run(db: &impl Hypotheses, session_id: &str, command: HypothesisCommands) 
                 println!("  category:  {}", h["category"].as_str().unwrap_or(""));
                 println!("  status:    {}", h["status"].as_str().unwrap_or(""));
                 println!("  priority:  {}", h["priority"].as_str().unwrap_or(""));
-                println!("  confidence:{:.1}", h["confidence"].as_f64().unwrap_or(0.0));
+                println!(
+                    "  confidence:{:.1}",
+                    h["confidence"].as_f64().unwrap_or(0.0)
+                );
                 if let Some(tc) = h["target_component"].as_str() {
                     println!("  component: {tc}");
                 }
@@ -90,7 +113,12 @@ pub fn run(db: &impl Hypotheses, session_id: &str, command: HypothesisCommands) 
                 if !evidence.is_empty() {
                     println!("  evidence ({}):", evidence.len());
                     for e in evidence {
-                        println!("    [{}] {} ({})", e["id"], e["finding"].as_str().unwrap_or(""), e["severity"].as_str().unwrap_or(""));
+                        println!(
+                            "    [{}] {} ({})",
+                            e["id"],
+                            e["finding"].as_str().unwrap_or(""),
+                            e["severity"].as_str().unwrap_or("")
+                        );
                     }
                 }
             }

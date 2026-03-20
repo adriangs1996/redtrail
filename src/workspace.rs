@@ -56,8 +56,17 @@ mod tests {
     #[test]
     fn test_path_helpers() {
         let ws = Path::new("/home/user/ctf");
-        assert_eq!(db_path(ws), PathBuf::from("/home/user/ctf/.redtrail/redtrail.db"));
-        assert_eq!(config_path(ws), PathBuf::from("/home/user/ctf/.redtrail/config.toml"));
-        assert_eq!(aliases_path(ws), PathBuf::from("/home/user/ctf/.redtrail/aliases.sh"));
+        assert_eq!(
+            db_path(ws),
+            PathBuf::from("/home/user/ctf/.redtrail/redtrail.db")
+        );
+        assert_eq!(
+            config_path(ws),
+            PathBuf::from("/home/user/ctf/.redtrail/config.toml")
+        );
+        assert_eq!(
+            aliases_path(ws),
+            PathBuf::from("/home/user/ctf/.redtrail/aliases.sh")
+        );
     }
 }

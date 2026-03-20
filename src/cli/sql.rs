@@ -7,7 +7,10 @@ pub fn run(sql: &str, json: bool) -> Result<(), Error> {
     let output = execute_to_string(&conn, sql)?;
     if json {
         let result = execute_query(&conn, sql)?;
-        println!("{}", serde_json::to_string_pretty(&result.to_json()).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&result.to_json()).unwrap()
+        );
     } else {
         print!("{output}");
     }
@@ -38,11 +41,16 @@ impl QueryResult {
         if !self.is_query {
             return serde_json::json!({"affected_rows": self.affected});
         }
-        let json_rows: Vec<serde_json::Value> = self.rows.iter()
+        let json_rows: Vec<serde_json::Value> = self
+            .rows
+            .iter()
             .map(|row| {
                 let mut map = serde_json::Map::new();
                 for (i, val) in row.iter().enumerate() {
-                    map.insert(self.columns[i].clone(), serde_json::Value::String(val.clone()));
+                    map.insert(
+                        self.columns[i].clone(),
+                        serde_json::Value::String(val.clone()),
+                    );
                 }
                 serde_json::Value::Object(map)
             })
@@ -67,29 +75,44 @@ fn execute_query(conn: &Connection, sql: &str) -> Result<QueryResult, Error> {
             .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
             .collect();
 
-        let rows: Vec<Vec<String>> = stmt.query_map([], |row| {
-            let mut vals = Vec::new();
-            for i in 0..col_count {
-                let val: String = row.get::<_, rusqlite::types::Value>(i)
-                    .map(|v| match v {
-                        rusqlite::types::Value::Null => "NULL".to_string(),
-                        rusqlite::types::Value::Integer(n) => n.to_string(),
-                        rusqlite::types::Value::Real(f) => f.to_string(),
-                        rusqlite::types::Value::Text(s) => s,
-                        rusqlite::types::Value::Blob(b) => format!("<blob {} bytes>", b.len()),
-                    })
-                    .unwrap_or_else(|_| "?".to_string());
-                vals.push(val);
-            }
-            Ok(vals)
-        }).map_err(|e| Error::Db(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .collect();
+        let rows: Vec<Vec<String>> = stmt
+            .query_map([], |row| {
+                let mut vals = Vec::new();
+                for i in 0..col_count {
+                    let val: String = row
+                        .get::<_, rusqlite::types::Value>(i)
+                        .map(|v| match v {
+                            rusqlite::types::Value::Null => "NULL".to_string(),
+                            rusqlite::types::Value::Integer(n) => n.to_string(),
+                            rusqlite::types::Value::Real(f) => f.to_string(),
+                            rusqlite::types::Value::Text(s) => s,
+                            rusqlite::types::Value::Blob(b) => format!("<blob {} bytes>", b.len()),
+                        })
+                        .unwrap_or_else(|_| "?".to_string());
+                    vals.push(val);
+                }
+                Ok(vals)
+            })
+            .map_err(|e| Error::Db(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
 
-        Ok(QueryResult { columns, rows, affected: 0, is_query: true })
+        Ok(QueryResult {
+            columns,
+            rows,
+            affected: 0,
+            is_query: true,
+        })
     } else {
-        let affected = conn.execute(sql, []).map_err(|e| Error::Db(e.to_string()))?;
-        Ok(QueryResult { columns: vec![], rows: vec![], affected, is_query: false })
+        let affected = conn
+            .execute(sql, [])
+            .map_err(|e| Error::Db(e.to_string()))?;
+        Ok(QueryResult {
+            columns: vec![],
+            rows: vec![],
+            affected,
+            is_query: false,
+        })
     }
 }
 
@@ -112,7 +135,10 @@ pub fn execute_to_string(conn: &Connection, sql: &str) -> Result<String, Error> 
     }
 
     let mut out = String::new();
-    let header: Vec<String> = result.columns.iter().enumerate()
+    let header: Vec<String> = result
+        .columns
+        .iter()
+        .enumerate()
         .map(|(i, n)| format!("{:<width$}", n, width = widths[i]))
         .collect();
     out.push_str(&header.join(" | "));
@@ -122,7 +148,9 @@ pub fn execute_to_string(conn: &Connection, sql: &str) -> Result<String, Error> 
     out.push('\n');
 
     for row in &result.rows {
-        let formatted: Vec<String> = row.iter().enumerate()
+        let formatted: Vec<String> = row
+            .iter()
+            .enumerate()
             .map(|(i, v)| format!("{:<width$}", v, width = widths[i]))
             .collect();
         out.push_str(&formatted.join(" | "));
@@ -135,7 +163,9 @@ pub fn execute_to_string(conn: &Connection, sql: &str) -> Result<String, Error> 
 
 pub fn execute_readonly_to_string(conn: &Connection, sql: &str) -> Result<String, Error> {
     if !is_read_query(sql) {
-        return Err(Error::Config("only SELECT/PRAGMA/EXPLAIN/WITH queries allowed".into()));
+        return Err(Error::Config(
+            "only SELECT/PRAGMA/EXPLAIN/WITH queries allowed".into(),
+        ));
     }
     execute_to_string(conn, sql)
 }

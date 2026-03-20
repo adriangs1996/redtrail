@@ -4,19 +4,19 @@ use crate::error::Error;
 use crate::workspace;
 
 const COMMAND_ALIASES: &[(&str, &str)] = &[
-    ("kb",     "kb"),
-    ("st",     "status"),
+    ("kb", "kb"),
+    ("st", "status"),
     ("theory", "hypothesis"),
-    ("ev",     "evidence"),
-    ("sess",   "session"),
-    ("scope",  "scope"),
-    ("conf",   "config"),
-    ("eat",    "ingest"),
-    ("rep",    "report"),
-    ("skill",  "skill"),
-    ("ask",    "ask"),
-    ("q",      "query"),
-    ("sql",    "sql"),
+    ("ev", "evidence"),
+    ("sess", "session"),
+    ("scope", "scope"),
+    ("conf", "config"),
+    ("eat", "ingest"),
+    ("rep", "report"),
+    ("skill", "skill"),
+    ("ask", "ask"),
+    ("q", "query"),
+    ("sql", "sql"),
 ];
 
 pub fn run(db: &impl SessionOps, session_id: &str) -> Result<(), Error> {

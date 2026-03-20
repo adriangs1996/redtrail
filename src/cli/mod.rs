@@ -1,24 +1,24 @@
 pub(crate) mod ask;
+pub mod config_cmd;
+pub mod env;
+pub mod evidence;
+pub mod hypothesis;
+pub mod ingest;
 mod init;
 pub mod kb;
-pub mod status;
-pub mod hypothesis;
-pub mod evidence;
-pub mod session;
-pub mod scope;
-pub mod config_cmd;
 pub mod proxy;
-pub mod env;
-pub mod setup;
-pub mod ingest;
 pub mod report;
+pub mod scope;
+pub mod session;
+pub mod setup;
 pub mod skill;
 pub mod sql;
+pub mod status;
 
-use clap::{Parser, Subcommand};
 use crate::db::SessionOps;
 use crate::error::Error;
 use crate::workspace;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
@@ -43,7 +43,11 @@ enum Commands {
     Init {
         #[arg(long, help = "Primary target IP or hostname")]
         target: Option<String>,
-        #[arg(long, default_value = "general", help = "Assessment goal (e.g. general, ctf, webapp)")]
+        #[arg(
+            long,
+            default_value = "general",
+            help = "Assessment goal (e.g. general, ctf, webapp)"
+        )]
         goal: String,
         #[arg(long, help = "CIDR scope restriction (e.g. 10.10.10.0/24)")]
         scope: Option<String>,
@@ -53,7 +57,10 @@ enum Commands {
         #[command(subcommand)]
         command: kb::KbCommands,
     },
-    #[command(about = "Show session metrics: hosts, ports, creds, flags, hypotheses", visible_alias = "st")]
+    #[command(
+        about = "Show session metrics: hosts, ports, creds, flags, hypotheses",
+        visible_alias = "st"
+    )]
     Status {
         #[arg(long, help = "Output as JSON")]
         json: bool,
@@ -63,7 +70,10 @@ enum Commands {
         #[command(subcommand)]
         command: hypothesis::HypothesisCommands,
     },
-    #[command(about = "Record and manage evidence and findings", visible_alias = "ev")]
+    #[command(
+        about = "Record and manage evidence and findings",
+        visible_alias = "ev"
+    )]
     Evidence {
         #[command(subcommand)]
         command: evidence::EvidenceCommands,
@@ -78,7 +88,10 @@ enum Commands {
         #[command(subcommand)]
         command: scope::ScopeCommands,
     },
-    #[command(about = "View and modify configuration (global and workspace)", visible_alias = "conf")]
+    #[command(
+        about = "View and modify configuration (global and workspace)",
+        visible_alias = "conf"
+    )]
     Config {
         #[command(subcommand)]
         command: config_cmd::ConfigCommands,
@@ -88,14 +101,20 @@ enum Commands {
         #[command(subcommand)]
         command: Option<setup::SetupCommands>,
     },
-    #[command(about = "Import tool output files into the knowledge base", visible_alias = "eat")]
+    #[command(
+        about = "Import tool output files into the knowledge base",
+        visible_alias = "eat"
+    )]
     Ingest {
         #[arg(help = "Path to tool output file (nmap, gobuster, nuclei, nikto, feroxbuster)")]
         file: String,
         #[arg(long, help = "Override auto-detected tool name")]
         tool: Option<String>,
     },
-    #[command(about = "Generate a penetration test report from session data", visible_alias = "rep")]
+    #[command(
+        about = "Generate a penetration test report from session data",
+        visible_alias = "rep"
+    )]
     Report {
         #[command(subcommand)]
         command: report::ReportCommands,
@@ -104,7 +123,10 @@ enum Commands {
     Pipeline,
     #[command(about = "Print shell commands to activate the redtrail environment")]
     Env,
-    #[command(about = "Print shell commands to deactivate the redtrail environment", visible_alias = "deact")]
+    #[command(
+        about = "Print shell commands to deactivate the redtrail environment",
+        visible_alias = "deact"
+    )]
     Deactivate,
     #[command(about = "Manage redtrail skills (create, test, install, remove)")]
     Skill {
@@ -124,7 +146,10 @@ enum Commands {
         #[arg(long, help = "Suppress skill auto-detection")]
         no_skill: bool,
     },
-    #[command(about = "One-shot LLM query with session context (no history)", visible_alias = "q")]
+    #[command(
+        about = "One-shot LLM query with session context (no history)",
+        visible_alias = "q"
+    )]
     Query {
         #[arg(help = "Your question")]
         message: String,
@@ -146,7 +171,13 @@ enum Commands {
     },
 }
 
-fn resolve_session() -> Result<(impl crate::db::KnowledgeBase + crate::db::Hypotheses + crate::db::CommandLog + SessionOps, String), Error> {
+fn resolve_session() -> Result<
+    (
+        impl crate::db::KnowledgeBase + crate::db::Hypotheses + crate::db::CommandLog + SessionOps,
+        String,
+    ),
+    Error,
+> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
     let db_path = workspace::db_path(&ws);
@@ -156,11 +187,38 @@ fn resolve_session() -> Result<(impl crate::db::KnowledgeBase + crate::db::Hypot
 }
 
 const KNOWN_SUBCOMMANDS: &[&str] = &[
-    "init", "kb", "status", "hypothesis", "evidence",
-    "session", "scope", "config", "setup", "ingest", "report", "pipeline", "env", "deactivate", "skill",
-    "ask", "query", "sql",
-    "st", "theory", "ev", "sess", "conf", "eat", "rep", "deact", "q",
-    "help", "--help", "-h", "--version", "-V",
+    "init",
+    "kb",
+    "status",
+    "hypothesis",
+    "evidence",
+    "session",
+    "scope",
+    "config",
+    "setup",
+    "ingest",
+    "report",
+    "pipeline",
+    "env",
+    "deactivate",
+    "skill",
+    "ask",
+    "query",
+    "sql",
+    "st",
+    "theory",
+    "ev",
+    "sess",
+    "conf",
+    "eat",
+    "rep",
+    "deact",
+    "q",
+    "help",
+    "--help",
+    "-h",
+    "--version",
+    "-V",
 ];
 
 pub fn run() -> Result<(), Error> {
@@ -176,9 +234,11 @@ pub fn run() -> Result<(), Error> {
 
     let cli = Cli::parse();
     match cli.command {
-        Some(Commands::Init { target, goal, scope }) => {
-            init::run(target, goal, scope)
-        }
+        Some(Commands::Init {
+            target,
+            goal,
+            scope,
+        }) => init::run(target, goal, scope),
         Some(Commands::Kb { command }) => {
             let (db, sid) = resolve_session()?;
             kb::run(&db, &sid, command)
@@ -203,16 +263,12 @@ pub fn run() -> Result<(), Error> {
             let (db, sid) = resolve_session()?;
             scope::run(&db, &sid, command)
         }
-        Some(Commands::Config { command }) => {
-            config_cmd::run(command)
-        }
-        Some(Commands::Setup { command }) => {
-            match command {
-                None => setup::run_wizard(),
-                Some(setup::SetupCommands::Status { json }) => setup::run_status(json),
-                Some(setup::SetupCommands::Aliases(args)) => setup::run_aliases(args),
-            }
-        }
+        Some(Commands::Config { command }) => config_cmd::run(command),
+        Some(Commands::Setup { command }) => match command {
+            None => setup::run_wizard(),
+            Some(setup::SetupCommands::Status { json }) => setup::run_status(json),
+            Some(setup::SetupCommands::Aliases(args)) => setup::run_aliases(args),
+        },
         Some(Commands::Ingest { file, tool }) => {
             let (db, sid) = resolve_session()?;
             ingest::run(&db, &sid, &file, tool)
@@ -229,25 +285,40 @@ pub fn run() -> Result<(), Error> {
             let (db, sid) = resolve_session()?;
             env::run(&db, &sid)
         }
-        Some(Commands::Deactivate) => {
-            env::deactivate()
-        }
-        Some(Commands::Skill { command }) => {
-            skill::run(command)
-        }
-        Some(Commands::Ask { message, clear, model, skill, no_skill }) => {
-            ask::run(message.as_deref(), true, clear, model.as_deref(), skill.as_deref(), no_skill)
-        }
-        Some(Commands::Query { message, model, skill, no_skill }) => {
-            ask::run(Some(&message), false, false, model.as_deref(), skill.as_deref(), no_skill)
-        }
-        Some(Commands::Sql { sql, file, json }) => {
-            match (sql, file) {
-                (_, Some(path)) => sql::run_file(&path, json),
-                (Some(query), _) => sql::run(&query, json),
-                (None, None) => Err(Error::Config("provide SQL or --file".into())),
-            }
-        }
+        Some(Commands::Deactivate) => env::deactivate(),
+        Some(Commands::Skill { command }) => skill::run(command),
+        Some(Commands::Ask {
+            message,
+            clear,
+            model,
+            skill,
+            no_skill,
+        }) => ask::run(
+            message.as_deref(),
+            true,
+            clear,
+            model.as_deref(),
+            skill.as_deref(),
+            no_skill,
+        ),
+        Some(Commands::Query {
+            message,
+            model,
+            skill,
+            no_skill,
+        }) => ask::run(
+            Some(&message),
+            false,
+            false,
+            model.as_deref(),
+            skill.as_deref(),
+            no_skill,
+        ),
+        Some(Commands::Sql { sql, file, json }) => match (sql, file) {
+            (_, Some(path)) => sql::run_file(&path, json),
+            (Some(query), _) => sql::run(&query, json),
+            (None, None) => Err(Error::Config("provide SQL or --file".into())),
+        },
         None => {
             println!("rt: redtrail. Use --help for usage.");
             Ok(())

@@ -1,9 +1,9 @@
-use std::io::{Read, Write};
-use std::time::Instant;
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use crate::db::SessionOps;
 use crate::error::Error;
 use crate::workspace;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use std::io::{Read, Write};
+use std::time::Instant;
 
 pub fn run(args: &[String]) -> Result<(), Error> {
     if args.is_empty() {
@@ -17,12 +17,14 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     let ws = workspace::find_workspace(&cwd);
 
     let pty_system = native_pty_system();
-    let pair = pty_system.openpty(PtySize {
-        rows: 24,
-        cols: 80,
-        pixel_width: 0,
-        pixel_height: 0,
-    }).map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
     let mut cmd = CommandBuilder::new(&args[0]);
     for arg in &args[1..] {
@@ -30,11 +32,15 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     }
     cmd.cwd(&cwd);
 
-    let mut child = pair.slave.spawn_command(cmd)
+    let mut child = pair
+        .slave
+        .spawn_command(cmd)
         .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
     drop(pair.slave);
 
-    let mut reader = pair.master.try_clone_reader()
+    let mut reader = pair
+        .master
+        .try_clone_reader()
         .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
 
     let start = Instant::now();
@@ -54,7 +60,8 @@ pub fn run(args: &[String]) -> Result<(), Error> {
         }
     }
 
-    let status = child.wait()
+    let status = child
+        .wait()
         .map_err(|e| Error::Io(std::io::Error::other(e.to_string())))?;
     let exit_code = status.exit_code() as i32;
     let duration_ms = start.elapsed().as_millis() as i64;
@@ -64,16 +71,21 @@ pub fn run(args: &[String]) -> Result<(), Error> {
         let db_path = workspace::db_path(&ws);
         if let Ok(db) = crate::db::open(db_path.to_str().unwrap())
             && let Ok(session_id) = db.active_session_id()
+            && let Ok(result) = crate::pipeline::process_command(
+                &db,
+                &session_id,
+                &cmd_str,
+                exit_code,
+                duration_ms,
+                &output_str,
+                tool,
+            )
         {
-            if let Ok(result) = crate::pipeline::process_command(
-                &db, &session_id, &cmd_str, exit_code, duration_ms, &output_str, tool,
-            ) {
-                for flag in &result.flags_found {
-                    eprintln!("[rt] flag captured: {flag}");
-                }
-                for warn in &result.scope_warnings {
-                    eprintln!("[rt] warning: {warn}");
-                }
+            for flag in &result.flags_found {
+                eprintln!("[rt] flag captured: {flag}");
+            }
+            for warn in &result.scope_warnings {
+                eprintln!("[rt] warning: {warn}");
             }
         }
     }

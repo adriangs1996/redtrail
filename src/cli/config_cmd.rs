@@ -1,7 +1,7 @@
-use clap::Subcommand;
-use crate::error::Error;
 use crate::config::Config;
+use crate::error::Error;
 use crate::workspace;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum ConfigCommands {
@@ -30,8 +30,8 @@ pub fn run(cmd: ConfigCommands) -> Result<(), Error> {
             } else {
                 Config::load_global()?
             };
-            let toml_str = toml::to_string_pretty(&config)
-                .map_err(|e| Error::Config(e.to_string()))?;
+            let toml_str =
+                toml::to_string_pretty(&config).map_err(|e| Error::Config(e.to_string()))?;
             print!("{}", toml_str);
             Ok(())
         }
@@ -43,15 +43,17 @@ pub fn run(cmd: ConfigCommands) -> Result<(), Error> {
             } else {
                 Config::load_global()?
             };
-            let toml_val = toml::Value::try_from(&config)
-                .map_err(|e| Error::Config(e.to_string()))?;
+            let toml_val =
+                toml::Value::try_from(&config).map_err(|e| Error::Config(e.to_string()))?;
 
             let parts: Vec<&str> = key.split('.').collect();
             let mut current = &toml_val;
             for part in &parts {
                 match current {
                     toml::Value::Table(t) => {
-                        current = t.get(*part).ok_or_else(|| Error::Config(format!("key not found: {key}")))?;
+                        current = t
+                            .get(*part)
+                            .ok_or_else(|| Error::Config(format!("key not found: {key}")))?;
                     }
                     _ => return Err(Error::Config(format!("key not found: {key}"))),
                 }
@@ -83,7 +85,8 @@ pub fn run(cmd: ConfigCommands) -> Result<(), Error> {
             };
 
             let parts: Vec<&str> = key.split('.').collect();
-            let parsed_value: toml::Value = value.parse::<i64>()
+            let parsed_value: toml::Value = value
+                .parse::<i64>()
                 .map(toml::Value::Integer)
                 .or_else(|_| value.parse::<f64>().map(toml::Value::Float))
                 .or_else(|_| value.parse::<bool>().map(toml::Value::Boolean))
@@ -91,8 +94,8 @@ pub fn run(cmd: ConfigCommands) -> Result<(), Error> {
 
             set_nested(&mut toml_val, &parts, parsed_value)?;
 
-            let out = toml::to_string_pretty(&toml_val)
-                .map_err(|e| Error::Config(e.to_string()))?;
+            let out =
+                toml::to_string_pretty(&toml_val).map_err(|e| Error::Config(e.to_string()))?;
 
             if let Some(parent) = config_path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -105,18 +108,24 @@ pub fn run(cmd: ConfigCommands) -> Result<(), Error> {
 }
 
 fn set_nested(val: &mut toml::Value, parts: &[&str], new_val: toml::Value) -> Result<(), Error> {
-    if parts.is_empty() { return Ok(()); }
+    if parts.is_empty() {
+        return Ok(());
+    }
     match val {
         toml::Value::Table(t) => {
             if parts.len() == 1 {
                 t.insert(parts[0].to_string(), new_val);
             } else {
-                let entry = t.entry(parts[0].to_string())
+                let entry = t
+                    .entry(parts[0].to_string())
                     .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
                 set_nested(entry, &parts[1..], new_val)?;
             }
             Ok(())
         }
-        _ => Err(Error::Config(format!("cannot set key on non-table value at '{}'", parts[0]))),
+        _ => Err(Error::Config(format!(
+            "cannot set key on non-table value at '{}'",
+            parts[0]
+        ))),
     }
 }

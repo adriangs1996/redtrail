@@ -1,12 +1,31 @@
-use clap::{Args, Subcommand};
-use crate::error::Error;
 use crate::config::Config;
+use crate::error::Error;
 use crate::workspace;
+use clap::{Args, Subcommand};
 
 const KNOWN_TOOLS: &[&str] = &[
-    "nmap", "gobuster", "feroxbuster", "ffuf", "dirb", "nikto", "sqlmap", "hydra",
-    "crackmapexec", "whatweb", "nuclei", "john", "hashcat", "curl", "wget", "ssh",
-    "scp", "nc", "netcat", "enum4linux", "responder", "wfuzz",
+    "nmap",
+    "gobuster",
+    "feroxbuster",
+    "ffuf",
+    "dirb",
+    "nikto",
+    "sqlmap",
+    "hydra",
+    "crackmapexec",
+    "whatweb",
+    "nuclei",
+    "john",
+    "hashcat",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "nc",
+    "netcat",
+    "enum4linux",
+    "responder",
+    "wfuzz",
 ];
 
 #[derive(Subcommand)]
@@ -44,7 +63,8 @@ fn detect_shell() -> String {
 }
 
 fn scan_tools() -> Vec<String> {
-    KNOWN_TOOLS.iter()
+    KNOWN_TOOLS
+        .iter()
         .filter(|t| {
             std::process::Command::new("which")
                 .arg(t)
@@ -61,8 +81,7 @@ fn write_global_config(config: &Config) -> Result<std::path::PathBuf, Error> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let toml_str = toml::to_string_pretty(config)
-        .map_err(|e| Error::Config(e.to_string()))?;
+    let toml_str = toml::to_string_pretty(config).map_err(|e| Error::Config(e.to_string()))?;
     std::fs::write(&path, toml_str)?;
     Ok(path)
 }
@@ -82,7 +101,8 @@ pub fn run_wizard() -> Result<(), Error> {
     println!("Found {} pentesting tools on PATH", found_tools.len());
 
     let tool_labels: Vec<&str> = KNOWN_TOOLS.to_vec();
-    let defaults: Vec<bool> = KNOWN_TOOLS.iter()
+    let defaults: Vec<bool> = KNOWN_TOOLS
+        .iter()
         .map(|t| found_tools.contains(&t.to_string()))
         .collect();
 
@@ -93,7 +113,8 @@ pub fn run_wizard() -> Result<(), Error> {
         .interact()
         .map_err(|e| Error::Config(e.to_string()))?;
 
-    let selected_tools: Vec<String> = selected_indices.iter()
+    let selected_tools: Vec<String> = selected_indices
+        .iter()
         .map(|&i| KNOWN_TOOLS[i].to_string())
         .collect();
 
@@ -133,8 +154,7 @@ pub fn run_status(json: bool) -> Result<(), Error> {
     let shell = detect_shell();
 
     let cwd = std::env::current_dir()?;
-    let active_workspace = workspace::find_workspace(&cwd)
-        .map(|p| p.to_string_lossy().to_string());
+    let active_workspace = workspace::find_workspace(&cwd).map(|p| p.to_string_lossy().to_string());
 
     if json {
         let obj = serde_json::json!({

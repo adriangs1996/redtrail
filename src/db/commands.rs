@@ -1,16 +1,32 @@
-use rusqlite::{Connection, params};
 use crate::error::Error;
+use rusqlite::{Connection, params};
 
-pub fn insert(conn: &Connection, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error> {
+pub fn insert(
+    conn: &Connection,
+    session_id: &str,
+    command: &str,
+    tool: Option<&str>,
+) -> Result<i64, Error> {
     conn.execute(
         "INSERT INTO command_history (session_id, command, tool) VALUES (?1, ?2, ?3)",
         params![session_id, command, tool],
-    ).map_err(|e| Error::Db(e.to_string()))?;
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
     Ok(conn.last_insert_rowid())
 }
 
-pub fn finish(conn: &Connection, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error> {
-    let preview = if output.len() > 500 { &output[..500] } else { output };
+pub fn finish(
+    conn: &Connection,
+    id: i64,
+    exit_code: i32,
+    duration_ms: i64,
+    output: &str,
+) -> Result<(), Error> {
+    let preview = if output.len() > 500 {
+        &output[..500]
+    } else {
+        output
+    };
     conn.execute(
         "UPDATE command_history SET exit_code = ?1, duration_ms = ?2, output = ?3, output_preview = ?4 WHERE id = ?5",
         params![exit_code, duration_ms, output, preview, id],
@@ -18,35 +34,44 @@ pub fn finish(conn: &Connection, id: i64, exit_code: i32, duration_ms: i64, outp
     Ok(())
 }
 
-pub fn get_for_extraction(conn: &Connection, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error> {
+pub fn get_for_extraction(
+    conn: &Connection,
+    id: i64,
+) -> Result<(String, String, Option<String>, Option<String>), Error> {
     conn.query_row(
         "SELECT session_id, command, tool, output FROM command_history WHERE id = ?1",
         params![id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-    ).map_err(|e| Error::Db(e.to_string()))
+    )
+    .map_err(|e| Error::Db(e.to_string()))
 }
 
 pub fn update_extraction_status(conn: &Connection, id: i64, status: &str) -> Result<(), Error> {
     conn.execute(
         "UPDATE command_history SET extraction_status = ?1 WHERE id = ?2",
         params![status, id],
-    ).map_err(|e| Error::Db(e.to_string()))?;
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::db::{open_in_memory, CommandLog, SessionOps};
+    use crate::db::{CommandLog, SessionOps, open_in_memory};
 
     #[test]
     fn test_command_capture_lifecycle() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
-        let cmd_id = db.insert_command("s1", "nmap -sV 10.10.10.1", Some("nmap")).unwrap();
+        let cmd_id = db
+            .insert_command("s1", "nmap -sV 10.10.10.1", Some("nmap"))
+            .unwrap();
         assert!(cmd_id > 0);
 
-        db.finish_command(cmd_id, 0, 1500, "22/tcp open ssh OpenSSH 8.9").unwrap();
+        db.finish_command(cmd_id, 0, 1500, "22/tcp open ssh OpenSSH 8.9")
+            .unwrap();
 
         let (session_id, command, tool, output) = db.get_command_for_extraction(cmd_id).unwrap();
         assert_eq!(session_id, "s1");

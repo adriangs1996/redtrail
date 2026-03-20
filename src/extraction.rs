@@ -1,7 +1,12 @@
 use crate::db::{CommandLog, KnowledgeBase};
 use crate::error::Error;
 
-pub fn extract_sync(db: &(impl CommandLog + KnowledgeBase), session_id: &str, cmd_id: i64, _config: &crate::config::Config) -> Result<(), Error> {
+pub fn extract_sync(
+    db: &(impl CommandLog + KnowledgeBase),
+    session_id: &str,
+    cmd_id: i64,
+    _config: &crate::config::Config,
+) -> Result<(), Error> {
     let (row_session_id, command, tool, output) = db.get_command_for_extraction(cmd_id)?;
     let _ = row_session_id;
 
@@ -19,7 +24,9 @@ pub fn extract_sync(db: &(impl CommandLog + KnowledgeBase), session_id: &str, cm
 
     let truncated = if output.len() > 8000 {
         let mut end = 8000;
-        while end > 0 && !output.is_char_boundary(end) { end -= 1; }
+        while end > 0 && !output.is_char_boundary(end) {
+            end -= 1;
+        }
         &output[..end]
     } else {
         &output
@@ -48,61 +55,116 @@ pub fn extract_sync(db: &(impl CommandLog + KnowledgeBase), session_id: &str, cm
     Ok(())
 }
 
-pub fn apply_extraction(db: &impl KnowledgeBase, session_id: &str, json_str: &str) -> Result<(), Error> {
+pub fn apply_extraction(
+    db: &impl KnowledgeBase,
+    session_id: &str,
+    json_str: &str,
+) -> Result<(), Error> {
     let v: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| Error::Config(format!("invalid JSON from LLM: {e}")))?;
 
     if let Some(hosts) = v["hosts"].as_array() {
         for h in hosts {
-            let ip = match h["ip"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
+            let ip = match h["ip"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
             let os = h["os"].as_str().filter(|s| !s.is_empty() && *s != "...");
-            let hostname = h["hostname"].as_str().filter(|s| !s.is_empty() && *s != "...");
+            let hostname = h["hostname"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
             db.add_host(session_id, ip, os, hostname)?;
         }
     }
 
     if let Some(ports) = v["ports"].as_array() {
         for p in ports {
-            let ip = match p["ip"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
-            let port = match p["port"].as_i64() { Some(n) if n > 0 => n, _ => continue };
-            let protocol = p["protocol"].as_str().filter(|s| !s.is_empty() && *s != "...");
-            let service = p["service"].as_str().filter(|s| !s.is_empty() && *s != "...");
-            let version = p["version"].as_str().filter(|s| !s.is_empty() && *s != "...");
+            let ip = match p["ip"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let port = match p["port"].as_i64() {
+                Some(n) if n > 0 => n,
+                _ => continue,
+            };
+            let protocol = p["protocol"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let service = p["service"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let version = p["version"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
             db.add_port(session_id, ip, port, protocol, service, version)?;
         }
     }
 
     if let Some(creds) = v["credentials"].as_array() {
         for c in creds {
-            let username = match c["username"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
-            let password = c["password"].as_str().filter(|s| !s.is_empty() && *s != "...");
-            let service = c["service"].as_str().filter(|s| !s.is_empty() && *s != "...");
+            let username = match c["username"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let password = c["password"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
+            let service = c["service"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
             let host = c["host"].as_str().filter(|s| !s.is_empty() && *s != "...");
-            db.add_credential(session_id, username, password, None, service, host, Some("llm-extraction"))?;
+            db.add_credential(
+                session_id,
+                username,
+                password,
+                None,
+                service,
+                host,
+                Some("llm-extraction"),
+            )?;
         }
     }
 
     if let Some(flags) = v["flags"].as_array() {
         for f in flags {
-            let value = match f["value"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
-            let source = f["source"].as_str().filter(|s| !s.is_empty() && *s != "...");
+            let value = match f["value"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let source = f["source"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
             db.add_flag(session_id, value, source)?;
         }
     }
 
     if let Some(access) = v["access"].as_array() {
         for a in access {
-            let host = match a["host"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
-            let user = match a["user"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
-            let level = match a["level"].as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
-            let method = a["method"].as_str().filter(|s| !s.is_empty() && *s != "...");
+            let host = match a["host"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let user = match a["user"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let level = match a["level"].as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
+            let method = a["method"]
+                .as_str()
+                .filter(|s| !s.is_empty() && *s != "...");
             db.add_access(session_id, host, user, level, method)?;
         }
     }
 
     if let Some(notes) = v["notes"].as_array() {
         for n in notes {
-            let text = match n.as_str() { Some(s) if !s.is_empty() && s != "..." => s, _ => continue };
+            let text = match n.as_str() {
+                Some(s) if !s.is_empty() && s != "..." => s,
+                _ => continue,
+            };
             db.add_note(session_id, text)?;
         }
     }
@@ -117,7 +179,8 @@ fn call_llm(prompt: &str, config: &crate::config::Config) -> Result<String, Erro
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| Error::Config(e.to_string()))?;
-    let resp = client.post("https://api.anthropic.com/v1/messages")
+    let resp = client
+        .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
@@ -128,25 +191,28 @@ fn call_llm(prompt: &str, config: &crate::config::Config) -> Result<String, Erro
         }))
         .send()
         .map_err(|e| Error::Config(format!("LLM request: {e}")))?;
-    let body: serde_json::Value = resp.json()
+    let body: serde_json::Value = resp
+        .json()
         .map_err(|e| Error::Config(format!("LLM response: {e}")))?;
-    body["content"][0]["text"].as_str()
+    body["content"][0]["text"]
+        .as_str()
         .map(String::from)
         .ok_or(Error::Config("no text in LLM response".into()))
 }
 
 fn extract_json(text: &str) -> &str {
     if let Some(start) = text.find('{')
-        && let Some(end) = text.rfind('}') {
-            return &text[start..=end];
-        }
+        && let Some(end) = text.rfind('}')
+    {
+        return &text[start..=end];
+    }
     text
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{open_in_memory, KnowledgeBase, SessionOps};
+    use crate::db::{KnowledgeBase, SessionOps, open_in_memory};
 
     #[test]
     fn test_extract_json_plain() {
@@ -162,7 +228,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_hosts_and_ports() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[{"ip":"10.10.10.1","os":"Linux"}],"ports":[{"ip":"10.10.10.1","port":22,"protocol":"tcp","service":"ssh","version":"OpenSSH 8.9"}],"credentials":[],"flags":[],"access":[],"notes":["SSH found"]}"#;
         apply_extraction(&db, "s1", json).unwrap();
@@ -182,7 +249,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_credentials() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[{"username":"admin","password":"secret","service":"ssh","host":"10.10.10.1"}],"flags":[],"access":[],"notes":[]}"#;
         apply_extraction(&db, "s1", json).unwrap();

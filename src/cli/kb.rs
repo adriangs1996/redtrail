@@ -1,6 +1,6 @@
-use clap::Subcommand;
 use crate::db::{CommandLog, KnowledgeBase};
 use crate::error::Error;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum KbCommands {
@@ -119,7 +119,11 @@ pub enum KbCommands {
     },
 }
 
-pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbCommands) -> Result<(), Error> {
+pub fn run(
+    db: &(impl KnowledgeBase + CommandLog),
+    session_id: &str,
+    cmd: KbCommands,
+) -> Result<(), Error> {
     match cmd {
         KbCommands::Hosts { json, host } => {
             let rows = db.list_hosts(session_id)?;
@@ -136,7 +140,8 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
                 } else {
                     println!("{:<18} {:<20} {:<15} STATUS", "IP", "HOSTNAME", "OS");
                     for r in filtered {
-                        println!("{:<18} {:<20} {:<15} {}",
+                        println!(
+                            "{:<18} {:<20} {:<15} {}",
                             r["ip"].as_str().unwrap_or(""),
                             r["hostname"].as_str().unwrap_or("-"),
                             r["os"].as_str().unwrap_or("-"),
@@ -153,11 +158,18 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
             } else if rows.is_empty() {
                 println!("no ports");
             } else {
-                println!("{:<18} {:<8} {:<8} {:<15} VERSION", "IP", "PORT", "PROTO", "SERVICE");
+                println!(
+                    "{:<18} {:<8} {:<8} {:<15} VERSION",
+                    "IP", "PORT", "PROTO", "SERVICE"
+                );
                 for r in &rows {
-                    println!("{:<18} {:<8} {:<8} {:<15} {}",
+                    println!(
+                        "{:<18} {:<8} {:<8} {:<15} {}",
                         r["ip"].as_str().unwrap_or(""),
-                        r["port"].as_i64().map(|p| p.to_string()).unwrap_or_default(),
+                        r["port"]
+                            .as_i64()
+                            .map(|p| p.to_string())
+                            .unwrap_or_default(),
                         r["protocol"].as_str().unwrap_or(""),
                         r["service"].as_str().unwrap_or("-"),
                         r["version"].as_str().unwrap_or("-"),
@@ -172,9 +184,13 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
             } else if rows.is_empty() {
                 println!("no credentials");
             } else {
-                println!("{:<20} {:<20} {:<15} {:<15} SOURCE", "USERNAME", "PASSWORD", "SERVICE", "HOST");
+                println!(
+                    "{:<20} {:<20} {:<15} {:<15} SOURCE",
+                    "USERNAME", "PASSWORD", "SERVICE", "HOST"
+                );
                 for r in &rows {
-                    println!("{:<20} {:<20} {:<15} {:<15} {}",
+                    println!(
+                        "{:<20} {:<20} {:<15} {:<15} {}",
                         r["username"].as_str().unwrap_or(""),
                         r["password"].as_str().unwrap_or("-"),
                         r["service"].as_str().unwrap_or("-"),
@@ -193,7 +209,8 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
             } else {
                 println!("{:<40} {:<20} CAPTURED_AT", "VALUE", "SOURCE");
                 for r in &rows {
-                    println!("{:<40} {:<20} {}",
+                    println!(
+                        "{:<40} {:<20} {}",
                         r["value"].as_str().unwrap_or(""),
                         r["source"].as_str().unwrap_or("-"),
                         r["captured_at"].as_str().unwrap_or(""),
@@ -210,7 +227,8 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
             } else {
                 println!("{:<18} {:<20} {:<12} METHOD", "HOST", "USER", "LEVEL");
                 for r in &rows {
-                    println!("{:<18} {:<20} {:<12} {}",
+                    println!(
+                        "{:<18} {:<20} {:<12} {}",
                         r["host"].as_str().unwrap_or(""),
                         r["user"].as_str().unwrap_or(""),
                         r["level"].as_str().unwrap_or(""),
@@ -227,7 +245,11 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
                 println!("no notes");
             } else {
                 for r in &rows {
-                    println!("[{}] {}", r["created_at"].as_str().unwrap_or(""), r["text"].as_str().unwrap_or(""));
+                    println!(
+                        "[{}] {}",
+                        r["created_at"].as_str().unwrap_or(""),
+                        r["text"].as_str().unwrap_or("")
+                    );
                 }
             }
         }
@@ -239,7 +261,11 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
                 println!("no history");
             } else {
                 for r in &rows {
-                    println!("[{}] {}", r["started_at"].as_str().unwrap_or(""), r["command"].as_str().unwrap_or(""));
+                    println!(
+                        "[{}] {}",
+                        r["started_at"].as_str().unwrap_or(""),
+                        r["command"].as_str().unwrap_or("")
+                    );
                 }
             }
         }
@@ -251,7 +277,11 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
                 println!("no results");
             } else {
                 for r in &rows {
-                    println!("[{}] {}", r["kind"].as_str().unwrap_or(""), r["value"].as_str().unwrap_or(""));
+                    println!(
+                        "[{}] {}",
+                        r["kind"].as_str().unwrap_or(""),
+                        r["value"].as_str().unwrap_or("")
+                    );
                 }
             }
         }
@@ -259,19 +289,52 @@ pub fn run(db: &(impl KnowledgeBase + CommandLog), session_id: &str, cmd: KbComm
             let id = db.add_host(session_id, &ip, os.as_deref(), hostname.as_deref())?;
             println!("host added (id={id}): {ip}");
         }
-        KbCommands::AddPort { ip, port, protocol, service, version } => {
-            let id = db.add_port(session_id, &ip, port, protocol.as_deref(), service.as_deref(), version.as_deref())?;
+        KbCommands::AddPort {
+            ip,
+            port,
+            protocol,
+            service,
+            version,
+        } => {
+            let id = db.add_port(
+                session_id,
+                &ip,
+                port,
+                protocol.as_deref(),
+                service.as_deref(),
+                version.as_deref(),
+            )?;
             println!("port added (id={id}): {ip}:{port}");
         }
-        KbCommands::AddCred { username, pass, hash, service, host, source } => {
-            let id = db.add_credential(session_id, &username, pass.as_deref(), hash.as_deref(), service.as_deref(), host.as_deref(), source.as_deref())?;
+        KbCommands::AddCred {
+            username,
+            pass,
+            hash,
+            service,
+            host,
+            source,
+        } => {
+            let id = db.add_credential(
+                session_id,
+                &username,
+                pass.as_deref(),
+                hash.as_deref(),
+                service.as_deref(),
+                host.as_deref(),
+                source.as_deref(),
+            )?;
             println!("credential added (id={id}): {username}");
         }
         KbCommands::AddFlag { value, source } => {
             let id = db.add_flag(session_id, &value, source.as_deref())?;
             println!("flag added (id={id}): {value}");
         }
-        KbCommands::AddAccess { host, user, level, method } => {
+        KbCommands::AddAccess {
+            host,
+            user,
+            level,
+            method,
+        } => {
             let id = db.add_access(session_id, &host, &user, &level, method.as_deref())?;
             println!("access added (id={id}): {user}@{host} ({level})");
         }

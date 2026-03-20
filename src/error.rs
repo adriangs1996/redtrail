@@ -18,7 +18,10 @@ impl fmt::Display for Error {
             Error::Io(e) => write!(f, "io error: {e}"),
             Error::NoWorkspace => write!(f, "no redtrail workspace found (run `rt init`)"),
             Error::NoActiveSession => write!(f, "no active session"),
-            Error::SkillNotFound(name) => write!(f, "skill '{name}' not found in ~/.redtrail/skills/ or workspace skills/"),
+            Error::SkillNotFound(name) => write!(
+                f,
+                "skill '{name}' not found in ~/.redtrail/skills/ or workspace skills/"
+            ),
         }
     }
 }
@@ -26,5 +29,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self { Error::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e)
+    }
 }

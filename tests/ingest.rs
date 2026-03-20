@@ -1,12 +1,13 @@
-use std::process::Command;
 use std::fs;
+use std::process::Command;
 
 fn setup_workspace() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
     Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["init", "--target", "10.10.10.1"])
         .current_dir(tmp.path())
-        .output().unwrap();
+        .output()
+        .unwrap();
     tmp
 }
 
@@ -19,8 +20,13 @@ fn test_ingest_file() {
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["ingest", scan_file.to_str().unwrap()])
         .current_dir(tmp.path())
-        .output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("ingested"));
     assert!(stdout.contains("nmap"));
@@ -28,7 +34,8 @@ fn test_ingest_file() {
     let hist = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["kb", "history", "--json"])
         .current_dir(tmp.path())
-        .output().unwrap();
+        .output()
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&hist.stdout).unwrap();
     let arr = json.as_array().unwrap();
     assert!(!arr.is_empty());
@@ -44,7 +51,8 @@ fn test_ingest_with_tool_override() {
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["ingest", file.to_str().unwrap(), "--tool", "my-scanner"])
         .current_dir(tmp.path())
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("my-scanner"));

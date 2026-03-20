@@ -18,9 +18,16 @@ fn test_proxy_captures_output() {
         .current_dir(tmp.path())
         .output()
         .unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("hello"), "stdout should contain 'hello', got: {stdout}");
+    assert!(
+        stdout.contains("hello"),
+        "stdout should contain 'hello', got: {stdout}"
+    );
 
     let db_out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["kb", "history", "--json"])

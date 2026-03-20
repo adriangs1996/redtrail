@@ -1,6 +1,6 @@
-use clap::Subcommand;
-use crate::db::{KnowledgeBase, Hypotheses, SessionOps};
+use crate::db::{Hypotheses, KnowledgeBase, SessionOps};
 use crate::error::Error;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum ReportCommands {
@@ -13,7 +13,11 @@ pub enum ReportCommands {
     },
 }
 
-pub fn run(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id: &str, command: ReportCommands) -> Result<(), Error> {
+pub fn run(
+    db: &(impl KnowledgeBase + Hypotheses + SessionOps),
+    session_id: &str,
+    command: ReportCommands,
+) -> Result<(), Error> {
     match command {
         ReportCommands::Generate { format: _, output } => {
             let md = build_report(db, session_id)?;
@@ -32,7 +36,9 @@ fn format_finding(ev: &serde_json::Value, hypotheses: &[serde_json::Value]) -> S
     let finding = ev["finding"].as_str().unwrap_or("");
     let poc = ev["poc"].as_str().unwrap_or("");
     let hyp_stmt = ev["hypothesis_id"].as_i64().and_then(|id| {
-        hypotheses.iter().find(|h| h["id"].as_i64() == Some(id))
+        hypotheses
+            .iter()
+            .find(|h| h["id"].as_i64() == Some(id))
             .and_then(|h| h["statement"].as_str())
     });
     match (hyp_stmt, poc.is_empty()) {
@@ -43,7 +49,10 @@ fn format_finding(ev: &serde_json::Value, hypotheses: &[serde_json::Value]) -> S
     }
 }
 
-fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id: &str) -> Result<String, Error> {
+fn build_report(
+    db: &(impl KnowledgeBase + Hypotheses + SessionOps),
+    session_id: &str,
+) -> Result<String, Error> {
     let summary = db.status_summary(session_id)?;
     let hosts = db.list_hosts(session_id)?;
     let ports = db.list_ports(session_id, None)?;
@@ -91,7 +100,8 @@ fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id:
         ("Medium", vec!["medium"]),
         ("Low / Info", vec!["low", "info"]),
     ] {
-        let bucket: Vec<_> = evidence.iter()
+        let bucket: Vec<_> = evidence
+            .iter()
             .filter(|e| severities.contains(&e["severity"].as_str().unwrap_or("info")))
             .collect();
         if !bucket.is_empty() {
@@ -111,15 +121,24 @@ fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id:
         let ip = host["ip"].as_str().unwrap_or("");
         let hostname = host["hostname"].as_str().unwrap_or("-");
         let os = host["os"].as_str().unwrap_or("-");
-        let host_ports: Vec<String> = ports.iter()
+        let host_ports: Vec<String> = ports
+            .iter()
             .filter(|p| p["ip"].as_str() == Some(ip))
             .map(|p| {
                 let port = p["port"].as_i64().unwrap_or(0);
                 let svc = p["service"].as_str().unwrap_or("");
-                if svc.is_empty() { format!("{port}") } else { format!("{port}/{svc}") }
+                if svc.is_empty() {
+                    format!("{port}")
+                } else {
+                    format!("{port}/{svc}")
+                }
             })
             .collect();
-        let ports_str = if host_ports.is_empty() { "-".to_string() } else { host_ports.join(", ") };
+        let ports_str = if host_ports.is_empty() {
+            "-".to_string()
+        } else {
+            host_ports.join(", ")
+        };
         md.push_str(&format!("| {ip} | {hostname} | {os} | {ports_str} |\n"));
     }
     md.push('\n');
@@ -147,7 +166,9 @@ fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id:
             let service = c["service"].as_str().unwrap_or("-");
             let host = c["host"].as_str().unwrap_or("-");
             let source = c["source"].as_str().unwrap_or("-");
-            md.push_str(&format!("| {username} | {password} | {service} | {host} | {source} |\n"));
+            md.push_str(&format!(
+                "| {username} | {password} | {service} | {host} | {source} |\n"
+            ));
         }
         md.push('\n');
     }
@@ -161,11 +182,17 @@ fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id:
         for h in timeline {
             let started_at = h["started_at"].as_str().unwrap_or("-");
             let command = h["command"].as_str().unwrap_or("");
-            let exit_code = h["exit_code"].as_i64().map(|c| c.to_string()).unwrap_or("-".to_string());
-            let duration = h["duration_ms"].as_i64()
+            let exit_code = h["exit_code"]
+                .as_i64()
+                .map(|c| c.to_string())
+                .unwrap_or("-".to_string());
+            let duration = h["duration_ms"]
+                .as_i64()
                 .map(|ms| format!("{ms}ms"))
                 .unwrap_or("-".to_string());
-            md.push_str(&format!("| {started_at} | `{command}` | {exit_code} | {duration} |\n"));
+            md.push_str(&format!(
+                "| {started_at} | `{command}` | {exit_code} | {duration} |\n"
+            ));
         }
         md.push('\n');
     }
@@ -180,7 +207,9 @@ fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id:
             let cat = h["category"].as_str().unwrap_or("");
             let status = h["status"].as_str().unwrap_or("");
             let priority = h["priority"].as_str().unwrap_or("");
-            md.push_str(&format!("| {id} | {stmt} | {cat} | {status} | {priority} |\n"));
+            md.push_str(&format!(
+                "| {id} | {stmt} | {cat} | {status} | {priority} |\n"
+            ));
         }
         md.push('\n');
     }
@@ -188,15 +217,29 @@ fn build_report(db: &(impl KnowledgeBase + Hypotheses + SessionOps), session_id:
     md.push_str("## Methodology\n\n");
     md.push_str("Redtrail deductive methodology (L0-L4):\n\n");
     let phase_num: i32 = phase.trim_start_matches('L').parse().unwrap_or(0);
-    for (i, label) in ["Reconnaissance", "Hypothesis Generation", "Probing", "Exploitation"].iter().enumerate() {
-        let status = if i as i32 <= phase_num { "complete" } else { "pending" };
+    for (i, label) in [
+        "Reconnaissance",
+        "Hypothesis Generation",
+        "Probing",
+        "Exploitation",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let status = if i as i32 <= phase_num {
+            "complete"
+        } else {
+            "pending"
+        };
         md.push_str(&format!("- L{i} {label}: {status}\n"));
     }
     md.push('\n');
 
     md.push_str("## Metrics\n\n");
     md.push_str(&format!("- Total commands: {}\n", history.len()));
-    md.push_str(&format!("- Hypotheses: {hyp_total} generated, {hyp_confirmed} confirmed, {hyp_refuted} refuted\n"));
+    md.push_str(&format!(
+        "- Hypotheses: {hyp_total} generated, {hyp_confirmed} confirmed, {hyp_refuted} refuted\n"
+    ));
     md.push_str(&format!("- Noise budget remaining: {noise_budget:.2}\n"));
 
     Ok(md)

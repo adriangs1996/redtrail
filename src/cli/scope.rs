@@ -1,11 +1,13 @@
-use clap::Subcommand;
 use crate::db::SessionOps;
 use crate::error::Error;
 use crate::net;
+use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum ScopeCommands {
-    #[command(about = "Check if an IP is within the session's defined scope (exit 0 = in, exit 1 = out)")]
+    #[command(
+        about = "Check if an IP is within the session's defined scope (exit 0 = in, exit 1 = out)"
+    )]
     Check {
         #[arg(help = "IP address to check")]
         ip: String,

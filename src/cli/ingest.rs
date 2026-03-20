@@ -1,8 +1,13 @@
-use std::fs;
 use crate::db::CommandLog;
 use crate::error::Error;
+use std::fs;
 
-pub fn run(db: &impl CommandLog, session_id: &str, file: &str, tool_override: Option<String>) -> Result<(), Error> {
+pub fn run(
+    db: &impl CommandLog,
+    session_id: &str,
+    file: &str,
+    tool_override: Option<String>,
+) -> Result<(), Error> {
     let content = fs::read_to_string(file)?;
     let tool = tool_override.unwrap_or_else(|| detect_tool(&content));
     let filename = std::path::Path::new(file)
@@ -13,7 +18,10 @@ pub fn run(db: &impl CommandLog, session_id: &str, file: &str, tool_override: Op
     let cmd_id = db.insert_command(session_id, &format!("rt ingest {filename}"), Some(&tool))?;
     db.finish_command(cmd_id, 0, 0, &content)?;
 
-    println!("ingested: {filename} (tool: {tool}, {} bytes)", content.len());
+    println!(
+        "ingested: {filename} (tool: {tool}, {} bytes)",
+        content.len()
+    );
     println!("extraction pending — run `rt kb extract {cmd_id}` to extract manually");
     Ok(())
 }

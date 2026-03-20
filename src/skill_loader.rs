@@ -1,6 +1,6 @@
-use std::path::Path;
-use rusqlite::Connection;
 use crate::error::Error;
+use rusqlite::Connection;
+use std::path::Path;
 
 pub struct SkillMatch {
     pub phase_name: String,
@@ -9,21 +9,41 @@ pub struct SkillMatch {
 }
 
 pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillMatch>, Error> {
-    let (host_count, hyp_total, hyp_pending, hyp_confirmed, hyp_refuted): (i64, i64, i64, i64, i64) = conn.query_row(
-        "SELECT
+    let (host_count, hyp_total, hyp_pending, hyp_confirmed, hyp_refuted): (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = conn
+        .query_row(
+            "SELECT
             (SELECT count(*) FROM hosts WHERE session_id = ?1),
             (SELECT count(*) FROM hypotheses WHERE session_id = ?1),
             (SELECT count(*) FROM hypotheses WHERE session_id = ?1 AND status = 'pending'),
             (SELECT count(*) FROM hypotheses WHERE session_id = ?1 AND status = 'confirmed'),
             (SELECT count(*) FROM hypotheses WHERE session_id = ?1 AND status = 'refuted')",
-        rusqlite::params![session_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-    ).map_err(|e| Error::Db(e.to_string()))?;
+            rusqlite::params![session_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
 
-    phase_from_counts(host_count, hyp_total, hyp_pending, hyp_confirmed, hyp_refuted)
+    phase_from_counts(
+        host_count,
+        hyp_total,
+        hyp_pending,
+        hyp_confirmed,
+        hyp_refuted,
+    )
 }
 
-fn phase_from_counts(hosts: i64, hyp_total: i64, hyp_pending: i64, hyp_confirmed: i64, hyp_refuted: i64) -> Result<Option<SkillMatch>, Error> {
+fn phase_from_counts(
+    hosts: i64,
+    hyp_total: i64,
+    hyp_pending: i64,
+    hyp_confirmed: i64,
+    hyp_refuted: i64,
+) -> Result<Option<SkillMatch>, Error> {
     if hosts == 0 && hyp_total == 0 {
         return Ok(Some(SkillMatch {
             phase_name: "Setup".into(),
@@ -75,7 +95,10 @@ fn bundled_prompt(skill_name: &str) -> Option<&'static str> {
 
 pub fn load_skill_prompt(skill_name: &str, workspace: Option<&Path>) -> Result<String, Error> {
     if let Some(home) = dirs::home_dir() {
-        let installed = home.join(".redtrail/skills").join(skill_name).join("prompt.md");
+        let installed = home
+            .join(".redtrail/skills")
+            .join(skill_name)
+            .join("prompt.md");
         if installed.exists() {
             return std::fs::read_to_string(&installed).map_err(Error::Io);
         }
@@ -119,10 +142,8 @@ mod tests {
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(crate::db::SCHEMA).unwrap();
-        conn.execute(
-            "INSERT INTO sessions (id, name) VALUES ('s1', 'test')",
-            [],
-        ).unwrap();
+        conn.execute("INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [])
+            .unwrap();
         conn
     }
 
@@ -139,7 +160,8 @@ mod tests {
         conn.execute(
             "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.0.0.1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-hypothesize");
     }
@@ -150,7 +172,8 @@ mod tests {
         conn.execute(
             "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.0.0.1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO hypotheses (session_id, statement, category, status) VALUES ('s1', 'h1', 'auth', 'pending')",
             [],
@@ -165,7 +188,8 @@ mod tests {
         conn.execute(
             "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.0.0.1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO hypotheses (session_id, statement, category, status) VALUES ('s1', 'h1', 'auth', 'confirmed')",
             [],
@@ -180,7 +204,8 @@ mod tests {
         conn.execute(
             "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.0.0.1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO hypotheses (session_id, statement, category, status) VALUES ('s1', 'h1', 'auth', 'refuted')",
             [],
@@ -196,7 +221,8 @@ mod tests {
         conn.execute(
             "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.0.0.1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO hypotheses (session_id, statement, category, status) VALUES ('s1', 'h1', 'auth', 'testing')",
             [],
@@ -211,13 +237,27 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let skill_dir = tmp.path().join("skills/redtrail-recon");
         std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(skill_dir.join("prompt.md"), "# Recon skill\nYou are the recon advisor.").unwrap();
+        std::fs::write(
+            skill_dir.join("prompt.md"),
+            "# Recon skill\nYou are the recon advisor.",
+        )
+        .unwrap();
 
-        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+        let prompt =
+            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
-        assert!(prompt.contains("Recon skill"), "should contain skill content");
-        assert!(prompt.contains("Active skill: redtrail-recon"), "should have skill header");
-        assert!(!prompt.contains("You are Redtrail, a pentesting advisor"), "should NOT contain generic identity");
+        assert!(
+            prompt.contains("Recon skill"),
+            "should contain skill content"
+        );
+        assert!(
+            prompt.contains("Active skill: redtrail-recon"),
+            "should have skill header"
+        );
+        assert!(
+            !prompt.contains("You are Redtrail, a pentesting advisor"),
+            "should NOT contain generic identity"
+        );
     }
 
     #[test]
@@ -225,10 +265,17 @@ mod tests {
         let conn = setup_db();
         let tmp = tempfile::tempdir().unwrap();
 
-        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, true).unwrap();
+        let prompt =
+            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, true).unwrap();
 
-        assert!(prompt.contains("You are Redtrail, a pentesting advisor"), "should contain generic identity");
-        assert!(!prompt.contains("Active skill:"), "should NOT have skill header");
+        assert!(
+            prompt.contains("You are Redtrail, a pentesting advisor"),
+            "should contain generic identity"
+        );
+        assert!(
+            !prompt.contains("Active skill:"),
+            "should NOT have skill header"
+        );
     }
 
     #[test]
@@ -237,12 +284,29 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let skill_dir = tmp.path().join("skills/redtrail-hypothesize");
         std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(skill_dir.join("prompt.md"), "# Hypothesize\nGenerate hypotheses.").unwrap();
+        std::fs::write(
+            skill_dir.join("prompt.md"),
+            "# Hypothesize\nGenerate hypotheses.",
+        )
+        .unwrap();
 
-        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), Some("redtrail-hypothesize"), false).unwrap();
+        let prompt = crate::cli::ask::build_system_prompt(
+            &conn,
+            "s1",
+            tmp.path(),
+            Some("redtrail-hypothesize"),
+            false,
+        )
+        .unwrap();
 
-        assert!(prompt.contains("Active skill: redtrail-hypothesize"), "should load overridden skill");
-        assert!(prompt.contains("Generate hypotheses"), "should contain override skill content");
+        assert!(
+            prompt.contains("Active skill: redtrail-hypothesize"),
+            "should load overridden skill"
+        );
+        assert!(
+            prompt.contains("Generate hypotheses"),
+            "should contain override skill content"
+        );
     }
 
     #[test]
@@ -250,17 +314,30 @@ mod tests {
         let conn = setup_db();
         let tmp = tempfile::tempdir().unwrap();
 
-        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+        let prompt =
+            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
-        assert!(prompt.contains("Active skill: redtrail-recon"), "should load bundled skill");
-        assert!(prompt.contains("L0 Modeling"), "should contain bundled recon content");
-        assert!(!prompt.contains("You are Redtrail, a pentesting advisor"), "should NOT use generic");
+        assert!(
+            prompt.contains("Active skill: redtrail-recon"),
+            "should load bundled skill"
+        );
+        assert!(
+            prompt.contains("L0 Modeling"),
+            "should contain bundled recon content"
+        );
+        assert!(
+            !prompt.contains("You are Redtrail, a pentesting advisor"),
+            "should NOT use generic"
+        );
     }
 
     #[test]
     fn test_load_skill_prompt_bundled_fallback() {
         let result = load_skill_prompt("redtrail-recon", None).unwrap();
-        assert!(result.contains("L0 Modeling"), "bundled recon skill should contain L0 Modeling");
+        assert!(
+            result.contains("L0 Modeling"),
+            "bundled recon skill should contain L0 Modeling"
+        );
     }
 
     #[test]
@@ -271,19 +348,27 @@ mod tests {
         std::fs::write(skill_dir.join("prompt.md"), "# Custom recon override").unwrap();
 
         let result = load_skill_prompt("redtrail-recon", Some(tmp.path())).unwrap();
-        assert_eq!(result, "# Custom recon override", "workspace should override bundled");
+        assert_eq!(
+            result, "# Custom recon override",
+            "workspace should override bundled"
+        );
     }
 
     #[test]
     fn test_build_prompt_kb_dump_follows_skill() {
         let conn = setup_db();
-        conn.execute("INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.10.10.1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.10.10.1')",
+            [],
+        )
+        .unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let skill_dir = tmp.path().join("skills/redtrail-hypothesize");
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("prompt.md"), "# Hypothesize").unwrap();
 
-        let prompt = crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+        let prompt =
+            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
         assert!(prompt.contains("=== Hosts ==="), "should contain KB dump");
         assert!(prompt.contains("10.10.10.1"), "should contain host data");
@@ -302,7 +387,8 @@ mod tests {
         conn.execute(
             "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.0.0.1')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-hypothesize");
 
@@ -316,14 +402,16 @@ mod tests {
         conn.execute(
             "UPDATE hypotheses SET status = 'confirmed' WHERE session_id = 's1'",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-exploit");
 
         conn.execute(
             "UPDATE hypotheses SET status = 'refuted' WHERE session_id = 's1'",
             [],
-        ).unwrap();
+        )
+        .unwrap();
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-recon");
         assert_eq!(m.phase_name, "Surface Exhausted");

@@ -1,10 +1,14 @@
 fn ip_to_u32(ip: &str) -> Option<u32> {
     let parts: Vec<&str> = ip.split('.').collect();
-    if parts.len() != 4 { return None; }
+    if parts.len() != 4 {
+        return None;
+    }
     let mut n: u32 = 0;
     for p in parts {
         let octet: u32 = p.parse().ok()?;
-        if octet > 255 { return None; }
+        if octet > 255 {
+            return None;
+        }
         n = (n << 8) | octet;
     }
     Some(n)
@@ -12,7 +16,9 @@ fn ip_to_u32(ip: &str) -> Option<u32> {
 
 pub fn ip_in_cidr(ip: &str, cidr: &str) -> bool {
     let parts: Vec<&str> = cidr.splitn(2, '/').collect();
-    if parts.len() != 2 { return false; }
+    if parts.len() != 2 {
+        return false;
+    }
     let prefix_len: u32 = match parts[1].parse() {
         Ok(n) if n <= 32 => n,
         _ => return false,
@@ -25,7 +31,11 @@ pub fn ip_in_cidr(ip: &str, cidr: &str) -> bool {
         Some(n) => n,
         None => return false,
     };
-    let mask = if prefix_len == 0 { 0u32 } else { !0u32 << (32 - prefix_len) };
+    let mask = if prefix_len == 0 {
+        0u32
+    } else {
+        !0u32 << (32 - prefix_len)
+    };
     (target & mask) == (base & mask)
 }
 
@@ -38,7 +48,8 @@ pub fn extract_ips(text: &str) -> Vec<String> {
 }
 
 pub fn ip_in_scope(ip: &str, scope: &str) -> bool {
-    scope.split(',')
+    scope
+        .split(',')
         .map(str::trim)
         .filter(|c| !c.is_empty())
         .any(|cidr| ip_in_cidr(ip, cidr))

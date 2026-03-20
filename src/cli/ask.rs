@@ -1,20 +1,29 @@
-use std::path::Path;
-use rusqlite::Connection;
-use serde_json::{json, Value};
 use crate::config::Config;
 use crate::db;
 use crate::error::Error;
 use crate::skill_loader;
 use crate::workspace;
+use rusqlite::Connection;
+use serde_json::{Value, json};
+use std::path::Path;
 
 const MAX_TOOL_ROUNDS: usize = 20;
 const MAX_OUTPUT_CHARS: usize = 12000;
 
-pub fn run(message: Option<&str>, keep_history: bool, clear: bool, model_override: Option<&str>, skill_override: Option<&str>, no_skill: bool) -> Result<(), Error> {
+pub fn run(
+    message: Option<&str>,
+    keep_history: bool,
+    clear: bool,
+    model_override: Option<&str>,
+    skill_override: Option<&str>,
+    no_skill: bool,
+) -> Result<(), Error> {
     let cwd = std::env::current_dir()?;
     let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
     let db_path = workspace::db_path(&ws);
-    let db_path_str = db_path.to_str().ok_or(Error::Config("invalid db path".into()))?;
+    let db_path_str = db_path
+        .to_str()
+        .ok_or(Error::Config("invalid db path".into()))?;
     let conn = db::open_connection(db_path_str)?;
     let session_id = db::session::active_session_id(&conn)?;
 
@@ -55,11 +64,11 @@ pub fn run(message: Option<&str>, keep_history: bool, clear: bool, model_overrid
         let blocks = content.as_array().cloned().unwrap_or_default();
 
         for block in &blocks {
-            if block["type"] == "text" {
-                if let Some(text) = block["text"].as_str() {
-                    print!("{text}");
-                    final_text.push_str(text);
-                }
+            if block["type"] == "text"
+                && let Some(text) = block["text"].as_str()
+            {
+                print!("{text}");
+                final_text.push_str(text);
             }
         }
 
@@ -130,7 +139,8 @@ fn call_api(
         body["tools"] = json!(tools);
     }
 
-    let resp = client.post("https://api.anthropic.com/v1/messages")
+    let resp = client
+        .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
@@ -138,7 +148,8 @@ fn call_api(
         .send()
         .map_err(|e| Error::Config(format!("API request failed: {e}")))?;
 
-    let response: Value = resp.json()
+    let response: Value = resp
+        .json()
         .map_err(|e| Error::Config(format!("API response parse failed: {e}")))?;
 
     if let Some(err) = response.get("error") {
@@ -184,13 +195,15 @@ fn tool_definitions() -> Vec<Value> {
 fn execute_tool(name: &str, input: &Value, conn: &Connection, cwd: &Path) -> Result<String, Error> {
     match name {
         "run_command" => {
-            let command = input["command"].as_str()
+            let command = input["command"]
+                .as_str()
                 .ok_or(Error::Config("missing command".into()))?;
             eprintln!("[tool] $ {command}");
             execute_command(command, cwd)
         }
         "sql_query" => {
-            let query = input["query"].as_str()
+            let query = input["query"]
+                .as_str()
                 .ok_or(Error::Config("missing query".into()))?;
             eprintln!("[tool] sql: {query}");
             super::sql::execute_readonly_to_string(conn, query)
@@ -214,16 +227,23 @@ fn execute_command(command: &str, cwd: &Path) -> Result<String, Error> {
         result.push_str(&stdout);
     }
     if !stderr.is_empty() {
-        if !result.is_empty() { result.push('\n'); }
+        if !result.is_empty() {
+            result.push('\n');
+        }
         result.push_str(&stderr);
     }
     if !output.status.success() {
-        result.push_str(&format!("\n(exit code: {})", output.status.code().unwrap_or(-1)));
+        result.push_str(&format!(
+            "\n(exit code: {})",
+            output.status.code().unwrap_or(-1)
+        ));
     }
 
     if result.len() > MAX_OUTPUT_CHARS {
         let mut end = MAX_OUTPUT_CHARS;
-        while end > 0 && !result.is_char_boundary(end) { end -= 1; }
+        while end > 0 && !result.is_char_boundary(end) {
+            end -= 1;
+        }
         result.truncate(end);
         result.push_str("\n... (output truncated)");
     }
@@ -231,7 +251,13 @@ fn execute_command(command: &str, cwd: &Path) -> Result<String, Error> {
     Ok(result)
 }
 
-pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Path, skill_override: Option<&str>, no_skill: bool) -> Result<String, Error> {
+pub(crate) fn build_system_prompt(
+    conn: &Connection,
+    session_id: &str,
+    cwd: &Path,
+    skill_override: Option<&str>,
+    no_skill: bool,
+) -> Result<String, Error> {
     let skill_content: Option<(String, String)> = if no_skill {
         None
     } else if let Some(name) = skill_override {
@@ -240,18 +266,22 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
         Some((name.to_string(), prompt))
     } else {
         match skill_loader::detect_phase(conn, session_id)? {
-            Some(m) => {
-                match skill_loader::load_skill_prompt(&m.skill_name, Some(cwd)) {
-                    Ok(prompt) => {
-                        eprintln!("[phase] {} ({}) — loading {}", m.phase_name, m.context, m.skill_name);
-                        Some((m.skill_name, prompt))
-                    }
-                    Err(_) => {
-                        eprintln!("[phase] {} ({}) — skill {} not found, using generic", m.phase_name, m.context, m.skill_name);
-                        None
-                    }
+            Some(m) => match skill_loader::load_skill_prompt(&m.skill_name, Some(cwd)) {
+                Ok(prompt) => {
+                    eprintln!(
+                        "[phase] {} ({}) — loading {}",
+                        m.phase_name, m.context, m.skill_name
+                    );
+                    Some((m.skill_name, prompt))
                 }
-            }
+                Err(_) => {
+                    eprintln!(
+                        "[phase] {} ({}) — skill {} not found, using generic",
+                        m.phase_name, m.context, m.skill_name
+                    );
+                    None
+                }
+            },
             None => None,
         }
     };
@@ -288,12 +318,16 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if skill_content.is_none() {
         p.push_str(&format!("Phase: {phase}\n"));
     }
-    p.push_str(&format!("Noise budget: {noise:.2}\nCWD: {}\n\n", cwd.display()));
+    p.push_str(&format!(
+        "Noise budget: {noise:.2}\nCWD: {}\n\n",
+        cwd.display()
+    ));
 
     if !hosts.is_empty() {
         p.push_str("=== Hosts ===\n");
         for h in &hosts {
-            p.push_str(&format!("  {} {} {}\n",
+            p.push_str(&format!(
+                "  {} {} {}\n",
                 h["ip"].as_str().unwrap_or(""),
                 h["hostname"].as_str().unwrap_or("-"),
                 h["os"].as_str().unwrap_or("-"),
@@ -305,7 +339,8 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if !ports.is_empty() {
         p.push_str("=== Ports ===\n");
         for port in &ports {
-            p.push_str(&format!("  {}:{}/{} {} {}\n",
+            p.push_str(&format!(
+                "  {}:{}/{} {} {}\n",
                 port["ip"].as_str().unwrap_or(""),
                 port["port"].as_i64().unwrap_or(0),
                 port["protocol"].as_str().unwrap_or("tcp"),
@@ -319,7 +354,8 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if !creds.is_empty() {
         p.push_str("=== Credentials ===\n");
         for c in &creds {
-            p.push_str(&format!("  {}:{} @ {} ({})\n",
+            p.push_str(&format!(
+                "  {}:{} @ {} ({})\n",
                 c["username"].as_str().unwrap_or(""),
                 c["password"].as_str().unwrap_or("***"),
                 c["host"].as_str().unwrap_or("-"),
@@ -332,7 +368,8 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if !flags.is_empty() {
         p.push_str("=== Flags ===\n");
         for f in &flags {
-            p.push_str(&format!("  {} ({})\n",
+            p.push_str(&format!(
+                "  {} ({})\n",
                 f["value"].as_str().unwrap_or(""),
                 f["source"].as_str().unwrap_or("-"),
             ));
@@ -343,7 +380,8 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if !access.is_empty() {
         p.push_str("=== Access ===\n");
         for a in &access {
-            p.push_str(&format!("  {}@{} level={} method={}\n",
+            p.push_str(&format!(
+                "  {}@{} level={} method={}\n",
                 a["user"].as_str().unwrap_or(""),
                 a["host"].as_str().unwrap_or(""),
                 a["level"].as_str().unwrap_or(""),
@@ -356,8 +394,10 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if !hypotheses.is_empty() {
         p.push_str("=== Hypotheses ===\n");
         for h in &hypotheses {
-            p.push_str(&format!("  [{}] {} — {} (priority={}, conf={:.1})\n",
-                h["id"], h["statement"].as_str().unwrap_or(""),
+            p.push_str(&format!(
+                "  [{}] {} — {} (priority={}, conf={:.1})\n",
+                h["id"],
+                h["statement"].as_str().unwrap_or(""),
                 h["status"].as_str().unwrap_or(""),
                 h["priority"].as_str().unwrap_or(""),
                 h["confidence"].as_f64().unwrap_or(0.0),
@@ -377,9 +417,14 @@ pub(crate) fn build_system_prompt(conn: &Connection, session_id: &str, cwd: &Pat
     if !history.is_empty() {
         p.push_str("=== Recent Commands ===\n");
         for h in history.iter().rev().take(20) {
-            let exit = h["exit_code"].as_i64().map(|c| c.to_string()).unwrap_or("-".to_string());
-            p.push_str(&format!("  [exit={}] {}\n",
-                exit, h["command"].as_str().unwrap_or(""),
+            let exit = h["exit_code"]
+                .as_i64()
+                .map(|c| c.to_string())
+                .unwrap_or("-".to_string());
+            p.push_str(&format!(
+                "  [exit={}] {}\n",
+                exit,
+                h["command"].as_str().unwrap_or(""),
             ));
         }
         p.push('\n');

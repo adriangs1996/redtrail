@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::fs;
+use std::process::Command;
 
 #[test]
 fn test_skill_init() {
@@ -7,8 +7,13 @@ fn test_skill_init() {
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["skill", "init", "my-skill"])
         .current_dir(tmp.path())
-        .output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(tmp.path().join("my-skill/skill.toml").exists());
     assert!(tmp.path().join("my-skill/prompt.md").exists());
 }
@@ -19,12 +24,14 @@ fn test_skill_test_valid() {
     Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["skill", "init", "test-skill"])
         .current_dir(tmp.path())
-        .output().unwrap();
+        .output()
+        .unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["skill", "test", "test-skill"])
         .current_dir(tmp.path())
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert!(out.status.success());
 }
 
@@ -36,7 +43,8 @@ fn test_skill_test_invalid() {
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["skill", "test", "bad-skill"])
         .current_dir(tmp.path())
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert!(!out.status.success());
 }
 
@@ -44,6 +52,7 @@ fn test_skill_test_invalid() {
 fn test_skill_list_empty() {
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
         .args(["skill", "list"])
-        .output().unwrap();
+        .output()
+        .unwrap();
     assert!(out.status.success());
 }

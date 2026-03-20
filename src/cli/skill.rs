@@ -1,5 +1,5 @@
-use clap::Subcommand;
 use crate::error::Error;
+use clap::Subcommand;
 use std::fs;
 use std::path::Path;
 
@@ -53,7 +53,8 @@ fn init_skill(name: &str) -> Result<(), Error> {
     }
     fs::create_dir_all(dir)?;
 
-    let skill_toml = format!(r#"[skill]
+    let skill_toml = format!(
+        r#"[skill]
 name = "{name}"
 version = "0.1.0"
 description = ""
@@ -65,9 +66,13 @@ keywords = []
 [dependencies]
 commands = []
 rt_commands = []
-"#);
+"#
+    );
     fs::write(dir.join("skill.toml"), skill_toml)?;
-    fs::write(dir.join("prompt.md"), format!("# {name}\n\nYour skill prompt here.\n"))?;
+    fs::write(
+        dir.join("prompt.md"),
+        format!("# {name}\n\nYour skill prompt here.\n"),
+    )?;
     println!("skill scaffolded: {name}/");
     println!("  skill.toml — metadata");
     println!("  prompt.md  — prompt content");
@@ -88,7 +93,9 @@ fn test_skill(path: &str) -> Result<(), Error> {
                 let has_name = val.get("skill").and_then(|s| s.get("name")).is_some()
                     || val.get("name").is_some();
                 if !has_name {
-                    errors.push("skill.toml missing name (either [skill].name or root name)".to_string());
+                    errors.push(
+                        "skill.toml missing name (either [skill].name or root name)".to_string(),
+                    );
                 }
             }
             Err(e) => errors.push(format!("skill.toml parse error: {e}")),
@@ -133,17 +140,27 @@ fn list_skills() -> Result<(), Error> {
             continue;
         }
         if let Ok(content) = fs::read_to_string(&toml_path)
-            && let Ok(val) = toml::from_str::<toml::Value>(&content) {
-                let skill_section = val.get("skill");
-                let name = skill_section.and_then(|s| s.get("name")).or(val.get("name"))
-                    .and_then(|v| v.as_str()).unwrap_or("?");
-                let version = skill_section.and_then(|s| s.get("version")).or(val.get("version"))
-                    .and_then(|v| v.as_str()).unwrap_or("?");
-                let desc = skill_section.and_then(|s| s.get("description")).or(val.get("description"))
-                    .and_then(|v| v.as_str()).unwrap_or("");
-                println!("{name} ({version}) — {desc}");
-                found = true;
-            }
+            && let Ok(val) = toml::from_str::<toml::Value>(&content)
+        {
+            let skill_section = val.get("skill");
+            let name = skill_section
+                .and_then(|s| s.get("name"))
+                .or(val.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let version = skill_section
+                .and_then(|s| s.get("version"))
+                .or(val.get("version"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let desc = skill_section
+                .and_then(|s| s.get("description"))
+                .or(val.get("description"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            println!("{name} ({version}) — {desc}");
+            found = true;
+        }
     }
     if !found {
         println!("no skills installed");
@@ -155,10 +172,12 @@ fn install_skill(path: &str) -> Result<(), Error> {
     test_skill(path)?;
     let src = Path::new(path);
     let toml_content = fs::read_to_string(src.join("skill.toml"))?;
-    let val: toml::Value = toml::from_str(&toml_content)
-        .map_err(|e| Error::Config(e.to_string()))?;
+    let val: toml::Value =
+        toml::from_str(&toml_content).map_err(|e| Error::Config(e.to_string()))?;
     let skill_section = val.get("skill");
-    let name = skill_section.and_then(|s| s.get("name")).or(val.get("name"))
+    let name = skill_section
+        .and_then(|s| s.get("name"))
+        .or(val.get("name"))
         .and_then(|v| v.as_str())
         .ok_or(Error::Config("missing skill name".into()))?;
 

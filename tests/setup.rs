@@ -6,7 +6,11 @@ fn test_setup_status_json() {
         .args(["setup", "status", "--json"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(json.get("installed").is_some());
     assert!(json.get("shell").is_some());
@@ -26,7 +30,11 @@ fn test_setup_status_shows_workspace() {
         .current_dir(tmp.path())
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(json["active_workspace"].as_str().is_some());
 }
@@ -37,7 +45,11 @@ fn test_setup_aliases_list() {
         .args(["setup", "aliases", "--list"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("nmap"));
 }

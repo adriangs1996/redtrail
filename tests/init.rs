@@ -8,7 +8,11 @@ fn test_rt_init_creates_workspace() {
         .current_dir(tmp.path())
         .output()
         .unwrap();
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(tmp.path().join(".redtrail").is_dir());
     assert!(tmp.path().join(".redtrail/redtrail.db").exists());
     assert!(tmp.path().join(".redtrail/config.toml").exists());

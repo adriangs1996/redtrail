@@ -69,11 +69,18 @@ fn detection_cost(tool: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{open_in_memory, SessionOps};
+    use crate::db::{SessionOps, open_in_memory};
 
     fn setup() -> (impl CommandLog + KnowledgeBase + SessionOps, String) {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", Some("10.10.10.1"), Some("10.10.10.0/24"), "general").unwrap();
+        db.create_session(
+            "s1",
+            "test",
+            Some("10.10.10.1"),
+            Some("10.10.10.0/24"),
+            "general",
+        )
+        .unwrap();
         (db, "s1".to_string())
     }
 
@@ -89,8 +96,15 @@ mod tests {
     fn test_process_command_records_and_finishes() {
         let (db, sid) = setup();
         let result = process_command(
-            &db, &sid, "nmap -sV 10.10.10.1", 0, 1500, "22/tcp open ssh", Some("nmap"),
-        ).unwrap();
+            &db,
+            &sid,
+            "nmap -sV 10.10.10.1",
+            0,
+            1500,
+            "22/tcp open ssh",
+            Some("nmap"),
+        )
+        .unwrap();
 
         assert!(result.command_id > 0);
 
@@ -105,12 +119,27 @@ mod tests {
         let (db, sid) = setup();
         let output = "user.txt: HTB{fake_user_flag}\nroot.txt: HTB{fake_root_flag}";
         let result = process_command(
-            &db, &sid, "cat user.txt root.txt", 0, 100, output, Some("cat"),
-        ).unwrap();
+            &db,
+            &sid,
+            "cat user.txt root.txt",
+            0,
+            100,
+            output,
+            Some("cat"),
+        )
+        .unwrap();
 
         assert_eq!(result.flags_found.len(), 2);
-        assert!(result.flags_found.contains(&"HTB{fake_user_flag}".to_string()));
-        assert!(result.flags_found.contains(&"HTB{fake_root_flag}".to_string()));
+        assert!(
+            result
+                .flags_found
+                .contains(&"HTB{fake_user_flag}".to_string())
+        );
+        assert!(
+            result
+                .flags_found
+                .contains(&"HTB{fake_root_flag}".to_string())
+        );
 
         let flags = db.list_flags(&sid).unwrap();
         assert_eq!(flags.len(), 2);
@@ -119,9 +148,8 @@ mod tests {
     #[test]
     fn test_process_command_scope_warnings() {
         let (db, sid) = setup();
-        let result = process_command(
-            &db, &sid, "nmap -sV 192.168.1.1", 0, 500, "", Some("nmap"),
-        ).unwrap();
+        let result =
+            process_command(&db, &sid, "nmap -sV 192.168.1.1", 0, 500, "", Some("nmap")).unwrap();
 
         assert_eq!(result.scope_warnings.len(), 1);
         assert!(result.scope_warnings[0].contains("192.168.1.1"));
@@ -140,6 +168,9 @@ mod tests {
 
         let summary = db.status_summary(&sid).unwrap();
         let budget_after = summary["noise_budget"].as_f64().unwrap();
-        assert!((budget_after - 0.8).abs() < 0.001, "nmap costs 0.2, budget should be 0.8, got {budget_after}");
+        assert!(
+            (budget_after - 0.8).abs() < 0.001,
+            "nmap costs 0.2, budget should be 0.8, got {budget_after}"
+        );
     }
 }

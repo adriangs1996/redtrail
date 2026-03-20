@@ -127,42 +127,121 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 ";
 
 pub trait KnowledgeBase {
-    fn add_host(&self, session_id: &str, ip: &str, os: Option<&str>, hostname: Option<&str>) -> Result<i64, Error>;
-    fn add_port(&self, session_id: &str, host_ip: &str, port: i64, protocol: Option<&str>, service: Option<&str>, version: Option<&str>) -> Result<i64, Error>;
-    fn add_credential(&self, session_id: &str, username: &str, password: Option<&str>, hash: Option<&str>, service: Option<&str>, host: Option<&str>, source: Option<&str>) -> Result<i64, Error>;
+    fn add_host(
+        &self,
+        session_id: &str,
+        ip: &str,
+        os: Option<&str>,
+        hostname: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn add_port(
+        &self,
+        session_id: &str,
+        host_ip: &str,
+        port: i64,
+        protocol: Option<&str>,
+        service: Option<&str>,
+        version: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn add_credential(
+        &self,
+        session_id: &str,
+        username: &str,
+        password: Option<&str>,
+        hash: Option<&str>,
+        service: Option<&str>,
+        host: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<i64, Error>;
     fn add_flag(&self, session_id: &str, value: &str, source: Option<&str>) -> Result<i64, Error>;
-    fn add_access(&self, session_id: &str, host: &str, user: &str, level: &str, method: Option<&str>) -> Result<i64, Error>;
+    fn add_access(
+        &self,
+        session_id: &str,
+        host: &str,
+        user: &str,
+        level: &str,
+        method: Option<&str>,
+    ) -> Result<i64, Error>;
     fn add_note(&self, session_id: &str, text: &str) -> Result<i64, Error>;
     fn list_hosts(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
-    fn list_ports(&self, session_id: &str, host_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_ports(
+        &self,
+        session_id: &str,
+        host_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error>;
     fn list_credentials(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
     fn list_flags(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
     fn list_access(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
     fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
-    fn list_history(&self, session_id: &str, limit: usize) -> Result<Vec<serde_json::Value>, Error>;
+    fn list_history(&self, session_id: &str, limit: usize)
+    -> Result<Vec<serde_json::Value>, Error>;
     fn search(&self, session_id: &str, query: &str) -> Result<Vec<serde_json::Value>, Error>;
 }
 
 pub trait Hypotheses {
-    fn create_hypothesis(&self, session_id: &str, statement: &str, category: &str, priority: &str, confidence: f64, target_component: Option<&str>) -> Result<i64, Error>;
-    fn list_hypotheses(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error>;
+    fn create_hypothesis(
+        &self,
+        session_id: &str,
+        statement: &str,
+        category: &str,
+        priority: &str,
+        confidence: f64,
+        target_component: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn list_hypotheses(
+        &self,
+        session_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error>;
     fn update_hypothesis(&self, id: i64, status: &str) -> Result<(), Error>;
     fn get_hypothesis(&self, id: i64) -> Result<serde_json::Value, Error>;
-    fn create_evidence(&self, session_id: &str, hypothesis_id: Option<i64>, finding: &str, severity: &str, poc: Option<&str>) -> Result<i64, Error>;
-    fn list_evidence(&self, session_id: &str, hypothesis_id: Option<i64>) -> Result<Vec<serde_json::Value>, Error>;
+    fn create_evidence(
+        &self,
+        session_id: &str,
+        hypothesis_id: Option<i64>,
+        finding: &str,
+        severity: &str,
+        poc: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn list_evidence(
+        &self,
+        session_id: &str,
+        hypothesis_id: Option<i64>,
+    ) -> Result<Vec<serde_json::Value>, Error>;
     fn export_evidence(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error>;
 }
 
 pub trait CommandLog {
-    fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error>;
-    fn finish_command(&self, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error>;
-    fn get_command_for_extraction(&self, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error>;
+    fn insert_command(
+        &self,
+        session_id: &str,
+        command: &str,
+        tool: Option<&str>,
+    ) -> Result<i64, Error>;
+    fn finish_command(
+        &self,
+        id: i64,
+        exit_code: i32,
+        duration_ms: i64,
+        output: &str,
+    ) -> Result<(), Error>;
+    fn get_command_for_extraction(
+        &self,
+        id: i64,
+    ) -> Result<(String, String, Option<String>, Option<String>), Error>;
     fn update_extraction_status(&self, id: i64, status: &str) -> Result<(), Error>;
 }
 
 pub trait SessionOps {
     fn active_session_id(&self) -> Result<String, Error>;
-    fn create_session(&self, id: &str, name: &str, target: Option<&str>, scope: Option<&str>, goal: &str) -> Result<(), Error>;
+    fn create_session(
+        &self,
+        id: &str,
+        name: &str,
+        target: Option<&str>,
+        scope: Option<&str>,
+        goal: &str,
+    ) -> Result<(), Error>;
     fn get_session(&self, session_id: &str) -> Result<serde_json::Value, Error>;
     fn load_flag_patterns(&self, session_id: &str) -> Result<Vec<String>, Error>;
     fn load_scope(&self, session_id: &str) -> Result<Option<String>, Error>;
@@ -176,16 +255,21 @@ struct SqliteDb {
 
 impl SqliteDb {
     fn init(&self) -> Result<(), Error> {
-        self.conn.execute_batch("PRAGMA journal_mode=WAL;")
+        self.conn
+            .execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| Error::Db(e.to_string()))?;
-        self.conn.execute_batch("PRAGMA foreign_keys=ON;")
+        self.conn
+            .execute_batch("PRAGMA foreign_keys=ON;")
             .map_err(|e| Error::Db(e.to_string()))?;
-        self.conn.execute_batch(SCHEMA)
+        self.conn
+            .execute_batch(SCHEMA)
             .map_err(|e| Error::Db(e.to_string()))
     }
 }
 
-pub fn open(path: &str) -> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps + use<>, Error> {
+pub fn open(
+    path: &str,
+) -> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps + use<>, Error> {
     let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
     let db = SqliteDb { conn };
     db.init()?;
@@ -194,14 +278,18 @@ pub fn open(path: &str) -> Result<impl KnowledgeBase + Hypotheses + CommandLog +
 
 pub fn open_connection(path: &str) -> Result<Connection, Error> {
     let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
-    conn.execute_batch("PRAGMA journal_mode=WAL;").map_err(|e| Error::Db(e.to_string()))?;
-    conn.execute_batch("PRAGMA foreign_keys=ON;").map_err(|e| Error::Db(e.to_string()))?;
-    conn.execute_batch(SCHEMA).map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA foreign_keys=ON;")
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch(SCHEMA)
+        .map_err(|e| Error::Db(e.to_string()))?;
     Ok(conn)
 }
 
 #[cfg(test)]
-pub(crate) fn open_in_memory() -> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps, Error> {
+pub(crate) fn open_in_memory()
+-> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps, Error> {
     let conn = Connection::open_in_memory().map_err(|e| Error::Db(e.to_string()))?;
     let db = SqliteDb { conn };
     db.init()?;
@@ -209,19 +297,53 @@ pub(crate) fn open_in_memory() -> Result<impl KnowledgeBase + Hypotheses + Comma
 }
 
 impl KnowledgeBase for SqliteDb {
-    fn add_host(&self, session_id: &str, ip: &str, os: Option<&str>, hostname: Option<&str>) -> Result<i64, Error> {
+    fn add_host(
+        &self,
+        session_id: &str,
+        ip: &str,
+        os: Option<&str>,
+        hostname: Option<&str>,
+    ) -> Result<i64, Error> {
         kb::add_host(&self.conn, session_id, ip, os, hostname)
     }
-    fn add_port(&self, session_id: &str, host_ip: &str, port: i64, protocol: Option<&str>, service: Option<&str>, version: Option<&str>) -> Result<i64, Error> {
-        kb::add_port(&self.conn, session_id, host_ip, port, protocol, service, version)
+    fn add_port(
+        &self,
+        session_id: &str,
+        host_ip: &str,
+        port: i64,
+        protocol: Option<&str>,
+        service: Option<&str>,
+        version: Option<&str>,
+    ) -> Result<i64, Error> {
+        kb::add_port(
+            &self.conn, session_id, host_ip, port, protocol, service, version,
+        )
     }
-    fn add_credential(&self, session_id: &str, username: &str, password: Option<&str>, hash: Option<&str>, service: Option<&str>, host: Option<&str>, source: Option<&str>) -> Result<i64, Error> {
-        kb::add_credential(&self.conn, session_id, username, password, hash, service, host, source)
+    fn add_credential(
+        &self,
+        session_id: &str,
+        username: &str,
+        password: Option<&str>,
+        hash: Option<&str>,
+        service: Option<&str>,
+        host: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<i64, Error> {
+        kb::add_credential(
+            &self.conn, session_id, username, password, hash, service, host, source,
+        )
     }
     fn add_flag(&self, session_id: &str, value: &str, source: Option<&str>) -> Result<i64, Error> {
         kb::add_flag(&self.conn, session_id, value, source)
     }
-    fn add_access(&self, session_id: &str, host: &str, user: &str, level: &str, method: Option<&str>) -> Result<i64, Error> {
+    fn add_access(
+        &self,
+        session_id: &str,
+        host: &str,
+        user: &str,
+        level: &str,
+        method: Option<&str>,
+    ) -> Result<i64, Error> {
         kb::add_access(&self.conn, session_id, host, user, level, method)
     }
     fn add_note(&self, session_id: &str, text: &str) -> Result<i64, Error> {
@@ -230,7 +352,11 @@ impl KnowledgeBase for SqliteDb {
     fn list_hosts(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_hosts(&self.conn, session_id)
     }
-    fn list_ports(&self, session_id: &str, host_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_ports(
+        &self,
+        session_id: &str,
+        host_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_ports(&self.conn, session_id, host_filter)
     }
     fn list_credentials(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
@@ -245,7 +371,11 @@ impl KnowledgeBase for SqliteDb {
     fn list_notes(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_notes(&self.conn, session_id)
     }
-    fn list_history(&self, session_id: &str, limit: usize) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_history(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>, Error> {
         kb::list_history(&self.conn, session_id, limit)
     }
     fn search(&self, session_id: &str, query: &str) -> Result<Vec<serde_json::Value>, Error> {
@@ -254,10 +384,30 @@ impl KnowledgeBase for SqliteDb {
 }
 
 impl Hypotheses for SqliteDb {
-    fn create_hypothesis(&self, session_id: &str, statement: &str, category: &str, priority: &str, confidence: f64, target_component: Option<&str>) -> Result<i64, Error> {
-        hypothesis::create(&self.conn, session_id, statement, category, priority, confidence, target_component)
+    fn create_hypothesis(
+        &self,
+        session_id: &str,
+        statement: &str,
+        category: &str,
+        priority: &str,
+        confidence: f64,
+        target_component: Option<&str>,
+    ) -> Result<i64, Error> {
+        hypothesis::create(
+            &self.conn,
+            session_id,
+            statement,
+            category,
+            priority,
+            confidence,
+            target_component,
+        )
     }
-    fn list_hypotheses(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_hypotheses(
+        &self,
+        session_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<serde_json::Value>, Error> {
         hypothesis::list(&self.conn, session_id, status_filter)
     }
     fn update_hypothesis(&self, id: i64, status: &str) -> Result<(), Error> {
@@ -266,10 +416,28 @@ impl Hypotheses for SqliteDb {
     fn get_hypothesis(&self, id: i64) -> Result<serde_json::Value, Error> {
         hypothesis::get(&self.conn, id)
     }
-    fn create_evidence(&self, session_id: &str, hypothesis_id: Option<i64>, finding: &str, severity: &str, poc: Option<&str>) -> Result<i64, Error> {
-        hypothesis::create_evidence(&self.conn, session_id, hypothesis_id, finding, severity, poc)
+    fn create_evidence(
+        &self,
+        session_id: &str,
+        hypothesis_id: Option<i64>,
+        finding: &str,
+        severity: &str,
+        poc: Option<&str>,
+    ) -> Result<i64, Error> {
+        hypothesis::create_evidence(
+            &self.conn,
+            session_id,
+            hypothesis_id,
+            finding,
+            severity,
+            poc,
+        )
     }
-    fn list_evidence(&self, session_id: &str, hypothesis_id: Option<i64>) -> Result<Vec<serde_json::Value>, Error> {
+    fn list_evidence(
+        &self,
+        session_id: &str,
+        hypothesis_id: Option<i64>,
+    ) -> Result<Vec<serde_json::Value>, Error> {
         hypothesis::list_evidence(&self.conn, session_id, hypothesis_id)
     }
     fn export_evidence(&self, session_id: &str) -> Result<Vec<serde_json::Value>, Error> {
@@ -278,13 +446,27 @@ impl Hypotheses for SqliteDb {
 }
 
 impl CommandLog for SqliteDb {
-    fn insert_command(&self, session_id: &str, command: &str, tool: Option<&str>) -> Result<i64, Error> {
+    fn insert_command(
+        &self,
+        session_id: &str,
+        command: &str,
+        tool: Option<&str>,
+    ) -> Result<i64, Error> {
         commands::insert(&self.conn, session_id, command, tool)
     }
-    fn finish_command(&self, id: i64, exit_code: i32, duration_ms: i64, output: &str) -> Result<(), Error> {
+    fn finish_command(
+        &self,
+        id: i64,
+        exit_code: i32,
+        duration_ms: i64,
+        output: &str,
+    ) -> Result<(), Error> {
         commands::finish(&self.conn, id, exit_code, duration_ms, output)
     }
-    fn get_command_for_extraction(&self, id: i64) -> Result<(String, String, Option<String>, Option<String>), Error> {
+    fn get_command_for_extraction(
+        &self,
+        id: i64,
+    ) -> Result<(String, String, Option<String>, Option<String>), Error> {
         commands::get_for_extraction(&self.conn, id)
     }
     fn update_extraction_status(&self, id: i64, status: &str) -> Result<(), Error> {
@@ -296,7 +478,14 @@ impl SessionOps for SqliteDb {
     fn active_session_id(&self) -> Result<String, Error> {
         session::active_session_id(&self.conn)
     }
-    fn create_session(&self, id: &str, name: &str, target: Option<&str>, scope: Option<&str>, goal: &str) -> Result<(), Error> {
+    fn create_session(
+        &self,
+        id: &str,
+        name: &str,
+        target: Option<&str>,
+        scope: Option<&str>,
+        goal: &str,
+    ) -> Result<(), Error> {
         session::create_session(&self.conn, id, name, target, scope, goal)
     }
     fn get_session(&self, session_id: &str) -> Result<serde_json::Value, Error> {
@@ -323,7 +512,8 @@ mod tests {
     #[test]
     fn test_open_creates_schema() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
         let id = db.active_session_id().unwrap();
         assert_eq!(id, "s1");
     }
@@ -331,8 +521,10 @@ mod tests {
     #[test]
     fn test_knowledge_base_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", Some("10.10.10.1"), None, "general").unwrap();
-        db.add_host("s1", "10.10.10.1", Some("Linux"), None).unwrap();
+        db.create_session("s1", "test", Some("10.10.10.1"), None, "general")
+            .unwrap();
+        db.add_host("s1", "10.10.10.1", Some("Linux"), None)
+            .unwrap();
         let hosts = db.list_hosts("s1").unwrap();
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0]["ip"], "10.10.10.1");
@@ -341,8 +533,11 @@ mod tests {
     #[test]
     fn test_command_log_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
-        let id = db.insert_command("s1", "nmap 10.10.10.1", Some("nmap")).unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
+        let id = db
+            .insert_command("s1", "nmap 10.10.10.1", Some("nmap"))
+            .unwrap();
         db.finish_command(id, 0, 500, "22/tcp open ssh").unwrap();
         let (_, cmd, tool, output) = db.get_command_for_extraction(id).unwrap();
         assert_eq!(cmd, "nmap 10.10.10.1");
@@ -353,8 +548,18 @@ mod tests {
     #[test]
     fn test_hypotheses_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
-        let id = db.create_hypothesis("s1", "SSH allows root login", "auth", "high", 0.7, Some("ssh")).unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
+        let id = db
+            .create_hypothesis(
+                "s1",
+                "SSH allows root login",
+                "auth",
+                "high",
+                0.7,
+                Some("ssh"),
+            )
+            .unwrap();
         db.update_hypothesis(id, "confirmed").unwrap();
         let h = db.get_hypothesis(id).unwrap();
         assert_eq!(h["status"], "confirmed");
@@ -364,7 +569,14 @@ mod tests {
     #[test]
     fn test_session_ops_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", Some("10.10.10.1"), Some("10.10.10.0/24"), "general").unwrap();
+        db.create_session(
+            "s1",
+            "test",
+            Some("10.10.10.1"),
+            Some("10.10.10.0/24"),
+            "general",
+        )
+        .unwrap();
         let id = db.active_session_id().unwrap();
         assert_eq!(id, "s1");
         let scope = db.load_scope("s1").unwrap();

@@ -12,6 +12,7 @@ pub mod scope;
 pub mod session;
 pub mod setup;
 pub mod skill;
+pub mod pipeline_cmd;
 pub mod sql;
 pub mod status;
 
@@ -119,8 +120,11 @@ enum Commands {
         #[command(subcommand)]
         command: report::ReportCommands,
     },
-    #[command(about = "Pipeline management (deferred to v2)")]
-    Pipeline,
+    #[command(about = "Pipeline management")]
+    Pipeline {
+        #[command(subcommand)]
+        command: pipeline_cmd::PipelineCommands,
+    },
     #[command(about = "Print shell commands to activate the redtrail environment")]
     Env,
     #[command(
@@ -199,6 +203,7 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "ingest",
     "report",
     "pipeline",
+    "extract",
     "env",
     "deactivate",
     "skill",
@@ -277,10 +282,7 @@ pub fn run() -> Result<(), Error> {
             let (db, sid) = resolve_session()?;
             report::run(&db, &sid, command)
         }
-        Some(Commands::Pipeline) => {
-            println!("pipeline configurability deferred to v2");
-            Ok(())
-        }
+        Some(Commands::Pipeline { command }) => pipeline_cmd::run(command),
         Some(Commands::Env) => {
             let (db, sid) = resolve_session()?;
             env::run(&db, &sid)

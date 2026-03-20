@@ -53,19 +53,19 @@ describe('Hero', () => {
   });
 
   describe('locale-prefixed links', () => {
-    it('points Quick Start to /en/getting-started/quickstart/', async () => {
+    it('points Quick Start to /getting-started/quickstart/', async () => {
       const html = await render(EN_PROPS);
-      expect(html).toContain('href="/en/getting-started/quickstart/"');
+      expect(html).toContain('href="/getting-started/quickstart/"');
     });
 
-    it('points Methodology to /en/core-concepts/overview/', async () => {
+    it('points Methodology to /core-concepts/overview/', async () => {
       const html = await render(EN_PROPS);
-      expect(html).toContain('href="/en/core-concepts/overview/"');
+      expect(html).toContain('href="/core-concepts/overview/"');
     });
 
-    it('points Tutorial to /en/guides/simple-lab/', async () => {
+    it('points Tutorial to /guides/simple-lab/', async () => {
       const html = await render(EN_PROPS);
-      expect(html).toContain('href="/en/guides/simple-lab/"');
+      expect(html).toContain('href="/guides/simple-lab/"');
     });
 
     it('uses /es/ prefix for Spanish locale', async () => {

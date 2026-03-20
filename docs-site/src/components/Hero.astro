@@ -25,7 +25,7 @@ const {
   tutorialDesc,
 } = Astro.props;
 
-const prefix = `/${locale}`;
+const prefix = locale === 'en' ? '' : `/${locale}`;
 ---
 
 <section class="hero">
@@ -35,7 +35,19 @@ const prefix = `/${locale}`;
 
     <div class="hero-terminal">
       <TerminalFrame title={terminalTitle}>
-        <pre><span class="prompt">$</span> rt scan --target 10.10.14.7{'\n'}<span class="dim">[L0] Recon started on 10.10.14.7</span>{'\n'}<span class="dim">[L1] Open ports: 22/ssh, 80/http, 443/https</span>{'\n'}<span class="dim">[L1] HTTP title: "Admin Portal v2.1"</span>{'\n'}<span class="accent">[L2] Hypothesis: default credentials on /admin</span>{'\n'}<span class="green">[L3] Confirmed: admin:admin grants access to /admin/dashboard</span>{'\n'}<span class="prompt">$</span> rt suggest{'\n'}<span class="accent">→ Escalate: enumerate /admin/dashboard for file upload or command injection</span>{'\n'}<span class="accent">→ Pivot: check if SSH accepts the same credentials</span>{'\n'}<span class="accent">→ Document: flag default-creds finding for report</span></pre>
+        <pre>
+          <span class="prompt">$</span> rt scan --target 10.10.14.7
+          <span class="dim">[L0] Recon started on 10.10.14.7 </span>
+          <span class="dim">[L1] Open ports: 22/ssh, 80/http, 443/https </span>
+          <span class="dim">[L1] HTTP title: "Admin Portal v2.1"</span>
+          <span class="accent">[L2] Hypothesis: default credentials on /admin</span>
+          <span class="green">[L3] Confirmed: admin:admin grants access to /admin/dashboard</span>
+
+          <span class="prompt">$</span> <span class=""> rt suggest</span> 
+          <span class="accent">→ Escalate: enumerate /admin/dashboard for file upload or command injection</span>
+          <span class="accent">→ Pivot: check if SSH accepts the same credentials</span>
+          <span class="accent">→ Document: flag default-creds finding for report</span>
+        </pre>
       </TerminalFrame>
     </div>
 

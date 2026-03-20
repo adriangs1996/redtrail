@@ -8,6 +8,11 @@ export default defineConfig({
 			title: 'Redtrail',
 			customCss: ['./src/styles/custom.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/adriangs1996/redtrail' }],
+			defaultLocale: 'en',
+			locales: {
+				en: { label: 'English', lang: 'en' },
+				es: { label: 'Español', lang: 'es' },
+			},
 			sidebar: [
 				{
 					label: 'Getting Started',

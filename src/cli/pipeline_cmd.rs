@@ -26,7 +26,7 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
     let db_path = workspace::db_path(&ws);
     let db = crate::db::open(db_path.to_str().unwrap())?;
 
-    let (session_id, _command, _tool, _output) = db.get_command_for_extraction(cmd_id)?;
+    let session_id = db.get_command_for_extraction(cmd_id)?.0;
 
     let config = Config::resolved(&ws)?;
     crate::extraction::extract_sync(&db, &session_id, cmd_id, &config)?;

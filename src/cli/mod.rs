@@ -11,8 +11,8 @@ pub mod report;
 pub mod scope;
 pub mod session;
 pub mod setup;
-pub mod skill;
 pub mod pipeline_cmd;
+pub mod skill;
 pub mod sql;
 pub mod status;
 
@@ -203,7 +203,6 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "ingest",
     "report",
     "pipeline",
-    "extract",
     "env",
     "deactivate",
     "skill",

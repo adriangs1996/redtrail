@@ -146,10 +146,10 @@ fn test_config_set() {
 }
 
 #[test]
-fn test_pipeline_stub() {
+fn test_pipeline_help() {
     let tmp = setup_workspace();
     let out = Command::new(env!("CARGO_BIN_EXE_rt"))
-        .args(["pipeline"])
+        .args(["pipeline", "--help"])
         .current_dir(tmp.path())
         .output()
         .unwrap();
@@ -159,5 +159,5 @@ fn test_pipeline_stub() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("v2"));
+    assert!(stdout.contains("extract"));
 }

@@ -1,0 +1,46 @@
+---
+title: Componente Terminal Frame
+description: Demo del componente MDX TerminalFrame con diversas configuraciones.
+---
+
+import TerminalFrame from '../../../../components/TerminalFrame.astro';
+
+El componente `TerminalFrame` renderiza código en una interfaz tipo terminal con puntos de semáforo y tema Catppuccin.
+
+## Uso Básico
+
+<TerminalFrame title="bash">
+```
+$ redtrail scan --target 192.168.1.0/24
+[*] Iniciando escaneo de red...
+[+] Host 192.168.1.1 activo (0.0023s latencia)
+[+] Host 192.168.1.42 activo (0.0051s latencia)
+[*] Escaneo completo: 2 hosts activos
+```
+</TerminalFrame>
+
+## Título Personalizado
+
+<TerminalFrame title="nmap — 192.168.1.42">
+```
+$ nmap -sV 192.168.1.42
+Starting Nmap 7.94 ( https://nmap.org )
+PORT     STATE SERVICE  VERSION
+22/tcp   open  ssh      OpenSSH 8.9
+80/tcp   open  http     nginx 1.18.0
+443/tcp  open  ssl/http nginx 1.18.0
+3306/tcp open  mysql    MySQL 8.0.32
+```
+</TerminalFrame>
+
+## Contenido Vacío
+
+<TerminalFrame title="esperando...">
+</TerminalFrame>
+
+## Props
+
+| Prop | Tipo | Default | Descripción |
+|------|------|---------|-------------|
+| `title` | `string` | `'Terminal'` | Título de la ventana en la barra superior |
+| `prompt` | `string` | `'$ '` | Cadena de prompt (reservado para uso futuro) |

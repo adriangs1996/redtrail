@@ -1,0 +1,90 @@
+---
+title: Terminal Frame Component
+description: Demo of the TerminalFrame MDX component with various configurations.
+---
+
+import TerminalFrame from '../../../../components/TerminalFrame.astro';
+
+The `TerminalFrame` component renders code in a terminal-like UI with traffic light dots and Catppuccin theming.
+
+## Basic Usage
+
+<TerminalFrame title="bash">
+```
+$ redtrail scan --target 192.168.1.0/24
+[*] Starting network scan...
+[+] Host 192.168.1.1 is up (0.0023s latency)
+[+] Host 192.168.1.42 is up (0.0051s latency)
+[*] Scan complete: 2 hosts up
+```
+</TerminalFrame>
+
+## Custom Title
+
+<TerminalFrame title="nmap — 192.168.1.42">
+```
+$ nmap -sV 192.168.1.42
+Starting Nmap 7.94 ( https://nmap.org )
+PORT     STATE SERVICE  VERSION
+22/tcp   open  ssh      OpenSSH 8.9
+80/tcp   open  http     nginx 1.18.0
+443/tcp  open  ssl/http nginx 1.18.0
+3306/tcp open  mysql    MySQL 8.0.32
+```
+</TerminalFrame>
+
+## Multiline Commands
+
+<TerminalFrame title="redtrail session">
+```
+$ redtrail suggest \
+    --context network-scan \
+    --depth 2
+[*] Analyzing scan results...
+[+] Suggestion: Enumerate HTTP service on port 80
+    Priority: HIGH
+    Reason: Web server detected — check for common vulnerabilities
+[+] Suggestion: Check MySQL auth configuration
+    Priority: MEDIUM
+    Reason: Database port exposed to network
+```
+</TerminalFrame>
+
+## Default Title
+
+<TerminalFrame>
+```
+$ echo "Hello from Redtrail"
+Hello from Redtrail
+```
+</TerminalFrame>
+
+## Long Output
+
+<TerminalFrame title="redtrail report">
+```
+$ redtrail report --format summary
+
+╔══════════════════════════════════════════════════╗
+║              REDTRAIL SCAN REPORT                ║
+╠══════════════════════════════════════════════════╣
+║ Target: 192.168.1.0/24                           ║
+║ Duration: 00:12:34                               ║
+║ Hosts discovered: 14                             ║
+║ Open ports: 47                                   ║
+║ Vulnerabilities: 3 HIGH, 7 MEDIUM, 12 LOW       ║
+╚══════════════════════════════════════════════════╝
+```
+</TerminalFrame>
+
+## Empty Content
+
+<TerminalFrame title="waiting...">
+</TerminalFrame>
+
+## Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `title` | `string` | `'Terminal'` | Window title displayed in the title bar |
+| `prompt` | `string` | `'$ '` | Prompt string (reserved for future use) |

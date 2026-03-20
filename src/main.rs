@@ -6,6 +6,7 @@ mod extraction;
 mod net;
 mod pipeline;
 mod skill_loader;
+mod spawn;
 mod workspace;
 
 fn main() {

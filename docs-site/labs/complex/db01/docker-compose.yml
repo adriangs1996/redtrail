@@ -1,0 +1,6 @@
+services:
+  db01:
+    build: .
+    ports:
+      - "3307:3306"
+    restart: unless-stopped

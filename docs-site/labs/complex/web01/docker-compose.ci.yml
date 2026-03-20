@@ -1,0 +1,5 @@
+services:
+  web01:
+    ports:
+      - "80"
+    restart: "no"

@@ -56,10 +56,10 @@ fn test_env_modifies_prompt() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("[rt:"),
+        stdout.contains("(rt:"),
         "should modify PS1 with session name"
     );
-    assert!(stdout.contains("RT_OLD_PS1"), "should save old PS1");
+    assert!(stdout.contains("_rt_precmd"), "should install precmd hook");
 }
 
 #[test]

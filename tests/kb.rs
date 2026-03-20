@@ -116,3 +116,29 @@ fn test_search() {
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(json.as_array().unwrap().len() >= 2);
 }
+
+#[test]
+fn test_paths_cli_empty() {
+    let tmp = setup_workspace();
+    let out = Command::new(env!("CARGO_BIN_EXE_rt"))
+        .args(["kb", "paths", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_vulns_cli_empty() {
+    let tmp = setup_workspace();
+    let out = Command::new(env!("CARGO_BIN_EXE_rt"))
+        .args(["kb", "vulns", "--json"])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 0);
+}

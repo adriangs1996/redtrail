@@ -426,6 +426,14 @@ pub fn search(
             "command",
             "SELECT 'command' as kind, command as value FROM command_history WHERE session_id = ?1 AND command LIKE ?2",
         ),
+        (
+            "web_path",
+            "SELECT 'web_path' as kind, path as value FROM web_paths w JOIN hosts h ON w.host_id = h.id WHERE w.session_id = ?1 AND (w.path LIKE ?2 OR h.ip LIKE ?2)",
+        ),
+        (
+            "vuln",
+            "SELECT 'vuln' as kind, name as value FROM vulns v JOIN hosts h ON v.host_id = h.id WHERE v.session_id = ?1 AND (v.name LIKE ?2 OR v.cve LIKE ?2 OR h.ip LIKE ?2)",
+        ),
     ];
 
     for (_kind, sql) in &searches {

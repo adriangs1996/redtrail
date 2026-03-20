@@ -44,8 +44,9 @@ pub fn run(db: &impl SessionOps, session_id: &str) -> Result<(), Error> {
         println!("export RT_TARGET='{target}';");
     }
 
-    println!("export RT_OLD_PS1=\"$PS1\";");
-    println!("export PS1=\"[rt:{session_name}] $PS1\";");
+    println!(r#"_rt_precmd() {{ [[ "$PROMPT" != *"(rt:{session_name})"* ]] && PROMPT="(rt:{session_name}) ${{PROMPT}}"; }};"#);
+    println!("autoload -Uz add-zsh-hook;");
+    println!("add-zsh-hook precmd _rt_precmd;");
 
     print!("rt_deactivate() {{ ");
     for tool in aliases {
@@ -54,8 +55,9 @@ pub fn run(db: &impl SessionOps, session_id: &str) -> Result<(), Error> {
     for (short, _) in COMMAND_ALIASES {
         print!("unalias {short} 2>/dev/null; ");
     }
-    print!("export PS1=\"$RT_OLD_PS1\"; ");
-    print!("unset RT_WORKSPACE RT_SESSION RT_TARGET RT_OLD_PS1; ");
+    print!("add-zsh-hook -d precmd _rt_precmd; ");
+    print!("unset -f _rt_precmd; ");
+    print!("unset RT_WORKSPACE RT_SESSION RT_TARGET; ");
     print!("unset -f rt_deactivate; ");
     println!("}};");
 
@@ -73,8 +75,9 @@ pub fn deactivate() -> Result<(), Error> {
     for (short, _) in COMMAND_ALIASES {
         println!("unalias {short} 2>/dev/null;");
     }
-    println!("export PS1=\"$RT_OLD_PS1\";");
-    println!("unset RT_WORKSPACE RT_SESSION RT_TARGET RT_OLD_PS1;");
+    println!("add-zsh-hook -d precmd _rt_precmd 2>/dev/null;");
+    println!("unset -f _rt_precmd 2>/dev/null;");
+    println!("unset RT_WORKSPACE RT_SESSION RT_TARGET;");
     println!("unset -f rt_deactivate;");
     Ok(())
 }

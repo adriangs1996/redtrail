@@ -1,0 +1,211 @@
+---
+title: Getting Started
+description: Get up and running with Redtrail in under 10 minutes.
+---
+
+import TerminalFrame from '../../../../components/TerminalFrame.astro';
+
+Redtrail (RT) is a pentesting workspace manager. It tracks hosts, ports, credentials, hypotheses, and evidence in a local SQLite database while you work. Any tool you run through `rt` gets its output captured and ingested automatically.
+
+This guide walks you through a complete RT workflow against a single target.
+
+## 1. Setup
+
+After [installing RT](/en/getting-started/installation/), run the setup wizard to configure your LLM provider and detect installed tools:
+
+<TerminalFrame title="bash">
+```
+$ rt setup
+[*] Redtrail setup wizard
+[?] LLM provider (anthropic/ollama): anthropic
+[?] Anthropic API key: sk-ant-••••••••
+[+] API key validated
+[*] Scanning PATH for known tools...
+[+] Found: nmap, gobuster, nikto, sqlmap, hydra, john, curl, ssh, nc
+[+] Config written to ~/.config/redtrail/config.toml
+```
+</TerminalFrame>
+
+## 2. Initialize a workspace
+
+Create a workspace directory and initialize RT with your target:
+
+<TerminalFrame title="bash">
+```
+$ mkdir htb-broker && cd htb-broker
+$ rt init --target 10.10.11.243 --goal ctf --scope 10.10.11.0/24
+[+] Workspace initialized: htb-broker
+[+] Target: 10.10.11.243
+[+] Goal: ctf
+[+] Scope: 10.10.11.0/24
+[+] Session: sess_a1b2c3
+[+] Database: .rt/redtrail.db
+```
+</TerminalFrame>
+
+Activate the RT environment so proxied commands get captured:
+
+<TerminalFrame title="bash">
+```
+$ eval "$(rt env)"
+[rt:htb-broker] $
+```
+</TerminalFrame>
+
+## 3. Recon
+
+Run your tools as usual. RT intercepts known tools, captures output, and extracts findings into the knowledge base:
+
+<TerminalFrame title="nmap — 10.10.11.243">
+```
+[rt:htb-broker] $ nmap -sV -sC 10.10.11.243
+Starting Nmap 7.94 ( https://nmap.org )
+PORT    STATE SERVICE VERSION
+22/tcp  open  ssh     OpenSSH 8.9p1 Ubuntu 3ubuntu0.4
+80/tcp  open  http    nginx 1.18.0
+| http-title: ActiveMQ
+|_Requested resource was /admin/
+443/tcp open  ssl/http nginx 1.18.0
+Nmap done: 1 IP host up scanned in 12.34 seconds
+
+[rt] captured → 1 host, 3 ports, 1 service fingerprint
+```
+</TerminalFrame>
+
+You can also ingest output files from previous runs:
+
+<TerminalFrame title="bash">
+```
+[rt:htb-broker] $ rt ingest scan-results.xml --tool nmap
+[+] Ingested scan-results.xml (nmap)
+[+] Added: 1 host, 5 ports
+```
+</TerminalFrame>
+
+## 4. Query the knowledge base
+
+Check what RT has collected:
+
+<TerminalFrame title="rt kb">
+```
+[rt:htb-broker] $ rt kb hosts
+HOST           OS               PORTS  FIRST SEEN
+10.10.11.243   Linux (Ubuntu)   3      2 min ago
+
+[rt:htb-broker] $ rt kb ports --host 10.10.11.243
+HOST            PORT   PROTO  SERVICE   VERSION            STATE
+10.10.11.243    22     tcp    ssh       OpenSSH 8.9p1      open
+10.10.11.243    80     tcp    http      nginx 1.18.0       open
+10.10.11.243    443    tcp    ssl/http  nginx 1.18.0       open
+```
+</TerminalFrame>
+
+Search across all KB data:
+
+<TerminalFrame title="rt kb search">
+```
+[rt:htb-broker] $ rt kb search "ActiveMQ"
+[ports] 10.10.11.243:80 — http-title: ActiveMQ
+[notes] nmap script output mentions ActiveMQ admin panel
+```
+</TerminalFrame>
+
+## 5. Form a hypothesis
+
+When you spot something interesting, track it as a hypothesis:
+
+<TerminalFrame title="rt hypothesis">
+```
+[rt:htb-broker] $ rt hypothesis create \
+    "ActiveMQ admin panel has default credentials" \
+    --category auth \
+    --priority high \
+    --confidence 0.6 \
+    --component 10.10.11.243:80
+[+] Hypothesis #1 created (status: pending)
+
+[rt:htb-broker] $ rt hypothesis list
+ID  STATUS   PRI   CONF  CATEGORY  STATEMENT
+1   pending  high  0.60  auth      ActiveMQ admin panel has default credentials
+```
+</TerminalFrame>
+
+## 6. Ask the LLM
+
+Use `rt ask` to get contextual suggestions. RT sends your full session state (hosts, ports, hypotheses, command history) to the LLM:
+
+<TerminalFrame title="rt ask">
+```
+[rt:htb-broker] $ rt ask "What should I try next on port 80?"
+[*] Sending context: 1 host, 3 ports, 1 hypothesis, 4 commands...
+
+Based on your session:
+
+1. **Test default creds on ActiveMQ** (supports hypothesis #1)
+   → curl -u admin:admin http://10.10.11.243/admin/
+   Priority: HIGH — default creds on ActiveMQ are common
+
+2. **Check ActiveMQ version for known CVEs**
+   → curl -s http://10.10.11.243/admin/ | grep -i version
+   Priority: HIGH — ActiveMQ has had critical RCE vulnerabilities
+
+3. **Directory enumeration on the web root**
+   → gobuster dir -u http://10.10.11.243 -w /usr/share/seclists/...
+   Priority: MEDIUM — may reveal additional endpoints
+```
+</TerminalFrame>
+
+For quick one-shot questions without conversation history, use `rt query`:
+
+<TerminalFrame title="rt query">
+```
+[rt:htb-broker] $ rt query "Is CVE-2023-46604 relevant here?"
+ActiveMQ CVE-2023-46604 is a critical RCE (CVSS 10.0) affecting
+Apache ActiveMQ before 5.15.16, 5.16.7, 5.17.6, and 5.18.3.
+Given you found an ActiveMQ admin panel on port 80, this is
+highly relevant. Check the version first.
+```
+</TerminalFrame>
+
+## 7. Generate a report
+
+When you're ready, generate a pentest report from your session data:
+
+<TerminalFrame title="rt report">
+```
+[rt:htb-broker] $ rt report generate --output report.md
+[*] Generating report from session sess_a1b2c3...
+[+] Hosts: 1 | Ports: 3 | Hypotheses: 1 | Evidence: 2
+[+] Report written to report.md
+```
+</TerminalFrame>
+
+The report includes discovered hosts, open ports, tested hypotheses with evidence, a command timeline, and methodology notes — ready to hand off or archive.
+
+## 8. Check session status
+
+At any point, get a quick overview of your session:
+
+<TerminalFrame title="rt status">
+```
+[rt:htb-broker] $ rt status
+Session:      sess_a1b2c3
+Target:       10.10.11.243
+Goal:         ctf
+Scope:        10.10.11.0/24
+Duration:     00:08:12
+
+Hosts:        1
+Ports:        3
+Credentials:  0
+Flags:        0
+Hypotheses:   1 (pending: 1)
+Commands:     6
+```
+</TerminalFrame>
+
+## Next steps
+
+- [Core Concepts](/en/core-concepts/overview/) — understand the workspace model, deductive layers (L0–L4), and BISCL framework
+- [Hands-On Tutorial](/en/guides/simple-lab/) — walk through a full lab engagement step by step
+- [CLI Reference](/en/cli-reference/commands/) — complete list of `rt` subcommands and flags

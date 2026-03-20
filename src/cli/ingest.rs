@@ -7,6 +7,7 @@ pub fn run(
     session_id: &str,
     file: &str,
     tool_override: Option<String>,
+    auto_extract: bool,
 ) -> Result<(), Error> {
     let content = fs::read_to_string(file)?;
     let tool = tool_override.unwrap_or_else(|| detect_tool(&content));
@@ -22,7 +23,14 @@ pub fn run(
         "ingested: {filename} (tool: {tool}, {} bytes)",
         content.len()
     );
-    println!("extraction pending — run `rt kb extract {cmd_id}` to extract manually");
+
+    if auto_extract {
+        crate::spawn::spawn_extraction(cmd_id);
+        println!("extraction queued");
+    } else {
+        println!("extraction skipped (auto_extract disabled)");
+    }
+
     Ok(())
 }
 

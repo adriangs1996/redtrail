@@ -275,7 +275,12 @@ pub fn run() -> Result<(), Error> {
         },
         Some(Commands::Ingest { file, tool }) => {
             let (db, sid) = resolve_session()?;
-            ingest::run(&db, &sid, &file, tool)
+            let cwd = std::env::current_dir()?;
+            let auto_extract = workspace::find_workspace(&cwd)
+                .and_then(|ws| crate::config::Config::resolved(&ws).ok())
+                .map(|c| c.general.auto_extract)
+                .unwrap_or(true);
+            ingest::run(&db, &sid, &file, tool, auto_extract)
         }
         Some(Commands::Report { command }) => {
             let (db, sid) = resolve_session()?;

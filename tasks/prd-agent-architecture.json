@@ -204,11 +204,12 @@
         "cargo test --bin rt passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Output tools — they don't modify DB state. With run(), results collected via step inspection. With stream(), respond text streams token by token.",
       "dependsOn": [
         "US-006"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-011",
@@ -367,6 +368,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-21T16:43:48.152Z"
+    "updatedAt": "2026-03-21T16:45:40.034Z"
   }
 }

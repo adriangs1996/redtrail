@@ -253,6 +253,78 @@ mod tests {
     }
 
     #[test]
+    fn make_suggest_tool_returns_valid_tool() {
+        let tool = make_suggest_tool();
+        assert_eq!(tool.name, "suggest");
+        assert!(!tool.description.is_empty());
+    }
+
+    #[test]
+    fn make_respond_tool_returns_valid_tool() {
+        let tool = make_respond_tool();
+        assert_eq!(tool.name, "respond");
+        assert!(!tool.description.is_empty());
+    }
+
+    #[test]
+    fn suggest_tool_returns_text_and_priority() {
+        let tool = make_suggest_tool();
+        let input = serde_json::json!({
+            "text": "Try enumerating port 8080",
+            "priority": "high"
+        });
+        let result = tool.execute.call(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["text"], "Try enumerating port 8080");
+        assert_eq!(parsed["priority"], "high");
+    }
+
+    #[test]
+    fn suggest_tool_validates_priority() {
+        let tool = make_suggest_tool();
+        let input = serde_json::json!({
+            "text": "something",
+            "priority": "urgent"
+        });
+        let result = tool.execute.call(input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid priority"));
+    }
+
+    #[test]
+    fn suggest_tool_accepts_all_priorities() {
+        let tool = make_suggest_tool();
+        for p in &["low", "medium", "high", "critical"] {
+            let input = serde_json::json!({"text": "x", "priority": p});
+            assert!(tool.execute.call(input).is_ok());
+        }
+    }
+
+    #[test]
+    fn respond_tool_returns_text() {
+        let tool = make_respond_tool();
+        let input = serde_json::json!({
+            "text": "The target appears to be running Apache 2.4"
+        });
+        let result = tool.execute.call(input).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["text"], "The target appears to be running Apache 2.4");
+    }
+
+    #[test]
+    fn suggest_and_respond_schemas_are_valid() {
+        let suggest_schema = schema_for!(SuggestInput);
+        let respond_schema = schema_for!(RespondInput);
+
+        let s = serde_json::to_value(&suggest_schema).unwrap();
+        assert!(s["properties"]["text"].is_object());
+        assert!(s["properties"]["priority"].is_object());
+
+        let r = serde_json::to_value(&respond_schema).unwrap();
+        assert!(r["properties"]["text"].is_object());
+    }
+
+    #[test]
     fn input_schemas_are_valid_json_schema() {
         let query_schema = schema_for!(QueryInput);
         let create_schema = schema_for!(CreateInput);

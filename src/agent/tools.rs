@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::db::dispatcher;
+#[allow(unused_imports)]
 use super::ToolContext;
 
 #[derive(Deserialize, JsonSchema)]
@@ -79,6 +80,52 @@ pub fn make_update_tool(ctx: Arc<ToolContext>) -> Tool {
                 .map_err(|e| e.to_string())?;
             serde_json::to_string(&serde_json::json!({
                 "updated": result.updated,
+            })).map_err(|e| format!("serialize: {e}"))
+        })),
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SuggestInput {
+    pub text: String,
+    pub priority: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RespondInput {
+    pub text: String,
+}
+
+pub fn make_suggest_tool() -> Tool {
+    Tool {
+        name: "suggest".into(),
+        description: "Suggest a next action or insight to the operator. Does not modify state. The text will be displayed to the user. Priority indicates urgency: low, medium, high, critical.".into(),
+        input_schema: schema_for!(SuggestInput),
+        execute: ToolExecute::new(Box::new(|params| {
+            let input: SuggestInput = serde_json::from_value(params)
+                .map_err(|e| format!("invalid input: {e}"))?;
+            let valid = ["low", "medium", "high", "critical"];
+            if !valid.contains(&input.priority.as_str()) {
+                return Err(format!("invalid priority '{}': must be one of {:?}", input.priority, valid));
+            }
+            serde_json::to_string(&serde_json::json!({
+                "text": input.text,
+                "priority": input.priority,
+            })).map_err(|e| format!("serialize: {e}"))
+        })),
+    }
+}
+
+pub fn make_respond_tool() -> Tool {
+    Tool {
+        name: "respond".into(),
+        description: "Respond to the operator with a message. Does not modify state. The text will be displayed to the user.".into(),
+        input_schema: schema_for!(RespondInput),
+        execute: ToolExecute::new(Box::new(|params| {
+            let input: RespondInput = serde_json::from_value(params)
+                .map_err(|e| format!("invalid input: {e}"))?;
+            serde_json::to_string(&serde_json::json!({
+                "text": input.text,
             })).map_err(|e| format!("serialize: {e}"))
         })),
     }

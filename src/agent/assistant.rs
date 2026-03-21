@@ -374,8 +374,9 @@ mod tests {
 
     #[test]
     fn run_command_tool_executes() {
+        let conn = test_conn();
         let ctx = Arc::new(ToolContext {
-            conn: Arc::new(Mutex::new(Connection::open_in_memory().unwrap())),
+            conn,
             session_id: "s1".into(),
             cwd: PathBuf::from("/tmp"),
         });
@@ -383,6 +384,7 @@ mod tests {
         let input = serde_json::json!({"command": "echo hello"});
         let result = tool.execute.call(input).unwrap();
         assert!(result.contains("hello"));
+        assert!(result.contains("exit code: 0"));
     }
 
     #[test]

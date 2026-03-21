@@ -326,6 +326,104 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_strips_ansi_codes() {
+        let input = "\x1b[31mred text\x1b[0m normal";
+        let result = tools::sanitize_output(input);
+        assert_eq!(result, "red text normal");
+    }
+
+    #[test]
+    fn sanitize_collapses_excessive_newlines() {
+        let input = "line1\n\n\n\n\nline2";
+        let result = tools::sanitize_output(input);
+        assert_eq!(result, "line1\n\nline2");
+    }
+
+    #[test]
+    fn sanitize_removes_lines_with_multiple_cr() {
+        let input = "normal line\ndownloading\r\r\rfinal line";
+        let result = tools::sanitize_output(input);
+        assert!(result.contains("normal line"));
+        assert!(!result.contains("downloading"));
+    }
+
+    #[test]
+    fn sanitize_preserves_normal_output() {
+        let input = "PORT     STATE SERVICE\n22/tcp   open  ssh\n80/tcp   open  http\n";
+        let result = tools::sanitize_output(input);
+        assert_eq!(result, input.trim_end_matches('\n'));
+    }
+
+    #[test]
+    fn chunk_output_under_limit_unchanged() {
+        let short = "hello world";
+        assert_eq!(tools::chunk_output(short), short);
+    }
+
+    #[test]
+    fn chunk_output_over_limit_truncates() {
+        let long = "x".repeat(15000);
+        let result = tools::chunk_output(&long);
+        assert!(result.len() < 15000);
+        assert!(result.contains("output truncated"));
+        assert!(result.contains("remaining"));
+    }
+
+    #[test]
+    fn run_command_logs_to_command_history() {
+        let ctx = test_ctx();
+        let tool = make_run_command_tool(ctx.clone());
+        let input = serde_json::json!({"command": "echo logged"});
+        let result = tool.execute.call(input).unwrap();
+        assert!(result.contains("logged"));
+
+        let conn = ctx.conn.lock().unwrap();
+        let (sid, cmd, _tool, output) = db::commands::get_for_extraction(&conn, 1).unwrap();
+        assert_eq!(sid, "s1");
+        assert_eq!(cmd, "echo logged");
+        assert!(output.unwrap().contains("logged"));
+    }
+
+    #[test]
+    fn run_command_records_exit_code() {
+        let ctx = test_ctx();
+        let tool = make_run_command_tool(ctx.clone());
+        let input = serde_json::json!({"command": "exit 42"});
+        let result = tool.execute.call(input).unwrap();
+        assert!(result.contains("exit code: 42"));
+
+        let conn = ctx.conn.lock().unwrap();
+        let row: i32 = conn.query_row(
+            "SELECT exit_code FROM command_history WHERE id = 1", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(row, 42);
+    }
+
+    #[test]
+    fn run_command_records_duration() {
+        let ctx = test_ctx();
+        let tool = make_run_command_tool(ctx.clone());
+        let input = serde_json::json!({"command": "echo fast"});
+        tool.execute.call(input).unwrap();
+
+        let conn = ctx.conn.lock().unwrap();
+        let dur: i64 = conn.query_row(
+            "SELECT duration_ms FROM command_history WHERE id = 1", [], |r| r.get(0)
+        ).unwrap();
+        assert!(dur >= 0);
+    }
+
+    #[test]
+    fn run_command_strips_ansi_in_output() {
+        let ctx = test_ctx();
+        let tool = make_run_command_tool(ctx);
+        let input = serde_json::json!({"command": "printf '\\033[31mred\\033[0m'"});
+        let result = tool.execute.call(input).unwrap();
+        assert!(!result.contains("\x1b["));
+        assert!(result.contains("red"));
+    }
+
+    #[test]
     fn input_schemas_are_valid_json_schema() {
         let query_schema = schema_for!(QueryInput);
         let create_schema = schema_for!(CreateInput);

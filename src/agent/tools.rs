@@ -1,10 +1,12 @@
 use aisdk::core::tools::{Tool, ToolExecute};
+use regex::Regex;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use crate::db::dispatcher;
+use crate::db::{commands, dispatcher};
 #[allow(unused_imports)]
 use super::ToolContext;
 
@@ -86,58 +88,157 @@ pub fn make_update_tool(ctx: Arc<ToolContext>) -> Tool {
 }
 
 const MAX_OUTPUT_CHARS: usize = 12000;
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RunCommandInput {
     pub command: String,
 }
 
+pub fn sanitize_output(raw: &str) -> String {
+    let ansi_re = Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[\?]?[0-9;]*[a-zA-Z]").unwrap();
+    let cleaned = ansi_re.replace_all(raw, "");
+
+    let lines: Vec<&str> = cleaned.lines().collect();
+    let filtered: Vec<&str> = lines
+        .into_iter()
+        .filter(|line| {
+            let l = line.trim();
+            if l.is_empty() {
+                return true;
+            }
+            let has_progress_indicators =
+                (l.contains('%') || l.contains("ETA") || l.contains("eta"))
+                    && (l.contains('[') || l.contains('|') || l.contains('#') || l.contains('='));
+            if has_progress_indicators && l.contains('\r') {
+                return false;
+            }
+            let cr_count = line.matches('\r').count();
+            if cr_count > 1 {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    let joined = filtered.join("\n");
+
+    let newline_re = Regex::new(r"\n{3,}").unwrap();
+    let result = newline_re.replace_all(&joined, "\n\n");
+
+    result.into_owned()
+}
+
+pub fn chunk_output(sanitized: &str) -> String {
+    if sanitized.len() <= MAX_OUTPUT_CHARS {
+        return sanitized.to_string();
+    }
+
+    let mut end = MAX_OUTPUT_CHARS;
+    while end > 0 && !sanitized.is_char_boundary(end) {
+        end -= 1;
+    }
+    if let Some(nl) = sanitized[..end].rfind('\n') {
+        end = nl;
+    }
+
+    let mut result = sanitized[..end].to_string();
+    let remaining = sanitized.len() - end;
+    result.push_str(&format!(
+        "\n... (output truncated, {remaining} chars remaining)"
+    ));
+    result
+}
+
 pub fn make_run_command_tool(ctx: Arc<ToolContext>) -> Tool {
     Tool {
         name: "run_command".into(),
-        description: "Execute a shell command in the workspace directory. Use for running pentesting tools, checking files, network operations. Output is captured and returned.".into(),
+        description: "Execute a shell command in the workspace directory. Use for running pentesting tools, checking files, network operations. Output is captured and returned with exit code. Timeout: 300s.".into(),
         input_schema: schema_for!(RunCommandInput),
         execute: ToolExecute::new(Box::new(move |params| {
             let input: RunCommandInput = serde_json::from_value(params)
                 .map_err(|e| format!("invalid input: {e}"))?;
-            let output = std::process::Command::new("sh")
+
+            let cmd_id = {
+                let conn = ctx.conn.lock().map_err(|e| format!("db lock: {e}"))?;
+                commands::insert(&conn, &ctx.session_id, &input.command, None)
+                    .map_err(|e| format!("log insert: {e}"))?
+            };
+
+            let start = Instant::now();
+
+            let child = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&input.command)
                 .current_dir(&ctx.cwd)
-                .output()
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
                 .map_err(|e| format!("exec: {e}"))?;
+
+            let output = match wait_with_timeout(child, COMMAND_TIMEOUT) {
+                Ok(o) => o,
+                Err(e) => {
+                    let elapsed = start.elapsed().as_millis() as i64;
+                    if let Ok(conn) = ctx.conn.lock() {
+                        let _ = commands::finish(&conn, cmd_id, -1, elapsed, &format!("timeout: {e}"));
+                    }
+                    return Err(format!("command timed out after {}s", COMMAND_TIMEOUT.as_secs()));
+                }
+            };
+
+            let elapsed = start.elapsed().as_millis() as i64;
+            let exit_code = output.status.code().unwrap_or(-1);
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
 
-            let mut result = String::new();
+            let mut raw = String::new();
             if !stdout.is_empty() {
-                result.push_str(&stdout);
+                raw.push_str(&stdout);
             }
             if !stderr.is_empty() {
-                if !result.is_empty() {
-                    result.push('\n');
+                if !raw.is_empty() {
+                    raw.push('\n');
                 }
-                result.push_str(&stderr);
-            }
-            if !output.status.success() {
-                result.push_str(&format!(
-                    "\n(exit code: {})",
-                    output.status.code().unwrap_or(-1)
-                ));
+                raw.push_str(&stderr);
             }
 
-            if result.len() > MAX_OUTPUT_CHARS {
-                let mut end = MAX_OUTPUT_CHARS;
-                while end > 0 && !result.is_char_boundary(end) {
-                    end -= 1;
-                }
-                result.truncate(end);
-                result.push_str("\n... (output truncated)");
+            let sanitized = sanitize_output(&raw);
+            let chunked = chunk_output(&sanitized);
+
+            {
+                let conn = ctx.conn.lock().map_err(|e| format!("db lock: {e}"))?;
+                commands::finish(&conn, cmd_id, exit_code, elapsed, &sanitized)
+                    .map_err(|e| format!("log finish: {e}"))?;
             }
 
-            Ok(result)
+            Ok(format!("{chunked}\n(exit code: {exit_code})"))
         })),
+    }
+}
+
+fn wait_with_timeout(
+    child: std::process::Child,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    use std::thread;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || {
+        let child = child;
+        let result = child.wait_with_output();
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(result) => {
+            let _ = handle.join();
+            result.map_err(|e| format!("wait: {e}"))
+        }
+        Err(_) => {
+            Err("timeout".into())
+        }
     }
 }
 

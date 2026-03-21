@@ -11,34 +11,6 @@ pub enum HypothesisCommands {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
-    #[command(about = "Create a new attack hypothesis")]
-    Create {
-        #[arg(help = "Hypothesis statement (e.g. \"SSH accepts password auth\")")]
-        statement: String,
-        #[arg(long, help = "Category (e.g. auth, injection, misconfig, privesc)")]
-        category: String,
-        #[arg(
-            long,
-            default_value = "medium",
-            help = "Priority: low, medium, high, critical"
-        )]
-        priority: String,
-        #[arg(
-            long,
-            default_value_t = 0.5,
-            help = "Initial confidence score (0.0 to 1.0)"
-        )]
-        confidence: f64,
-        #[arg(long, help = "Target component (e.g. host:port, service name)")]
-        component: Option<String>,
-    },
-    #[command(about = "Update a hypothesis status")]
-    Update {
-        #[arg(help = "Hypothesis ID")]
-        id: i64,
-        #[arg(long, help = "New status (e.g. confirmed, refuted, testing)")]
-        status: String,
-    },
     #[command(about = "Show full details and linked evidence for a hypothesis")]
     Show {
         #[arg(help = "Hypothesis ID")]
@@ -71,27 +43,6 @@ pub fn run(
                     );
                 }
             }
-        }
-        HypothesisCommands::Create {
-            statement,
-            category,
-            priority,
-            confidence,
-            component,
-        } => {
-            let id = db.create_hypothesis(
-                session_id,
-                &statement,
-                &category,
-                &priority,
-                confidence,
-                component.as_deref(),
-            )?;
-            println!("hypothesis created: {id}");
-        }
-        HypothesisCommands::Update { id, status } => {
-            db.update_hypothesis(id, &status)?;
-            println!("hypothesis {id} updated to {status}");
         }
         HypothesisCommands::Show { id, json } => {
             let h = db.get_hypothesis(id)?;

@@ -1,4 +1,4 @@
-use crate::db::{CommandLog, KnowledgeBase};
+use crate::db::KnowledgeBase;
 use crate::error::Error;
 use clap::Subcommand;
 
@@ -68,75 +68,10 @@ pub enum KbCommands {
         #[arg(long, help = "Output as JSON")]
         json: bool,
     },
-    #[command(about = "Register a new host in the knowledge base")]
-    AddHost {
-        #[arg(help = "IP address of the host")]
-        ip: String,
-        #[arg(long, help = "Operating system (e.g. Linux, Windows)")]
-        os: Option<String>,
-        #[arg(long, help = "Hostname or FQDN")]
-        hostname: Option<String>,
-    },
-    #[command(about = "Register a new port on a host")]
-    AddPort {
-        #[arg(help = "Host IP address")]
-        ip: String,
-        #[arg(help = "Port number")]
-        port: i64,
-        #[arg(long, help = "Protocol: tcp or udp")]
-        protocol: Option<String>,
-        #[arg(long, help = "Service name (e.g. http, ssh, smb)")]
-        service: Option<String>,
-        #[arg(long, help = "Service version string")]
-        version: Option<String>,
-    },
-    #[command(about = "Store a discovered credential")]
-    AddCred {
-        #[arg(help = "Username")]
-        username: String,
-        #[arg(long, help = "Cleartext password")]
-        pass: Option<String>,
-        #[arg(long, help = "Password hash")]
-        hash: Option<String>,
-        #[arg(long, help = "Service the credential belongs to")]
-        service: Option<String>,
-        #[arg(long, help = "Host where the credential was found")]
-        host: Option<String>,
-        #[arg(long, help = "How the credential was obtained")]
-        source: Option<String>,
-    },
-    #[command(about = "Record a captured flag")]
-    AddFlag {
-        #[arg(help = "Flag value")]
-        value: String,
-        #[arg(long, help = "Where the flag was found")]
-        source: Option<String>,
-    },
-    #[command(about = "Record an access level obtained on a host")]
-    AddAccess {
-        #[arg(help = "Target host IP")]
-        host: String,
-        #[arg(help = "Username with access")]
-        user: String,
-        #[arg(help = "Access level (e.g. user, root, admin)")]
-        level: String,
-        #[arg(long, help = "Access method (e.g. ssh, rdp, web-shell)")]
-        method: Option<String>,
-    },
-    #[command(about = "Add a free-form operator note")]
-    AddNote {
-        #[arg(help = "Note text")]
-        text: String,
-    },
-    #[command(about = "Extract structured data from a logged command's output")]
-    Extract {
-        #[arg(help = "Command history ID (from `rt kb history`)")]
-        id: i64,
-    },
 }
 
 pub fn run(
-    db: &(impl KnowledgeBase + CommandLog + crate::db::Schematizable),
+    db: &impl KnowledgeBase,
     session_id: &str,
     cmd: KbCommands,
 ) -> Result<(), Error> {
@@ -349,68 +284,6 @@ pub fn run(
                     );
                 }
             }
-        }
-        KbCommands::AddHost { ip, os, hostname } => {
-            let id = db.add_host(session_id, &ip, os.as_deref(), hostname.as_deref())?;
-            println!("host added (id={id}): {ip}");
-        }
-        KbCommands::AddPort {
-            ip,
-            port,
-            protocol,
-            service,
-            version,
-        } => {
-            let id = db.add_port(
-                session_id,
-                &ip,
-                port,
-                protocol.as_deref(),
-                service.as_deref(),
-                version.as_deref(),
-            )?;
-            println!("port added (id={id}): {ip}:{port}");
-        }
-        KbCommands::AddCred {
-            username,
-            pass,
-            hash,
-            service,
-            host,
-            source,
-        } => {
-            let id = db.add_credential(
-                session_id,
-                &username,
-                pass.as_deref(),
-                hash.as_deref(),
-                service.as_deref(),
-                host.as_deref(),
-                source.as_deref(),
-            )?;
-            println!("credential added (id={id}): {username}");
-        }
-        KbCommands::AddFlag { value, source } => {
-            let id = db.add_flag(session_id, &value, source.as_deref())?;
-            println!("flag added (id={id}): {value}");
-        }
-        KbCommands::AddAccess {
-            host,
-            user,
-            level,
-            method,
-        } => {
-            let id = db.add_access(session_id, &host, &user, &level, method.as_deref())?;
-            println!("access added (id={id}): {user}@{host} ({level})");
-        }
-        KbCommands::AddNote { text } => {
-            let id = db.add_note(session_id, &text)?;
-            println!("note added (id={id})");
-        }
-        KbCommands::Extract { id } => {
-            let config = crate::config::Config::resolved(&std::env::current_dir()?)?;
-            crate::extraction::extract_sync(db, session_id, id, &config)?;
-            println!("extraction complete for command {id}");
         }
     }
 

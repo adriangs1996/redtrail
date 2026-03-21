@@ -57,28 +57,32 @@ pub fn update_extraction_status(conn: &Connection, id: i64, status: &str) -> Res
 
 #[cfg(test)]
 mod tests {
-    use crate::db::{CommandLog, SessionOps, open_in_memory};
+    use super::*;
+    use crate::db;
+
+    fn setup_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(db::SCHEMA).unwrap();
+        db::session::create_session(&conn, "s1", "test", None, None, "general").unwrap();
+        conn
+    }
 
     #[test]
     fn test_command_capture_lifecycle() {
-        let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general")
-            .unwrap();
+        let conn = setup_conn();
 
-        let cmd_id = db
-            .insert_command("s1", "nmap -sV 10.10.10.1", Some("nmap"))
-            .unwrap();
+        let cmd_id = insert(&conn, "s1", "nmap -sV 10.10.10.1", Some("nmap")).unwrap();
         assert!(cmd_id > 0);
 
-        db.finish_command(cmd_id, 0, 1500, "22/tcp open ssh OpenSSH 8.9")
-            .unwrap();
+        finish(&conn, cmd_id, 0, 1500, "22/tcp open ssh OpenSSH 8.9").unwrap();
 
-        let (session_id, command, tool, output) = db.get_command_for_extraction(cmd_id).unwrap();
+        let (session_id, command, tool, output) = get_for_extraction(&conn, cmd_id).unwrap();
         assert_eq!(session_id, "s1");
         assert_eq!(command, "nmap -sV 10.10.10.1");
         assert_eq!(tool.as_deref(), Some("nmap"));
         assert_eq!(output.as_deref(), Some("22/tcp open ssh OpenSSH 8.9"));
 
-        db.update_extraction_status(cmd_id, "done").unwrap();
+        update_extraction_status(&conn, cmd_id, "done").unwrap();
     }
 }

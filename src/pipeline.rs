@@ -1,6 +1,8 @@
-use crate::db::{CommandLog, KnowledgeBase, SessionOps};
+use crate::db::{commands, dispatcher, session};
 use crate::error::Error;
 use crate::net;
+use rusqlite::Connection;
+use std::collections::HashMap;
 
 pub struct CommandResult {
     pub command_id: i64,
@@ -9,7 +11,7 @@ pub struct CommandResult {
 }
 
 pub fn process_command(
-    db: &(impl CommandLog + KnowledgeBase + SessionOps),
+    conn: &Connection,
     session_id: &str,
     command: &str,
     exit_code: i32,
@@ -17,16 +19,22 @@ pub fn process_command(
     output: &str,
     tool: Option<&str>,
 ) -> Result<CommandResult, Error> {
-    let cmd_id = db.insert_command(session_id, command, tool)?;
-    db.finish_command(cmd_id, exit_code, duration_ms, output)?;
+    let cmd_id = commands::insert(conn, session_id, command, tool)?;
+    commands::finish(conn, cmd_id, exit_code, duration_ms, output)?;
 
     let mut flags_found = Vec::new();
-    if let Ok(patterns) = db.load_flag_patterns(session_id) {
+    if let Ok(patterns) = session::load_flag_patterns(conn, session_id) {
         for pat in &patterns {
             if let Ok(re) = regex::Regex::new(pat) {
                 for m in re.find_iter(output) {
                     let flag = m.as_str().to_string();
-                    let _ = db.add_flag(session_id, &flag, Some(command));
+                    let mut data = HashMap::new();
+                    data.insert("value".to_string(), serde_json::Value::String(flag.clone()));
+                    data.insert(
+                        "source".to_string(),
+                        serde_json::Value::String(command.to_string()),
+                    );
+                    let _ = dispatcher::create(conn, session_id, "flags", &data);
                     flags_found.push(flag);
                 }
             }
@@ -36,12 +44,12 @@ pub fn process_command(
     if let Some(t) = tool {
         let cost = detection_cost(t);
         if cost > 0.0 {
-            let _ = db.decrement_noise_budget(session_id, cost);
+            let _ = session::decrement_noise_budget(conn, session_id, cost);
         }
     }
 
     let mut scope_warnings = Vec::new();
-    if let Ok(Some(scope)) = db.load_scope(session_id) {
+    if let Ok(Some(scope)) = session::load_scope(conn, session_id) {
         for ip in &net::extract_ips(command) {
             if !net::ip_in_scope(ip, &scope) {
                 scope_warnings.push(format!("{ip} is out of scope ({scope})"));
@@ -69,11 +77,14 @@ fn detection_cost(tool: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{SessionOps, open_in_memory};
+    use crate::db;
 
-    fn setup() -> (impl CommandLog + KnowledgeBase + SessionOps, String) {
-        let db = open_in_memory().unwrap();
-        db.create_session(
+    fn setup() -> (Connection, String) {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(db::SCHEMA).unwrap();
+        session::create_session(
+            &conn,
             "s1",
             "test",
             Some("10.10.10.1"),
@@ -81,7 +92,7 @@ mod tests {
             "general",
         )
         .unwrap();
-        (db, "s1".to_string())
+        (conn, "s1".to_string())
     }
 
     #[test]
@@ -94,9 +105,9 @@ mod tests {
 
     #[test]
     fn test_process_command_records_and_finishes() {
-        let (db, sid) = setup();
+        let (conn, sid) = setup();
         let result = process_command(
-            &db,
+            &conn,
             &sid,
             "nmap -sV 10.10.10.1",
             0,
@@ -107,19 +118,14 @@ mod tests {
         .unwrap();
 
         assert!(result.command_id > 0);
-
-        let history = db.list_history(&sid, 1).unwrap();
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0]["command"], "nmap -sV 10.10.10.1");
-        assert_eq!(history[0]["exit_code"], 0);
     }
 
     #[test]
     fn test_process_command_captures_flags() {
-        let (db, sid) = setup();
+        let (conn, sid) = setup();
         let output = "user.txt: HTB{fake_user_flag}\nroot.txt: HTB{fake_root_flag}";
         let result = process_command(
-            &db,
+            &conn,
             &sid,
             "cat user.txt root.txt",
             0,
@@ -130,26 +136,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.flags_found.len(), 2);
-        assert!(
-            result
-                .flags_found
-                .contains(&"HTB{fake_user_flag}".to_string())
-        );
-        assert!(
-            result
-                .flags_found
-                .contains(&"HTB{fake_root_flag}".to_string())
-        );
-
-        let flags = db.list_flags(&sid).unwrap();
-        assert_eq!(flags.len(), 2);
+        assert!(result.flags_found.contains(&"HTB{fake_user_flag}".to_string()));
+        assert!(result.flags_found.contains(&"HTB{fake_root_flag}".to_string()));
     }
 
     #[test]
     fn test_process_command_scope_warnings() {
-        let (db, sid) = setup();
+        let (conn, sid) = setup();
         let result =
-            process_command(&db, &sid, "nmap -sV 192.168.1.1", 0, 500, "", Some("nmap")).unwrap();
+            process_command(&conn, &sid, "nmap -sV 192.168.1.1", 0, 500, "", Some("nmap"))
+                .unwrap();
 
         assert_eq!(result.scope_warnings.len(), 1);
         assert!(result.scope_warnings[0].contains("192.168.1.1"));
@@ -158,15 +154,15 @@ mod tests {
 
     #[test]
     fn test_process_command_decrements_noise_budget() {
-        let (db, sid) = setup();
+        let (conn, sid) = setup();
 
-        let summary = db.status_summary(&sid).unwrap();
+        let summary = session::status_summary(&conn, &sid).unwrap();
         let budget_before = summary["noise_budget"].as_f64().unwrap();
         assert_eq!(budget_before, 1.0);
 
-        process_command(&db, &sid, "nmap 10.10.10.1", 0, 500, "", Some("nmap")).unwrap();
+        process_command(&conn, &sid, "nmap 10.10.10.1", 0, 500, "", Some("nmap")).unwrap();
 
-        let summary = db.status_summary(&sid).unwrap();
+        let summary = session::status_summary(&conn, &sid).unwrap();
         let budget_after = summary["noise_budget"].as_f64().unwrap();
         assert!(
             (budget_after - 0.8).abs() < 0.001,

@@ -186,7 +186,7 @@ enum Commands {
 
 fn resolve_session() -> Result<
     (
-        impl crate::db::KnowledgeBase + crate::db::Hypotheses + crate::db::CommandLog + SessionOps + crate::db::Schematizable,
+        impl crate::db::KnowledgeBase + crate::db::Hypotheses + crate::db::CommandLog + SessionOps,
         String,
     ),
     Error,

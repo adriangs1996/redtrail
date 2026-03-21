@@ -1,4 +1,4 @@
-use crate::db::SessionOps;
+use crate::db;
 use crate::error::Error;
 use crate::workspace;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -69,10 +69,10 @@ pub fn run(args: &[String]) -> Result<(), Error> {
 
     if let Some(ws) = ws {
         let db_path = workspace::db_path(&ws);
-        if let Ok(db) = crate::db::open(db_path.to_str().unwrap())
-            && let Ok(session_id) = db.active_session_id()
+        if let Ok(conn) = db::open_connection(db_path.to_str().unwrap())
+            && let Ok(session_id) = db::session::active_session_id(&conn)
             && let Ok(result) = crate::pipeline::process_command(
-                &db,
+                &conn,
                 &session_id,
                 &cmd_str,
                 exit_code,

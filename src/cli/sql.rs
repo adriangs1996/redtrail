@@ -160,12 +160,3 @@ pub fn execute_to_string(conn: &Connection, sql: &str) -> Result<String, Error> 
 
     Ok(out)
 }
-
-pub fn execute_readonly_to_string(conn: &Connection, sql: &str) -> Result<String, Error> {
-    if !is_read_query(sql) {
-        return Err(Error::Config(
-            "only SELECT/PRAGMA/EXPLAIN/WITH queries allowed".into(),
-        ));
-    }
-    execute_to_string(conn, sql)
-}

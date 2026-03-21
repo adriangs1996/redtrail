@@ -47,7 +47,13 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
     }
 
     let config = Config::resolved(&ws)?;
-    let model = crate::agent::create_model(&config)?;
+    let model = match crate::agent::create_model(&config) {
+        Ok(m) => m,
+        Err(e) => {
+            commands::update_extraction_status(&conn, cmd_id, "failed")?;
+            return Err(e);
+        }
+    };
     let prompt = input.to_prompt();
     let conn = Arc::new(Mutex::new(conn));
     let agent = build_extraction_agent(model, conn.clone(), session_id.clone(), cwd.clone());

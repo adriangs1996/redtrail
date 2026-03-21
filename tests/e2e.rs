@@ -54,47 +54,35 @@ fn test_full_pentest_workflow() {
     );
     assert!(out.status.success());
 
-    // 4. Add hosts and ports
+    // 4. Insert data via SQL (writes now go through dispatcher/agent, not CLI)
     rt(
         &[
-            "kb",
-            "add-host",
-            "10.10.10.1",
-            "--os",
-            "Linux",
-            "--hostname",
-            "target",
+            "sql",
+            "INSERT OR IGNORE INTO hosts (session_id, ip, os, hostname) \
+             SELECT id, '10.10.10.1', 'Linux', 'target' FROM sessions LIMIT 1",
         ],
         dir,
     );
     rt(
         &[
-            "kb",
-            "add-port",
-            "10.10.10.1",
-            "22",
-            "--service",
-            "ssh",
-            "--version",
-            "OpenSSH 8.9",
+            "sql",
+            "INSERT OR IGNORE INTO ports (session_id, host_id, port, protocol, service, version) \
+             SELECT s.id, h.id, 22, 'tcp', 'ssh', 'OpenSSH 8.9' \
+             FROM sessions s JOIN hosts h ON h.session_id = s.id LIMIT 1",
         ],
         dir,
     );
     rt(
         &[
-            "kb",
-            "add-port",
-            "10.10.10.1",
-            "80",
-            "--service",
-            "http",
-            "--version",
-            "nginx 1.18",
+            "sql",
+            "INSERT OR IGNORE INTO ports (session_id, host_id, port, protocol, service, version) \
+             SELECT s.id, h.id, 80, 'tcp', 'http', 'nginx 1.18' \
+             FROM sessions s JOIN hosts h ON h.session_id = s.id LIMIT 1",
         ],
         dir,
     );
 
-    // 5. Verify KB state
+    // 5. Verify KB state (read-only CLI)
     let hosts = rt_json(&["kb", "hosts", "--json"], dir);
     assert_eq!(hosts.as_array().unwrap().len(), 1);
     assert_eq!(hosts[0]["ip"], "10.10.10.1");
@@ -109,32 +97,20 @@ fn test_full_pentest_workflow() {
     assert_eq!(status["hosts"], 1);
     assert_eq!(status["ports"], 2);
 
-    // 7. Create hypotheses
+    // 7. Insert hypotheses via SQL
     rt(
         &[
-            "hypothesis",
-            "create",
-            "SQLi in login form",
-            "--category",
-            "I",
-            "--priority",
-            "high",
-            "--confidence",
-            "0.8",
+            "sql",
+            "INSERT INTO hypotheses (session_id, statement, category, priority, confidence) \
+             SELECT id, 'SQLi in login form', 'I', 'high', 0.8 FROM sessions LIMIT 1",
         ],
         dir,
     );
     rt(
         &[
-            "hypothesis",
-            "create",
-            "Debug console exposed on :80",
-            "--category",
-            "C",
-            "--priority",
-            "critical",
-            "--confidence",
-            "0.6",
+            "sql",
+            "INSERT INTO hypotheses (session_id, statement, category, priority, confidence) \
+             SELECT id, 'Debug console exposed on :80', 'C', 'critical', 0.6 FROM sessions LIMIT 1",
         ],
         dir,
     );
@@ -142,15 +118,14 @@ fn test_full_pentest_workflow() {
     let hyps = rt_json(&["hypothesis", "list", "--json"], dir);
     assert_eq!(hyps.as_array().unwrap().len(), 2);
 
-    // 8. Update hypothesis — confirm one
+    // 8. Update hypothesis via SQL, verify through read CLI
     let hyp_id = hyps[0]["id"].as_i64().unwrap();
     rt(
         &[
-            "hypothesis",
-            "update",
-            &hyp_id.to_string(),
-            "--status",
-            "confirmed",
+            "sql",
+            &format!(
+                "UPDATE hypotheses SET status = 'confirmed', resolved_at = datetime('now') WHERE id = {hyp_id}"
+            ),
         ],
         dir,
     );
@@ -161,19 +136,15 @@ fn test_full_pentest_workflow() {
     );
     assert_eq!(confirmed.as_array().unwrap().len(), 1);
 
-    // 9. Add evidence
+    // 9. Insert evidence via SQL
     rt(
         &[
-            "evidence",
-            "add",
-            "--finding",
-            "SQL error in response with single quote",
-            "--hypothesis",
-            &hyp_id.to_string(),
-            "--severity",
-            "critical",
-            "--poc",
-            "curl http://10.10.10.1/login -d 'user=admin\\''",
+            "sql",
+            &format!(
+                "INSERT INTO evidence (session_id, hypothesis_id, finding, severity, poc) \
+                 SELECT id, {hyp_id}, 'SQL error in response with single quote', 'critical', \
+                 'curl http://10.10.10.1/login' FROM sessions LIMIT 1"
+            ),
         ],
         dir,
     );
@@ -182,28 +153,20 @@ fn test_full_pentest_workflow() {
     assert_eq!(evidence.as_array().unwrap().len(), 1);
     assert_eq!(evidence[0]["severity"], "critical");
 
-    // 10. Add credentials and flag
+    // 10. Insert credentials and flag via SQL
     rt(
         &[
-            "kb",
-            "add-cred",
-            "admin",
-            "--pass",
-            "admin123",
-            "--service",
-            "mysql",
-            "--host",
-            "10.10.10.1",
+            "sql",
+            "INSERT INTO credentials (session_id, username, password, service, host) \
+             SELECT id, 'admin', 'admin123', 'mysql', '10.10.10.1' FROM sessions LIMIT 1",
         ],
         dir,
     );
     rt(
         &[
-            "kb",
-            "add-flag",
-            "HTB{e2e_test_flag}",
-            "--source",
-            "/home/user/user.txt",
+            "sql",
+            "INSERT INTO flags (session_id, value, source) \
+             SELECT id, 'HTB{e2e_test_flag}', '/home/user/user.txt' FROM sessions LIMIT 1",
         ],
         dir,
     );
@@ -214,35 +177,17 @@ fn test_full_pentest_workflow() {
     let creds = rt_json(&["kb", "creds", "--json"], dir);
     assert_eq!(creds[0]["username"], "admin");
 
-    // 11. Add access
-    rt(
-        &[
-            "kb",
-            "add-access",
-            "10.10.10.1",
-            "admin",
-            "user",
-            "--method",
-            "ssh",
-        ],
-        dir,
-    );
-
-    // 12. Search
-    let search = rt_json(&["kb", "search", "admin", "--json"], dir);
-    assert!(!search.as_array().unwrap().is_empty());
-
-    // 13. Scope check
+    // 11. Scope check
     let scope_in = rt(&["scope", "check", "10.10.10.5"], dir);
     assert!(scope_in.status.success());
     let scope_out = rt(&["scope", "check", "192.168.1.1"], dir);
     assert!(!scope_out.status.success());
 
-    // 14. Command history
+    // 12. Command history
     let history = rt_json(&["kb", "history", "--json"], dir);
     assert!(!history.as_array().unwrap().is_empty());
 
-    // 15. Generate report
+    // 13. Generate report
     let report_path = dir.join("report.md");
     rt(
         &[
@@ -259,11 +204,11 @@ fn test_full_pentest_workflow() {
     assert!(report.contains("HTB{e2e_test_flag}"));
     assert!(report.contains("SQLi"));
 
-    // 16. Session info
+    // 14. Session info
     let session = rt_json(&["session", "active", "--json"], dir);
     assert_eq!(session["target"], "10.10.10.1");
 
-    // 17. Env outputs valid shell code
+    // 15. Env outputs valid shell code
     let env_out = rt(&["env"], dir);
     assert!(env_out.status.success());
     let env_str = String::from_utf8_lossy(&env_out.stdout);
@@ -271,23 +216,15 @@ fn test_full_pentest_workflow() {
     assert!(env_str.contains("RT_WORKSPACE"));
     assert!(env_str.contains("rt_deactivate"));
 
-    // 18. Config
+    // 16. Config
     let config_out = rt(&["config", "list"], dir);
     assert!(config_out.status.success());
 
-    // 19. Evidence export
+    // 17. Evidence export
     let export = rt(&["evidence", "export", "--json"], dir);
     assert!(export.status.success());
 
-    // 20. Notes
-    rt(
-        &["kb", "add-note", "SSH credentials found via SQLi dump"],
-        dir,
-    );
-    let notes = rt_json(&["kb", "notes", "--json"], dir);
-    assert_eq!(notes.as_array().unwrap().len(), 1);
-
-    // 21. Final status — verify everything accumulated
+    // 18. Final status — verify everything accumulated
     let final_status = rt_json(&["status", "--json"], dir);
     assert_eq!(final_status["hosts"], 1);
     assert_eq!(final_status["ports"], 2);

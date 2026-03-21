@@ -4,21 +4,6 @@ use clap::Subcommand;
 
 #[derive(Subcommand)]
 pub enum EvidenceCommands {
-    #[command(about = "Record a new finding or piece of evidence")]
-    Add {
-        #[arg(long, help = "Description of the finding")]
-        finding: String,
-        #[arg(long, help = "Link to a hypothesis ID")]
-        hypothesis: Option<i64>,
-        #[arg(
-            long,
-            default_value = "info",
-            help = "Severity: info, low, medium, high, critical"
-        )]
-        severity: String,
-        #[arg(long, help = "Proof of concept command or payload")]
-        poc: Option<String>,
-    },
     #[command(about = "List evidence, optionally filtered by hypothesis")]
     List {
         #[arg(long, help = "Filter by hypothesis ID")]
@@ -35,16 +20,6 @@ pub enum EvidenceCommands {
 
 pub fn run(db: &impl Hypotheses, session_id: &str, command: EvidenceCommands) -> Result<(), Error> {
     match command {
-        EvidenceCommands::Add {
-            finding,
-            hypothesis,
-            severity,
-            poc,
-        } => {
-            let id =
-                db.create_evidence(session_id, hypothesis, &finding, &severity, poc.as_deref())?;
-            println!("evidence added: {id}");
-        }
         EvidenceCommands::List { hypothesis, json } => {
             let rows = db.list_evidence(session_id, hypothesis)?;
             if json {

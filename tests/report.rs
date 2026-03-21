@@ -9,29 +9,38 @@ fn setup_workspace_with_data() -> tempfile::TempDir {
         .output()
         .unwrap();
     Command::new(rt)
-        .args(["kb", "add-host", "10.10.10.1", "--os", "Linux"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
-    Command::new(rt)
-        .args(["kb", "add-port", "10.10.10.1", "22", "--service", "ssh"])
-        .current_dir(tmp.path())
-        .output()
-        .unwrap();
-    Command::new(rt)
-        .args(["kb", "add-flag", "HTB{test}", "--source", "user.txt"])
+        .args([
+            "sql",
+            "INSERT OR IGNORE INTO hosts (session_id, ip, os) \
+             SELECT id, '10.10.10.1', 'Linux' FROM sessions LIMIT 1",
+        ])
         .current_dir(tmp.path())
         .output()
         .unwrap();
     Command::new(rt)
         .args([
-            "hypothesis",
-            "create",
-            "SQLi in login",
-            "--category",
-            "I",
-            "--priority",
-            "high",
+            "sql",
+            "INSERT OR IGNORE INTO ports (session_id, host_id, port, protocol, service) \
+             SELECT s.id, h.id, 22, 'tcp', 'ssh' \
+             FROM sessions s JOIN hosts h ON h.session_id = s.id LIMIT 1",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    Command::new(rt)
+        .args([
+            "sql",
+            "INSERT INTO flags (session_id, value, source) \
+             SELECT id, 'HTB{test}', 'user.txt' FROM sessions LIMIT 1",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    Command::new(rt)
+        .args([
+            "sql",
+            "INSERT INTO hypotheses (session_id, statement, category, priority, confidence) \
+             SELECT id, 'SQLi in login', 'I', 'high', 0.5 FROM sessions LIMIT 1",
         ])
         .current_dir(tmp.path())
         .output()

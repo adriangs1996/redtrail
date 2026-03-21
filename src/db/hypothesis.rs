@@ -1,39 +1,6 @@
 use crate::error::Error;
 use rusqlite::{Connection, params};
 
-pub fn create(
-    conn: &Connection,
-    session_id: &str,
-    statement: &str,
-    category: &str,
-    priority: &str,
-    confidence: f64,
-    target_component: Option<&str>,
-) -> Result<i64, Error> {
-    conn.execute(
-        "INSERT INTO hypotheses (session_id, statement, category, priority, confidence, target_component) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![session_id, statement, category, priority, confidence, target_component],
-    ).map_err(|e| Error::Db(e.to_string()))?;
-    Ok(conn.last_insert_rowid())
-}
-
-pub fn update_status(conn: &Connection, id: i64, status: &str) -> Result<(), Error> {
-    if status == "confirmed" || status == "refuted" {
-        conn.execute(
-            "UPDATE hypotheses SET status = ?1, resolved_at = datetime('now') WHERE id = ?2",
-            params![status, id],
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
-    } else {
-        conn.execute(
-            "UPDATE hypotheses SET status = ?1 WHERE id = ?2",
-            params![status, id],
-        )
-        .map_err(|e| Error::Db(e.to_string()))?;
-    }
-    Ok(())
-}
-
 pub fn get(conn: &Connection, id: i64) -> Result<serde_json::Value, Error> {
     let mut hyp = conn.query_row(
         "SELECT id, statement, category, status, priority, confidence, target_component, created_at, resolved_at FROM hypotheses WHERE id = ?1",
@@ -72,21 +39,6 @@ pub fn get(conn: &Connection, id: i64) -> Result<serde_json::Value, Error> {
 
     hyp["evidence"] = serde_json::Value::Array(evidence);
     Ok(hyp)
-}
-
-pub fn create_evidence(
-    conn: &Connection,
-    session_id: &str,
-    hypothesis_id: Option<i64>,
-    finding: &str,
-    severity: &str,
-    poc: Option<&str>,
-) -> Result<i64, Error> {
-    conn.execute(
-        "INSERT INTO evidence (session_id, hypothesis_id, finding, severity, poc) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![session_id, hypothesis_id, finding, severity, poc],
-    ).map_err(|e| Error::Db(e.to_string()))?;
-    Ok(conn.last_insert_rowid())
 }
 
 fn map_hypothesis_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<serde_json::Value> {
@@ -240,44 +192,26 @@ mod tests {
     use crate::db::{Hypotheses, SessionOps, open_in_memory};
 
     #[test]
-    fn test_hypothesis_lifecycle() {
+    fn test_list_hypotheses_empty() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general")
-            .unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+        let rows = db.list_hypotheses("s1", None).unwrap();
+        assert!(rows.is_empty());
+    }
 
-        let hid = db
-            .create_hypothesis(
-                "s1",
-                "SSH allows root login",
-                "vulnerability",
-                "high",
-                0.7,
-                Some("ssh"),
-            )
-            .unwrap();
-        assert!(hid > 0);
+    #[test]
+    fn test_list_evidence_empty() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+        let rows = db.list_evidence("s1", None).unwrap();
+        assert!(rows.is_empty());
+    }
 
-        let eid = db
-            .create_evidence(
-                "s1",
-                Some(hid),
-                "root login succeeded",
-                "critical",
-                Some("ssh root@target"),
-            )
-            .unwrap();
-        assert!(eid > 0);
-
-        db.update_hypothesis(hid, "confirmed").unwrap();
-
-        let hyp = db.get_hypothesis(hid).unwrap();
-        assert_eq!(hyp["statement"], "SSH allows root login");
-        assert_eq!(hyp["status"], "confirmed");
-        assert!(hyp["resolved_at"].as_str().is_some());
-
-        let evidence = hyp["evidence"].as_array().unwrap();
-        assert_eq!(evidence.len(), 1);
-        assert_eq!(evidence[0]["finding"], "root login succeeded");
-        assert_eq!(evidence[0]["severity"], "critical");
+    #[test]
+    fn test_export_evidence_empty() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", None, None, "general").unwrap();
+        let rows = db.export_evidence("s1").unwrap();
+        assert!(rows.is_empty());
     }
 }

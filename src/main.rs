@@ -3,7 +3,6 @@ mod cli;
 mod config;
 mod db;
 mod error;
-mod extraction;
 mod net;
 mod pipeline;
 mod skill_loader;

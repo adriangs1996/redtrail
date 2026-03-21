@@ -1,5 +1,6 @@
 pub mod assistant;
 pub mod extraction;
+pub mod strategist;
 pub mod tools;
 
 use aisdk::core::DynamicModel;

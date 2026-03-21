@@ -184,11 +184,12 @@
         "cargo test --bin rt passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "spawn.rs -> rt pipeline extract triggers Extraction Agent instead of old extract_sync function.",
       "dependsOn": [
         "US-008"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-010",
@@ -366,6 +367,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-21T16:40:22.376Z"
+    "updatedAt": "2026-03-21T16:43:48.152Z"
   }
 }

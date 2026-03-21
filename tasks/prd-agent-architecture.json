@@ -247,11 +247,12 @@
         "cargo test --bin rt passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "",
       "dependsOn": [
         "US-011"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-013",
@@ -369,6 +370,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-21T16:55:04.114Z"
+    "updatedAt": "2026-03-21T16:55:57.860Z"
   }
 }

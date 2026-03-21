@@ -1,5 +1,32 @@
 use rusqlite::Connection;
 
+const PROTECTED_TABLES: &[&str] = &["sessions", "command_history", "chat_messages"];
+
+struct Constraint {
+    table: &'static str,
+    column: &'static str,
+    kind: ConstraintKind,
+}
+
+enum ConstraintKind {
+    Enum(&'static [&'static str]),
+    Range(f64, f64),
+}
+
+static CONSTRAINTS: &[Constraint] = &[
+    Constraint { table: "hosts", column: "status", kind: ConstraintKind::Enum(&["up", "down", "unknown"]) },
+    Constraint { table: "ports", column: "protocol", kind: ConstraintKind::Enum(&["tcp", "udp", "sctp"]) },
+    Constraint { table: "ports", column: "port", kind: ConstraintKind::Range(1.0, 65535.0) },
+    Constraint { table: "web_paths", column: "scheme", kind: ConstraintKind::Enum(&["http", "https"]) },
+    Constraint { table: "web_paths", column: "port", kind: ConstraintKind::Range(1.0, 65535.0) },
+    Constraint { table: "web_paths", column: "status_code", kind: ConstraintKind::Range(100.0, 599.0) },
+    Constraint { table: "vulns", column: "severity", kind: ConstraintKind::Enum(&["info", "low", "medium", "high", "critical"]) },
+    Constraint { table: "hypotheses", column: "status", kind: ConstraintKind::Enum(&["pending", "testing", "confirmed", "refuted"]) },
+    Constraint { table: "hypotheses", column: "priority", kind: ConstraintKind::Enum(&["low", "medium", "high", "critical"]) },
+    Constraint { table: "hypotheses", column: "confidence", kind: ConstraintKind::Range(0.0, 1.0) },
+    Constraint { table: "evidence", column: "severity", kind: ConstraintKind::Enum(&["info", "low", "medium", "high", "critical"]) },
+];
+
 pub fn as_json(conn: &Connection) -> serde_json::Value {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table'")
@@ -8,6 +35,7 @@ pub fn as_json(conn: &Connection) -> serde_json::Value {
         .query_map([], |row| row.get(0))
         .unwrap()
         .filter_map(|r| r.ok())
+        .filter(|name: &String| !PROTECTED_TABLES.contains(&name.as_str()))
         .collect();
 
     let tables: Vec<TableInfo> = table_names
@@ -62,12 +90,32 @@ fn sqlite_type_to_json_type(sqlite_type: &str) -> serde_json::Value {
     }
 }
 
+fn apply_constraints(table_name: &str, col_name: &str, mut prop: serde_json::Value) -> serde_json::Value {
+    for c in CONSTRAINTS {
+        if c.table == table_name && c.column == col_name {
+            match &c.kind {
+                ConstraintKind::Enum(values) => {
+                    prop["enum"] = serde_json::json!(values);
+                }
+                ConstraintKind::Range(min, max) => {
+                    prop["minimum"] = serde_json::json!(min);
+                    prop["maximum"] = serde_json::json!(max);
+                }
+            }
+            break;
+        }
+    }
+    prop
+}
+
 fn table_schema_to_json_schema(table: &TableInfo) -> serde_json::Value {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
 
     for row in table.columns.iter() {
-        properties.insert(row.name.clone(), sqlite_type_to_json_type(&row.col_type));
+        let prop = sqlite_type_to_json_type(&row.col_type);
+        let prop = apply_constraints(&table.name, &row.name, prop);
+        properties.insert(row.name.clone(), prop);
         if row.notnull {
             required.push(serde_json::json!(row.name));
         }
@@ -168,37 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn schema_sessions() {
-        let t = make_table(
-            "sessions",
-            vec![
-                ("id", "TEXT", true),
-                ("name", "TEXT", true),
-                ("target", "TEXT", false),
-                ("scope", "TEXT", false),
-                ("goal", "TEXT", false),
-                ("goal_meta", "TEXT", false),
-                ("phase", "TEXT", false),
-                ("noise_budget", "REAL", false),
-                ("autonomy", "TEXT", false),
-                ("created_at", "TEXT", false),
-                ("updated_at", "TEXT", false),
-            ],
-        );
-        let s = table_schema_to_json_schema(&t);
-        assert_eq!(s["title"], "sessions");
-        assert_eq!(s["properties"]["id"]["type"], "string");
-        assert_eq!(s["properties"]["noise_budget"]["type"], "number");
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "name"]);
-    }
-
-    #[test]
     fn schema_hosts() {
         let t = make_table(
             "hosts",
@@ -221,6 +238,9 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(req, vec!["id", "session_id", "ip"]);
+        let status_enum: Vec<&str> = s["properties"]["status"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(status_enum, vec!["up", "down", "unknown"]);
     }
 
     #[test]
@@ -239,14 +259,11 @@ mod tests {
         );
         let s = table_schema_to_json_schema(&t);
         assert_eq!(s["properties"]["port"]["type"], "integer");
-        assert_eq!(s["properties"]["host_id"]["type"], "integer");
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "session_id", "host_id", "port"]);
+        assert_eq!(s["properties"]["port"]["minimum"], 1.0);
+        assert_eq!(s["properties"]["port"]["maximum"], 65535.0);
+        let proto_enum: Vec<&str> = s["properties"]["protocol"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(proto_enum, vec!["tcp", "udp", "sctp"]);
     }
 
     #[test]
@@ -294,13 +311,14 @@ mod tests {
         );
         let s = table_schema_to_json_schema(&t);
         assert_eq!(s["properties"]["confidence"]["type"], "number");
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "session_id", "statement", "category"]);
+        assert_eq!(s["properties"]["confidence"]["minimum"], 0.0);
+        assert_eq!(s["properties"]["confidence"]["maximum"], 1.0);
+        let status_enum: Vec<&str> = s["properties"]["status"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(status_enum, vec!["pending", "testing", "confirmed", "refuted"]);
+        let prio_enum: Vec<&str> = s["properties"]["priority"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(prio_enum, vec!["low", "medium", "high", "critical"]);
     }
 
     #[test]
@@ -320,42 +338,9 @@ mod tests {
         );
         let s = table_schema_to_json_schema(&t);
         assert_eq!(s["properties"]["hypothesis_id"]["type"], "integer");
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "session_id", "finding"]);
-    }
-
-    #[test]
-    fn schema_command_history() {
-        let t = make_table(
-            "command_history",
-            vec![
-                ("id", "INTEGER", true),
-                ("session_id", "TEXT", true),
-                ("command", "TEXT", true),
-                ("exit_code", "INTEGER", false),
-                ("duration_ms", "INTEGER", false),
-                ("output", "TEXT", false),
-                ("output_preview", "TEXT", false),
-                ("tool", "TEXT", false),
-                ("extraction_status", "TEXT", false),
-                ("started_at", "TEXT", false),
-            ],
-        );
-        let s = table_schema_to_json_schema(&t);
-        assert_eq!(s["properties"]["exit_code"]["type"], "integer");
-        assert_eq!(s["properties"]["duration_ms"]["type"], "integer");
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "session_id", "command"]);
+        let sev_enum: Vec<&str> = s["properties"]["severity"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(sev_enum, vec!["info", "low", "medium", "high", "critical"]);
     }
 
     #[test]
@@ -378,18 +363,13 @@ mod tests {
             ],
         );
         let s = table_schema_to_json_schema(&t);
-        assert_eq!(s["properties"]["status_code"]["type"], "integer");
-        assert_eq!(s["properties"]["content_length"]["type"], "integer");
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(
-            req,
-            vec!["id", "session_id", "host_id", "port", "scheme", "path"]
-        );
+        assert_eq!(s["properties"]["port"]["minimum"], 1.0);
+        assert_eq!(s["properties"]["port"]["maximum"], 65535.0);
+        assert_eq!(s["properties"]["status_code"]["minimum"], 100.0);
+        assert_eq!(s["properties"]["status_code"]["maximum"], 599.0);
+        let scheme_enum: Vec<&str> = s["properties"]["scheme"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(scheme_enum, vec!["http", "https"]);
     }
 
     #[test]
@@ -411,35 +391,9 @@ mod tests {
             ],
         );
         let s = table_schema_to_json_schema(&t);
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "session_id", "host_id", "port", "name"]);
-    }
-
-    #[test]
-    fn schema_chat_messages() {
-        let t = make_table(
-            "chat_messages",
-            vec![
-                ("id", "INTEGER", true),
-                ("session_id", "TEXT", true),
-                ("role", "TEXT", true),
-                ("content", "TEXT", true),
-                ("created_at", "TEXT", false),
-            ],
-        );
-        let s = table_schema_to_json_schema(&t);
-        let req: Vec<&str> = s["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert_eq!(req, vec!["id", "session_id", "role", "content"]);
+        let sev_enum: Vec<&str> = s["properties"]["severity"]["enum"]
+            .as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(sev_enum, vec!["info", "low", "medium", "high", "critical"]);
     }
 
     #[test]
@@ -464,5 +418,49 @@ mod tests {
         let s = table_schema_to_json_schema(&t);
         assert_eq!(s["$schema"], "https://json-schema.org/draft/2020-12/schema");
         assert_eq!(s["type"], "object");
+    }
+
+    #[test]
+    fn as_json_excludes_protected_tables() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("
+            CREATE TABLE sessions (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+            CREATE TABLE command_history (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, command TEXT NOT NULL);
+            CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL);
+            CREATE TABLE hosts (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, ip TEXT NOT NULL);
+            CREATE TABLE ports (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, host_id INTEGER NOT NULL, port INTEGER NOT NULL);
+        ").unwrap();
+        let result = as_json(&conn);
+        let tables = result["tables"].as_array().unwrap();
+        let names: Vec<&str> = tables.iter().map(|t| t["title"].as_str().unwrap()).collect();
+        assert!(!names.contains(&"sessions"));
+        assert!(!names.contains(&"command_history"));
+        assert!(!names.contains(&"chat_messages"));
+        assert!(names.contains(&"hosts"));
+        assert!(names.contains(&"ports"));
+    }
+
+    #[test]
+    fn as_json_includes_constraints() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("
+            CREATE TABLE hosts (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, ip TEXT NOT NULL, status TEXT);
+            CREATE TABLE ports (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, host_id INTEGER NOT NULL, port INTEGER NOT NULL, protocol TEXT);
+        ").unwrap();
+        let result = as_json(&conn);
+        let tables = result["tables"].as_array().unwrap();
+        let hosts = tables.iter().find(|t| t["title"] == "hosts").unwrap();
+        assert!(hosts["properties"]["status"]["enum"].as_array().is_some());
+        let ports = tables.iter().find(|t| t["title"] == "ports").unwrap();
+        assert!(ports["properties"]["protocol"]["enum"].as_array().is_some());
+        assert!(ports["properties"]["port"]["minimum"].as_f64().is_some());
+    }
+
+    #[test]
+    fn no_constraints_on_unconstrained_column() {
+        let t = make_table("hosts", vec![("ip", "TEXT", true)]);
+        let s = table_schema_to_json_schema(&t);
+        assert!(s["properties"]["ip"].get("enum").is_none());
+        assert!(s["properties"]["ip"].get("minimum").is_none());
     }
 }

@@ -3,6 +3,7 @@ description = "L1 BISCL — read KB evidence, generate grounded attack hypothese
 version = "1.0.0"
 
 triggers = ["hypothesize", "hypothesis", "l1", "biscl", "attack surface", "theorize"]
+tools = ["query_table", "create_record", "suggest", "respond"]
 
 [deps]
 commands = ["rt status", "rt kb components", "rt kb entrypoints", "rt kb hosts"]

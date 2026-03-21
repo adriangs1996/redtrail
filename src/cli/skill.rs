@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::skill_loader::KNOWN_TOOL_NAMES;
 use clap::Subcommand;
 use std::fs;
 use std::path::Path;
@@ -63,6 +64,8 @@ author = ""
 [triggers]
 keywords = []
 
+# tools = ["query_table", "create_record", "update_record", "run_command", "suggest", "respond"]
+
 [dependencies]
 commands = []
 rt_commands = []
@@ -96,6 +99,24 @@ fn test_skill(path: &str) -> Result<(), Error> {
                     errors.push(
                         "skill.toml missing name (either [skill].name or root name)".to_string(),
                     );
+                }
+                if let Some(tools) = val.get("tools") {
+                    if let Some(arr) = tools.as_array() {
+                        for t in arr {
+                            if let Some(name) = t.as_str() {
+                                if !KNOWN_TOOL_NAMES.contains(&name) {
+                                    errors.push(format!(
+                                        "unknown tool in tools array: \"{name}\" (known: {})",
+                                        KNOWN_TOOL_NAMES.join(", ")
+                                    ));
+                                }
+                            } else {
+                                errors.push("tools array must contain strings".to_string());
+                            }
+                        }
+                    } else {
+                        errors.push("tools field must be an array".to_string());
+                    }
                 }
             }
             Err(e) => errors.push(format!("skill.toml parse error: {e}")),

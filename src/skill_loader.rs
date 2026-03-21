@@ -2,10 +2,23 @@ use crate::error::Error;
 use rusqlite::Connection;
 use std::path::Path;
 
+pub const KNOWN_TOOL_NAMES: &[&str] = &[
+    "query_table",
+    "create_record",
+    "update_record",
+    "run_command",
+    "suggest",
+    "respond",
+];
+
 pub struct SkillMatch {
     pub phase_name: String,
     pub skill_name: String,
     pub context: String,
+}
+
+pub struct SkillConfig {
+    pub tools: Option<Vec<String>>,
 }
 
 pub fn detect_phase(conn: &Connection, session_id: &str) -> Result<Option<SkillMatch>, Error> {
@@ -113,6 +126,53 @@ pub fn load_skill_prompt(skill_name: &str, workspace: Option<&Path>) -> Result<S
         return Ok(prompt.to_string());
     }
     Err(Error::SkillNotFound(skill_name.to_string()))
+}
+
+fn bundled_toml(skill_name: &str) -> Option<&'static str> {
+    match skill_name {
+        "redtrail-recon" => Some(include_str!("../skills/redtrail-recon/skill.toml")),
+        "redtrail-hypothesize" => Some(include_str!("../skills/redtrail-hypothesize/skill.toml")),
+        "redtrail-probe" => Some(include_str!("../skills/redtrail-probe/skill.toml")),
+        "redtrail-exploit" => Some(include_str!("../skills/redtrail-exploit/skill.toml")),
+        "redtrail-report" => Some(include_str!("../skills/redtrail-report/skill.toml")),
+        _ => None,
+    }
+}
+
+fn parse_tools_from_toml(content: &str) -> Option<Vec<String>> {
+    let val: toml::Value = toml::from_str(content).ok()?;
+    let arr = val.get("tools")?.as_array()?;
+    Some(arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+}
+
+pub fn load_skill_config(skill_name: &str, workspace: Option<&Path>) -> SkillConfig {
+    let toml_content = if let Some(home) = dirs::home_dir() {
+        let installed = home
+            .join(".redtrail/skills")
+            .join(skill_name)
+            .join("skill.toml");
+        if installed.exists() {
+            std::fs::read_to_string(&installed).ok()
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+    .or_else(|| {
+        workspace.and_then(|ws| {
+            let ws_skill = ws.join("skills").join(skill_name).join("skill.toml");
+            if ws_skill.exists() {
+                std::fs::read_to_string(&ws_skill).ok()
+            } else {
+                None
+            }
+        })
+    })
+    .or_else(|| bundled_toml(skill_name).map(String::from));
+
+    let tools = toml_content.and_then(|c| parse_tools_from_toml(&c));
+    SkillConfig { tools }
 }
 
 #[cfg(test)]
@@ -415,5 +475,70 @@ mod tests {
         let m = detect_phase(&conn, "s1").unwrap().unwrap();
         assert_eq!(m.skill_name, "redtrail-recon");
         assert_eq!(m.phase_name, "Surface Exhausted");
+    }
+
+    #[test]
+    fn test_parse_tools_from_toml_present() {
+        let toml = r#"
+name = "test"
+tools = ["query_table", "suggest"]
+"#;
+        let tools = parse_tools_from_toml(toml).unwrap();
+        assert_eq!(tools, vec!["query_table", "suggest"]);
+    }
+
+    #[test]
+    fn test_parse_tools_from_toml_missing() {
+        let toml = r#"
+name = "test"
+"#;
+        assert!(parse_tools_from_toml(toml).is_none());
+    }
+
+    #[test]
+    fn test_parse_tools_from_toml_empty() {
+        let toml = r#"
+name = "test"
+tools = []
+"#;
+        let tools = parse_tools_from_toml(toml).unwrap();
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn test_load_skill_config_bundled_recon_has_tools() {
+        let cfg = load_skill_config("redtrail-recon", None);
+        let tools = cfg.tools.unwrap();
+        assert!(tools.contains(&"query_table".to_string()));
+        assert!(tools.contains(&"run_command".to_string()));
+    }
+
+    #[test]
+    fn test_load_skill_config_bundled_report_restricted() {
+        let cfg = load_skill_config("redtrail-report", None);
+        let tools = cfg.tools.unwrap();
+        assert!(tools.contains(&"query_table".to_string()));
+        assert!(!tools.contains(&"run_command".to_string()));
+    }
+
+    #[test]
+    fn test_load_skill_config_unknown_skill_no_tools() {
+        let cfg = load_skill_config("nonexistent", None);
+        assert!(cfg.tools.is_none());
+    }
+
+    #[test]
+    fn test_load_skill_config_workspace_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skills/redtrail-recon");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("skill.toml"),
+            "name = \"redtrail-recon\"\ntools = [\"suggest\"]\n",
+        )
+        .unwrap();
+        let cfg = load_skill_config("redtrail-recon", Some(tmp.path()));
+        let tools = cfg.tools.unwrap();
+        assert_eq!(tools, vec!["suggest"]);
     }
 }

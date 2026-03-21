@@ -223,13 +223,19 @@ pub fn build_assistant_agent<M: LanguageModel + TextInputSupport + ToolCallSuppo
     skill_override: Option<&str>,
     no_skill: bool,
 ) -> Result<Agent<M>, Error> {
-    let system = {
+    let (system, active_skill_name) = {
         let c = conn.lock().map_err(|e| Error::Config(format!("db lock: {e}")))?;
-        build_system_prompt(&c, &session_id, &cwd, skill_override, no_skill)?
+        let prompt = build_system_prompt(&c, &session_id, &cwd, skill_override, no_skill)?;
+        let skill_name = resolve_active_skill_name(&c, &session_id, &cwd, skill_override, no_skill);
+        (prompt, skill_name)
     };
 
+    let skill_tools = active_skill_name
+        .map(|name| skill_loader::load_skill_config(&name, Some(&cwd)))
+        .and_then(|cfg| cfg.tools);
+
     let ctx = Arc::new(ToolContext { conn, session_id, cwd });
-    let tools = vec![
+    let all_tools = vec![
         make_query_tool(ctx.clone()),
         make_create_tool(ctx.clone()),
         make_update_tool(ctx.clone()),
@@ -238,7 +244,40 @@ pub fn build_assistant_agent<M: LanguageModel + TextInputSupport + ToolCallSuppo
         make_respond_tool(),
     ];
 
+    let tools = match skill_tools {
+        Some(allowed) => all_tools
+            .into_iter()
+            .filter(|t| allowed.iter().any(|a| a == &t.name))
+            .collect(),
+        None => all_tools,
+    };
+
     Ok(Agent::new(model, system, tools, MAX_ASSISTANT_ROUNDS))
+}
+
+fn resolve_active_skill_name(
+    conn: &Connection,
+    session_id: &str,
+    cwd: &Path,
+    skill_override: Option<&str>,
+    no_skill: bool,
+) -> Option<String> {
+    if no_skill {
+        return None;
+    }
+    if let Some(name) = skill_override {
+        return Some(name.to_string());
+    }
+    skill_loader::detect_phase(conn, session_id)
+        .ok()
+        .flatten()
+        .and_then(|m| {
+            if skill_loader::load_skill_prompt(&m.skill_name, Some(cwd)).is_ok() {
+                Some(m.skill_name)
+            } else {
+                None
+            }
+        })
 }
 
 #[cfg(test)]
@@ -392,5 +431,87 @@ mod tests {
         let schema = schemars::schema_for!(RunCommandInput);
         let s = serde_json::to_value(&schema).unwrap();
         assert!(s["properties"]["command"].is_object());
+    }
+
+    #[test]
+    fn resolve_active_skill_name_no_skill_mode() {
+        let conn = test_conn();
+        let c = conn.lock().unwrap();
+        let name = resolve_active_skill_name(&c, "s1", Path::new("/tmp"), None, true);
+        assert!(name.is_none());
+    }
+
+    #[test]
+    fn resolve_active_skill_name_override() {
+        let conn = test_conn();
+        let c = conn.lock().unwrap();
+        let name = resolve_active_skill_name(&c, "s1", Path::new("/tmp"), Some("redtrail-report"), false);
+        assert_eq!(name.unwrap(), "redtrail-report");
+    }
+
+    #[test]
+    fn resolve_active_skill_name_auto_detect() {
+        let conn = test_conn();
+        let c = conn.lock().unwrap();
+        let name = resolve_active_skill_name(&c, "s1", Path::new("/tmp"), None, false);
+        assert_eq!(name.unwrap(), "redtrail-recon");
+    }
+
+    #[test]
+    fn tool_filtering_applies_skill_tools() {
+        let allowed = Some(vec!["query_table".to_string(), "suggest".to_string()]);
+        let conn = test_conn();
+        let ctx = Arc::new(ToolContext {
+            conn,
+            session_id: "s1".into(),
+            cwd: PathBuf::from("/tmp"),
+        });
+        let all_tools = vec![
+            make_query_tool(ctx.clone()),
+            make_create_tool(ctx.clone()),
+            make_update_tool(ctx.clone()),
+            make_run_command_tool(ctx),
+            make_suggest_tool(),
+            make_respond_tool(),
+        ];
+        let tools: Vec<_> = match allowed {
+            Some(ref a) => all_tools
+                .into_iter()
+                .filter(|t| a.iter().any(|name| name == &t.name))
+                .collect(),
+            None => all_tools,
+        };
+        assert_eq!(tools.len(), 2);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"query_table"));
+        assert!(names.contains(&"suggest"));
+        assert!(!names.contains(&"run_command"));
+    }
+
+    #[test]
+    fn tool_filtering_none_keeps_all() {
+        let allowed: Option<Vec<String>> = None;
+        let conn = test_conn();
+        let ctx = Arc::new(ToolContext {
+            conn,
+            session_id: "s1".into(),
+            cwd: PathBuf::from("/tmp"),
+        });
+        let all_tools = vec![
+            make_query_tool(ctx.clone()),
+            make_create_tool(ctx.clone()),
+            make_update_tool(ctx.clone()),
+            make_run_command_tool(ctx),
+            make_suggest_tool(),
+            make_respond_tool(),
+        ];
+        let tools: Vec<_> = match allowed {
+            Some(ref a) => all_tools
+                .into_iter()
+                .filter(|t| a.iter().any(|name| name == &t.name))
+                .collect(),
+            None => all_tools,
+        };
+        assert_eq!(tools.len(), 6);
     }
 }

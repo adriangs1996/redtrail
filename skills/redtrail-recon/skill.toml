@@ -3,6 +3,7 @@ description = "L0 Modeling — synthesize enumeration commands, execute, validat
 version = "1.0.0"
 
 triggers = ["recon", "enumerate", "scan", "discovery", "l0", "fingerprint"]
+tools = ["query_table", "create_record", "update_record", "run_command", "suggest", "respond"]
 
 [deps]
 commands = ["rt status", "rt kb hosts"]

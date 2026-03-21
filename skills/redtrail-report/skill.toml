@@ -3,6 +3,7 @@ description = "Generate final engagement report with evidence-linked findings an
 version = "1.0.0"
 
 triggers = ["report", "findings", "summary", "debrief", "writeup"]
+tools = ["query_table", "suggest", "respond"]
 
 [deps]
 commands = ["rt report generate", "rt evidence list", "rt hypotheses list", "rt status"]

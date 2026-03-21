@@ -162,13 +162,14 @@
         "cargo test --bin rt passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Agent tests use mock LanguageModel with canned tool calls + in-memory SQLite.",
       "dependsOn": [
         "US-006",
         "US-007",
         "US-005"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-009",
@@ -365,6 +366,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-21T16:32:49.083Z"
+    "updatedAt": "2026-03-21T16:40:22.376Z"
   }
 }

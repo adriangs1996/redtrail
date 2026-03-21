@@ -1,3 +1,4 @@
+pub mod extraction;
 pub mod tools;
 
 use aisdk::core::DynamicModel;

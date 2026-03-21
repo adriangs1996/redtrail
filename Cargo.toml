@@ -19,6 +19,8 @@ chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 dirs = "6"
+aisdk = { version = "0.5", features = ["anthropic", "openaichatcompletions"] }
+schemars = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"

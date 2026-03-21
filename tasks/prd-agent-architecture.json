@@ -118,14 +118,15 @@
         "cargo clippy --bin rt passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Tools constructed as closures capturing Arc<ToolContext>. Not using #[tool] macro since closures need DB access. run() calls generate_text(), stream() calls stream_text().",
       "dependsOn": [
         "US-001",
         "US-002",
         "US-003",
         "US-004"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-007",
@@ -363,6 +364,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-21T16:22:55.103Z"
+    "updatedAt": "2026-03-21T16:29:50.905Z"
   }
 }

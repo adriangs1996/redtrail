@@ -136,7 +136,7 @@ pub enum KbCommands {
 }
 
 pub fn run(
-    db: &(impl KnowledgeBase + CommandLog),
+    db: &(impl KnowledgeBase + CommandLog + crate::db::Schematizable),
     session_id: &str,
     cmd: KbCommands,
 ) -> Result<(), Error> {

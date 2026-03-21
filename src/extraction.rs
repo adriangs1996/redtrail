@@ -1,12 +1,14 @@
-use crate::db::{CommandLog, KnowledgeBase};
+use crate::db::{self, CommandLog, KnowledgeBase};
 use crate::error::Error;
 
 pub fn extract_sync(
-    db: &(impl CommandLog + KnowledgeBase),
+    db: &(impl db::CommandLog + db::KnowledgeBase + db::Schematizable),
     session_id: &str,
     cmd_id: i64,
     _config: &crate::config::Config,
 ) -> Result<(), Error> {
+    let db_schema = db.as_json();
+
     let (row_session_id, command, tool, output) = db.get_command_for_extraction(cmd_id)?;
     let _ = row_session_id;
 
@@ -22,23 +24,10 @@ pub fn extract_sync(
         Some(o) => o,
     };
 
-    let truncated = if output.len() > 8000 {
-        let mut end = 8000;
-        while end > 0 && !output.is_char_boundary(end) {
-            end -= 1;
-        }
-        &output[..end]
-    } else {
-        &output
-    };
+    let truncated = simplify_text(output);
     let tool_str = tool.as_deref().unwrap_or("unknown");
 
-    let prompt = format!(
-        "You are a pentesting data extractor. Given command output, extract structured data.\n\nCommand: {command}\nTool: {tool_str}\n\nOutput:\n{truncated}\n\nReturn ONLY valid JSON:\n{{\"hosts\":[{{\"ip\":\"...\",\"hostname\":\"...\",\"os\":\"...\"}}],\"ports\":[{{\"ip\":\"...\",\"port\":22,\"protocol\":\"tcp\",\"service\":\"ssh\",\"version\":\"...\"}}],\"credentials\":[{{\"username\":\"...\",\"password\":\"...\",\"service\":\"...\",\"host\":\"...\"}}],\"flags\":[{{\"value\":\"...\",\"source\":\"...\"}}],\"access\":[{{\"host\":\"...\",\"user\":\"...\",\"level\":\"...\",\"method\":\"...\"}}],\
-\"web_paths\":[{{\"ip\":\"...\",\"port\":80,\"scheme\":\"http\",\"path\":\"/admin\",\"status_code\":200,\"content_length\":1234,\"content_type\":\"text/html\",\"redirect_to\":\"\"}}],\
-\"vulns\":[{{\"ip\":\"...\",\"port\":80,\"name\":\"...\",\"severity\":\"high\",\"cve\":\"CVE-...\",\"url\":\"...\",\"detail\":\"...\"}}],\
-\"notes\":[\"...\"]}}\n\nEmpty arrays for categories with no data found."
-    );
+    let prompt = format!("");
 
     let config = _config;
     match call_llm(&prompt, config) {
@@ -183,8 +172,15 @@ pub fn apply_extraction(
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "...");
             db.add_web_path(
-                session_id, ip, port, scheme, path,
-                status_code, content_length, content_type, redirect_to,
+                session_id,
+                ip,
+                port,
+                scheme,
+                path,
+                status_code,
+                content_length,
+                content_type,
+                redirect_to,
                 Some("llm-extraction"),
             )?;
         }
@@ -204,18 +200,20 @@ pub fn apply_extraction(
             let severity = vl["severity"]
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "...");
-            let cve = vl["cve"]
-                .as_str()
-                .filter(|s| !s.is_empty() && *s != "...");
-            let url = vl["url"]
-                .as_str()
-                .filter(|s| !s.is_empty() && *s != "...");
+            let cve = vl["cve"].as_str().filter(|s| !s.is_empty() && *s != "...");
+            let url = vl["url"].as_str().filter(|s| !s.is_empty() && *s != "...");
             let detail = vl["detail"]
                 .as_str()
                 .filter(|s| !s.is_empty() && *s != "...");
             db.add_vuln(
-                session_id, ip, port, name,
-                severity, cve, url, detail,
+                session_id,
+                ip,
+                port,
+                name,
+                severity,
+                cve,
+                url,
+                detail,
                 Some("llm-extraction"),
             )?;
         }
@@ -268,6 +266,10 @@ fn extract_json(text: &str) -> &str {
     {
         return &text[start..=end];
     }
+    text
+}
+
+fn simplify_text(text: String) -> String {
     text
 }
 
@@ -325,7 +327,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_web_paths() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[{"ip":"10.10.10.1","port":80,"scheme":"http","path":"/admin","status_code":200,"content_length":1234,"content_type":"text/html","redirect_to":""}],"vulns":[],"notes":[]}"#;
         apply_extraction(&db, "s1", json).unwrap();
@@ -342,7 +345,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_vulns() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[],"vulns":[{"ip":"10.10.10.1","port":80,"name":"Apache Path Traversal","severity":"high","cve":"CVE-2021-41773","url":"http://10.10.10.1/cgi-bin/..","detail":"traversal"}],"notes":[]}"#;
         apply_extraction(&db, "s1", json).unwrap();
@@ -359,7 +363,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_skips_invalid_web_path() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[{"ip":"","port":80,"path":"/admin"},{"ip":"10.10.10.1","port":80,"path":""}],"vulns":[],"notes":[]}"#;
         apply_extraction(&db, "s1", json).unwrap();
@@ -371,7 +376,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_skips_invalid_vuln() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[],"vulns":[{"ip":"...","port":80,"name":"XSS"},{"ip":"10.10.10.1","port":80,"name":""}],"notes":[]}"#;
         apply_extraction(&db, "s1", json).unwrap();
@@ -383,7 +389,8 @@ mod tests {
     #[test]
     fn test_apply_extraction_vuln_no_port_defaults_zero() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", None, None, "general")
+            .unwrap();
 
         let json = r#"{"hosts":[],"ports":[],"credentials":[],"flags":[],"access":[],"web_paths":[],"vulns":[{"ip":"10.10.10.1","name":"Outdated OS","severity":"medium"}],"notes":[]}"#;
         apply_extraction(&db, "s1", json).unwrap();

@@ -1,8 +1,10 @@
 pub mod chat;
 pub mod commands;
+pub mod dispatcher;
 pub mod hypothesis;
 pub mod kb;
-pub mod session;
+pub mod schema;
+pub(crate) mod session;
 
 use crate::error::Error;
 use rusqlite::Connection;
@@ -156,6 +158,10 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TEXT DEFAULT (datetime('now'))
 );
 ";
+
+pub trait Schematizable {
+    fn as_json(&self) -> serde_json::Value;
+}
 
 pub trait KnowledgeBase {
     fn add_host(
@@ -336,7 +342,7 @@ impl SqliteDb {
 
 pub fn open(
     path: &str,
-) -> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps + use<>, Error> {
+) -> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps + Schematizable + use<>, Error> {
     let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
     let db = SqliteDb { conn };
     db.init()?;
@@ -356,11 +362,17 @@ pub fn open_connection(path: &str) -> Result<Connection, Error> {
 
 #[cfg(test)]
 pub(crate) fn open_in_memory()
--> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps, Error> {
+-> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps + Schematizable, Error> {
     let conn = Connection::open_in_memory().map_err(|e| Error::Db(e.to_string()))?;
     let db = SqliteDb { conn };
     db.init()?;
     Ok(db)
+}
+
+impl Schematizable for SqliteDb {
+    fn as_json(&self) -> serde_json::Value {
+        schema::as_json(&self.conn)
+    }
 }
 
 impl KnowledgeBase for SqliteDb {
@@ -452,8 +464,17 @@ impl KnowledgeBase for SqliteDb {
         source: Option<&str>,
     ) -> Result<i64, Error> {
         kb::add_web_path(
-            &self.conn, session_id, host_ip, port, scheme, path,
-            status_code, content_length, content_type, redirect_to, source,
+            &self.conn,
+            session_id,
+            host_ip,
+            port,
+            scheme,
+            path,
+            status_code,
+            content_length,
+            content_type,
+            redirect_to,
+            source,
         )
     }
     fn add_vuln(
@@ -469,8 +490,7 @@ impl KnowledgeBase for SqliteDb {
         source: Option<&str>,
     ) -> Result<i64, Error> {
         kb::add_vuln(
-            &self.conn, session_id, host_ip, port, name,
-            severity, cve, url, detail, source,
+            &self.conn, session_id, host_ip, port, name, severity, cve, url, detail, source,
         )
     }
     fn list_web_paths(

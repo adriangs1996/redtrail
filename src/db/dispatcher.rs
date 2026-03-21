@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use crate::error::Error;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +21,7 @@ static TABLES: &[(&str, TableDef)] = &[
         validators: &[("status", valid_host_status)],
     }),
     ("ports", TableDef {
-        columns: &["host_id", "port", "protocol", "service", "version"],
+        columns: &["host_id", "ip", "port", "protocol", "service", "version"],
         unique_key: &["host_id", "port", "protocol"],
         validators: &[("protocol", valid_protocol), ("port", valid_port_range)],
     }),
@@ -46,12 +46,12 @@ static TABLES: &[(&str, TableDef)] = &[
         validators: &[],
     }),
     ("web_paths", TableDef {
-        columns: &["host_id", "port", "scheme", "path", "status_code", "content_length", "content_type", "redirect_to", "source"],
+        columns: &["host_id", "ip", "port", "scheme", "path", "status_code", "content_length", "content_type", "redirect_to", "source"],
         unique_key: &["session_id", "host_id", "port", "path"],
         validators: &[("scheme", valid_scheme), ("status_code", valid_status_code)],
     }),
     ("vulns", TableDef {
-        columns: &["host_id", "port", "name", "severity", "cve", "url", "detail", "source"],
+        columns: &["host_id", "ip", "port", "name", "severity", "cve", "url", "detail", "source"],
         unique_key: &["session_id", "host_id", "port", "name"],
         validators: &[("severity", valid_severity)],
     }),
@@ -79,6 +79,8 @@ fn lookup_table(name: &str) -> Result<&'static TableDef, Error> {
         .map(|(_, def)| def)
         .ok_or_else(|| Error::Db(format!("unknown table '{name}'")))
 }
+
+const IP_RESOLVABLE_TABLES: &[&str] = &["ports", "web_paths", "vulns"];
 
 pub fn create(
     conn: &Connection,
@@ -111,12 +113,35 @@ pub fn create(
         }
     }
 
+    let mut data = data.clone();
+
+    if IP_RESOLVABLE_TABLES.contains(&table) {
+        if let Some(ip_val) = data.remove("ip") {
+            if data.contains_key("host_id") {
+                return Err(Error::Db("provide either 'ip' or 'host_id', not both".into()));
+            }
+            let ip = ip_val.as_str().ok_or_else(|| Error::Db("ip must be a string".into()))?;
+            let host_id = resolve_host_id(conn, session_id, ip)?;
+            data.insert("host_id".to_string(), serde_json::json!(host_id));
+        }
+    }
+
+    if table == "evidence" {
+        if let Some(hid_val) = data.get("hypothesis_id") {
+            if !hid_val.is_null() {
+                let hid = hid_val.as_i64().ok_or_else(|| Error::Db("hypothesis_id must be an integer".into()))?;
+                validate_hypothesis_session(conn, session_id, hid)?;
+            }
+        }
+    }
+
     let mut col_names = vec!["session_id".to_string()];
     let mut placeholders = vec!["?1".to_string()];
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(session_id.to_string())];
     let mut idx = 2;
 
     for col in def.columns {
+        if *col == "ip" && IP_RESOLVABLE_TABLES.contains(&table) { continue; }
         if let Some(val) = data.get(*col) {
             col_names.push(col.to_string());
             placeholders.push(format!("?{idx}"));
@@ -141,7 +166,7 @@ pub fn create(
     let id = if created {
         conn.last_insert_rowid()
     } else if !def.unique_key.is_empty() {
-        lookup_existing_id(conn, table, session_id, def, data)?
+        lookup_existing_id(conn, table, session_id, def, &data)?
     } else {
         return Err(Error::Db(format!(
             "duplicate row in '{table}' but no unique key to look up existing id"
@@ -149,6 +174,45 @@ pub fn create(
     };
 
     Ok(CreateResult { id, created })
+}
+
+fn resolve_host_id(conn: &Connection, session_id: &str, ip: &str) -> Result<i64, Error> {
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM hosts WHERE session_id = ?1 AND ip = ?2",
+            rusqlite::params![session_id, ip],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    conn.execute(
+        "INSERT INTO hosts (session_id, ip) VALUES (?1, ?2)",
+        rusqlite::params![session_id, ip],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(conn.last_insert_rowid())
+}
+
+fn validate_hypothesis_session(conn: &Connection, session_id: &str, hypothesis_id: i64) -> Result<(), Error> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM hypotheses WHERE id = ?1 AND session_id = ?2)",
+            rusqlite::params![hypothesis_id, session_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    if !exists {
+        return Err(Error::Db(format!(
+            "hypothesis_id {hypothesis_id} does not belong to session '{session_id}'"
+        )));
+    }
+    Ok(())
 }
 
 fn lookup_existing_id(
@@ -530,5 +594,88 @@ mod tests {
         ]);
         let err = create(&conn, "s1", "web_paths", &data).unwrap_err();
         assert!(err.to_string().contains("invalid value"));
+    }
+
+    #[test]
+    fn create_port_with_ip_auto_creates_host() {
+        let conn = setup();
+        let data = map(&[("ip", serde_json::json!("10.10.10.5")), ("port", serde_json::json!(22)), ("protocol", serde_json::json!("tcp"))]);
+        let r = create(&conn, "s1", "ports", &data).unwrap();
+        assert!(r.created);
+        let host_id: i64 = conn.query_row("SELECT id FROM hosts WHERE session_id='s1' AND ip='10.10.10.5'", [], |r| r.get(0)).unwrap();
+        let port_host: i64 = conn.query_row("SELECT host_id FROM ports WHERE id=?1", [r.id], |r| r.get(0)).unwrap();
+        assert_eq!(host_id, port_host);
+    }
+
+    #[test]
+    fn create_port_with_ip_reuses_existing_host() {
+        let conn = setup();
+        conn.execute("INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.10.10.1')", []).unwrap();
+        let existing_host_id: i64 = conn.query_row("SELECT id FROM hosts WHERE ip='10.10.10.1'", [], |r| r.get(0)).unwrap();
+        let data = map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(80)), ("protocol", serde_json::json!("tcp"))]);
+        let r = create(&conn, "s1", "ports", &data).unwrap();
+        assert!(r.created);
+        let port_host: i64 = conn.query_row("SELECT host_id FROM ports WHERE id=?1", [r.id], |r| r.get(0)).unwrap();
+        assert_eq!(existing_host_id, port_host);
+    }
+
+    #[test]
+    fn create_web_path_with_ip_resolves_host() {
+        let conn = setup();
+        let data = map(&[("ip", serde_json::json!("10.10.10.6")), ("port", serde_json::json!(443)), ("scheme", serde_json::json!("https")), ("path", serde_json::json!("/api"))]);
+        let r = create(&conn, "s1", "web_paths", &data).unwrap();
+        assert!(r.created);
+        let host_id: i64 = conn.query_row("SELECT id FROM hosts WHERE ip='10.10.10.6'", [], |r| r.get(0)).unwrap();
+        let wp_host: i64 = conn.query_row("SELECT host_id FROM web_paths WHERE id=?1", [r.id], |r| r.get(0)).unwrap();
+        assert_eq!(host_id, wp_host);
+    }
+
+    #[test]
+    fn create_vuln_with_ip_resolves_host() {
+        let conn = setup();
+        let data = map(&[("ip", serde_json::json!("10.10.10.7")), ("port", serde_json::json!(80)), ("name", serde_json::json!("SQLi")), ("severity", serde_json::json!("high"))]);
+        let r = create(&conn, "s1", "vulns", &data).unwrap();
+        assert!(r.created);
+        let host_id: i64 = conn.query_row("SELECT id FROM hosts WHERE ip='10.10.10.7'", [], |r| r.get(0)).unwrap();
+        let vuln_host: i64 = conn.query_row("SELECT host_id FROM vulns WHERE id=?1", [r.id], |r| r.get(0)).unwrap();
+        assert_eq!(host_id, vuln_host);
+    }
+
+    #[test]
+    fn create_rejects_ip_and_host_id_together() {
+        let conn = setup();
+        conn.execute("INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.10.10.1')", []).unwrap();
+        let data = map(&[("ip", serde_json::json!("10.10.10.1")), ("host_id", serde_json::json!(1)), ("port", serde_json::json!(22)), ("protocol", serde_json::json!("tcp"))]);
+        let err = create(&conn, "s1", "ports", &data).unwrap_err();
+        assert!(err.to_string().contains("either 'ip' or 'host_id'"));
+    }
+
+    #[test]
+    fn create_evidence_validates_hypothesis_session() {
+        let conn = setup();
+        conn.execute("INSERT INTO sessions (id, name) VALUES ('s2', 'other')", []).unwrap();
+        conn.execute("INSERT INTO hypotheses (session_id, statement, category) VALUES ('s2', 'test', 'auth')", []).unwrap();
+        let hyp_id: i64 = conn.query_row("SELECT id FROM hypotheses WHERE session_id='s2'", [], |r| r.get(0)).unwrap();
+        let data = map(&[("hypothesis_id", serde_json::json!(hyp_id)), ("finding", serde_json::json!("found")), ("severity", serde_json::json!("info"))]);
+        let err = create(&conn, "s1", "evidence", &data).unwrap_err();
+        assert!(err.to_string().contains("does not belong to session"));
+    }
+
+    #[test]
+    fn create_evidence_with_valid_hypothesis() {
+        let conn = setup();
+        conn.execute("INSERT INTO hypotheses (session_id, statement, category) VALUES ('s1', 'test', 'auth')", []).unwrap();
+        let hyp_id: i64 = conn.query_row("SELECT id FROM hypotheses WHERE session_id='s1'", [], |r| r.get(0)).unwrap();
+        let data = map(&[("hypothesis_id", serde_json::json!(hyp_id)), ("finding", serde_json::json!("found")), ("severity", serde_json::json!("info"))]);
+        let r = create(&conn, "s1", "evidence", &data).unwrap();
+        assert!(r.created);
+    }
+
+    #[test]
+    fn create_evidence_with_null_hypothesis_id_ok() {
+        let conn = setup();
+        let data = map(&[("hypothesis_id", serde_json::Value::Null), ("finding", serde_json::json!("found")), ("severity", serde_json::json!("info"))]);
+        let r = create(&conn, "s1", "evidence", &data).unwrap();
+        assert!(r.created);
     }
 }

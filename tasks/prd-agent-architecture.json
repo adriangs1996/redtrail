@@ -37,11 +37,12 @@
         "cargo clippy --bin rt passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "LLM sends ip in data, Rust pops it and resolves to host_id before INSERT.",
       "dependsOn": [
         "US-001"
-      ]
+      ],
+      "completionNotes": "Completed by agent"
     },
     {
       "id": "US-003",
@@ -359,6 +360,6 @@
     }
   ],
   "metadata": {
-    "updatedAt": "2026-03-21T16:13:22.682Z"
+    "updatedAt": "2026-03-21T16:16:35.750Z"
   }
 }

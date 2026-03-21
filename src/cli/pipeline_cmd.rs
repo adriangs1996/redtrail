@@ -79,7 +79,7 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
     let strat_model = crate::agent::create_model(&config)?;
     let strat_input = StrategistInput { new_records };
     let strat_prompt = strat_input.to_prompt();
-    let strat_agent = build_strategist_agent(strat_model, conn.clone(), session_id, cwd);
+    let strat_agent = build_strategist_agent(strat_model, conn.clone(), session_id, cwd)?;
 
     match rt.block_on(strat_agent.run(&strat_prompt)) {
         Ok(strat_response) => {

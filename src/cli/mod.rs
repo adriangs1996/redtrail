@@ -1,3 +1,4 @@
+pub(crate) mod advise;
 pub(crate) mod ask;
 pub mod config_cmd;
 pub mod env;
@@ -164,6 +165,14 @@ enum Commands {
         #[arg(long, help = "Suppress skill auto-detection")]
         no_skill: bool,
     },
+    #[command(
+        about = "Run full strategic analysis with L0-L4 reasoning and hypothesis management",
+        visible_alias = "adv"
+    )]
+    Advise {
+        #[arg(help = "Question or focus area for strategic analysis")]
+        question: String,
+    },
     #[command(about = "Run SQL against the redtrail database")]
     Sql {
         #[arg(help = "SQL statement to execute")]
@@ -208,6 +217,8 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "skill",
     "ask",
     "query",
+    "advise",
+    "adv",
     "sql",
     "st",
     "theory",
@@ -320,6 +331,7 @@ pub fn run() -> Result<(), Error> {
             skill.as_deref(),
             no_skill,
         ),
+        Some(Commands::Advise { question }) => advise::run(&question),
         Some(Commands::Sql { sql, file, json }) => match (sql, file) {
             (_, Some(path)) => sql::run_file(&path, json),
             (Some(query), _) => sql::run(&query, json),

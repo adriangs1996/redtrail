@@ -176,6 +176,107 @@ pub fn create(
     Ok(CreateResult { id, created })
 }
 
+pub fn query(
+    conn: &Connection,
+    session_id: &str,
+    table: &str,
+    filters: &HashMap<String, serde_json::Value>,
+) -> Result<Vec<serde_json::Value>, Error> {
+    let def = lookup_table(table)?;
+
+    let allowed_filter_keys: Vec<&str> = std::iter::once("id")
+        .chain(def.columns.iter().copied())
+        .collect();
+
+    let has_ip_filter = filters.contains_key("ip") && IP_RESOLVABLE_TABLES.contains(&table);
+
+    for key in filters.keys() {
+        if key == "ip" && IP_RESOLVABLE_TABLES.contains(&table) {
+            continue;
+        }
+        if !allowed_filter_keys.contains(&key.as_str()) {
+            return Err(Error::Db(format!(
+                "filter key '{key}' not allowed for table '{table}'; allowed: {:?}",
+                allowed_filter_keys
+            )));
+        }
+    }
+
+    let col_names = get_all_columns(conn, table)?;
+
+    let mut sql = if has_ip_filter {
+        format!(
+            "SELECT {cols} FROM {table} INNER JOIN hosts ON {table}.host_id = hosts.id AND hosts.session_id = {table}.session_id WHERE {table}.session_id = ?1",
+            cols = col_names.iter().map(|c| format!("{table}.{c}")).collect::<Vec<_>>().join(", "),
+        )
+    } else {
+        format!(
+            "SELECT {cols} FROM {table} WHERE {table}.session_id = ?1",
+            cols = col_names.join(", "),
+        )
+    };
+
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(session_id.to_string())];
+    let mut idx = 2;
+
+    for (key, val) in filters {
+        if key == "ip" && has_ip_filter {
+            sql.push_str(&format!(" AND hosts.ip = ?{idx}"));
+            values.push(json_to_sql(val));
+            idx += 1;
+        } else {
+            sql.push_str(&format!(" AND {table}.{key} = ?{idx}"));
+            values.push(json_to_sql(val));
+            idx += 1;
+        }
+    }
+
+    let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| Error::Db(e.to_string()))?;
+
+    let rows = stmt
+        .query_map(params_from_iter(params.iter()), |row| {
+            let mut obj = serde_json::Map::new();
+            for (i, col) in col_names.iter().enumerate() {
+                let val: rusqlite::types::Value = row.get(i)?;
+                obj.insert(col.clone(), sqlite_to_json(val));
+            }
+            Ok(serde_json::Value::Object(obj))
+        })
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| Error::Db(e.to_string()))?);
+    }
+    Ok(result)
+}
+
+fn get_all_columns(conn: &Connection, table: &str) -> Result<Vec<String>, Error> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(|e| Error::Db(e.to_string()))?;
+    let cols: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+    if cols.is_empty() {
+        return Err(Error::Db(format!("no columns found for table '{table}'")));
+    }
+    Ok(cols)
+}
+
+fn sqlite_to_json(val: rusqlite::types::Value) -> serde_json::Value {
+    match val {
+        rusqlite::types::Value::Null => serde_json::Value::Null,
+        rusqlite::types::Value::Integer(i) => serde_json::json!(i),
+        rusqlite::types::Value::Real(f) => serde_json::json!(f),
+        rusqlite::types::Value::Text(s) => serde_json::json!(s),
+        rusqlite::types::Value::Blob(b) => serde_json::json!(format!("<blob:{} bytes>", b.len())),
+    }
+}
+
 fn resolve_host_id(conn: &Connection, session_id: &str, ip: &str) -> Result<i64, Error> {
     let existing: Option<i64> = conn
         .query_row(
@@ -677,5 +778,167 @@ mod tests {
         let data = map(&[("hypothesis_id", serde_json::Value::Null), ("finding", serde_json::json!("found")), ("severity", serde_json::json!("info"))]);
         let r = create(&conn, "s1", "evidence", &data).unwrap();
         assert!(r.created);
+    }
+
+    // --- query tests ---
+
+    #[test]
+    fn query_returns_all_columns_as_json() {
+        let conn = setup();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1")), ("os", serde_json::json!("Linux"))])).unwrap();
+        let rows = query(&conn, "s1", "hosts", &HashMap::new()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert!(row.get("id").is_some());
+        assert_eq!(row["ip"], "10.10.10.1");
+        assert_eq!(row["os"], "Linux");
+        assert_eq!(row["session_id"], "s1");
+    }
+
+    #[test]
+    fn query_returns_timestamps() {
+        let conn = setup();
+        create(&conn, "s1", "notes", &map(&[("text", serde_json::json!("hello"))])).unwrap();
+        let rows = query(&conn, "s1", "notes", &HashMap::new()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].get("created_at").is_some());
+        assert!(!rows[0]["created_at"].is_null());
+    }
+
+    #[test]
+    fn query_filters_by_session() {
+        let conn = setup();
+        conn.execute("INSERT INTO sessions (id, name) VALUES ('s2', 'other')", []).unwrap();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        create(&conn, "s2", "hosts", &map(&[("ip", serde_json::json!("10.10.10.2"))])).unwrap();
+        let rows = query(&conn, "s1", "hosts", &HashMap::new()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ip"], "10.10.10.1");
+    }
+
+    #[test]
+    fn query_with_key_value_filter() {
+        let conn = setup();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1")), ("os", serde_json::json!("Linux"))])).unwrap();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.2")), ("os", serde_json::json!("Windows"))])).unwrap();
+        let filters = map(&[("os", serde_json::json!("Linux"))]);
+        let rows = query(&conn, "s1", "hosts", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ip"], "10.10.10.1");
+    }
+
+    #[test]
+    fn query_with_and_semantics() {
+        let conn = setup();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1")), ("os", serde_json::json!("Linux")), ("status", serde_json::json!("up"))])).unwrap();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.2")), ("os", serde_json::json!("Linux")), ("status", serde_json::json!("down"))])).unwrap();
+        let filters = map(&[("os", serde_json::json!("Linux")), ("status", serde_json::json!("up"))]);
+        let rows = query(&conn, "s1", "hosts", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ip"], "10.10.10.1");
+    }
+
+    #[test]
+    fn query_filter_by_id() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.2"))])).unwrap();
+        let filters = map(&[("id", serde_json::json!(r.id))]);
+        let rows = query(&conn, "s1", "hosts", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ip"], "10.10.10.1");
+    }
+
+    #[test]
+    fn query_rejects_unknown_filter_key() {
+        let conn = setup();
+        let filters = map(&[("bogus", serde_json::json!("x"))]);
+        let err = query(&conn, "s1", "hosts", &filters).unwrap_err();
+        assert!(err.to_string().contains("not allowed"));
+        assert!(err.to_string().contains("bogus"));
+    }
+
+    #[test]
+    fn query_rejects_unknown_table() {
+        let conn = setup();
+        let err = query(&conn, "s1", "nonexistent", &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("unknown table"));
+    }
+
+    #[test]
+    fn query_rejects_protected_table() {
+        let conn = setup();
+        let err = query(&conn, "s1", "sessions", &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("protected"));
+    }
+
+    #[test]
+    fn query_ip_filter_joins_hosts_for_ports() {
+        let conn = setup();
+        create(&conn, "s1", "ports", &map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(22)), ("protocol", serde_json::json!("tcp"))])).unwrap();
+        create(&conn, "s1", "ports", &map(&[("ip", serde_json::json!("10.10.10.2")), ("port", serde_json::json!(80)), ("protocol", serde_json::json!("tcp"))])).unwrap();
+        let filters = map(&[("ip", serde_json::json!("10.10.10.1"))]);
+        let rows = query(&conn, "s1", "ports", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["port"], 22);
+    }
+
+    #[test]
+    fn query_ip_filter_joins_hosts_for_vulns() {
+        let conn = setup();
+        create(&conn, "s1", "vulns", &map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(80)), ("name", serde_json::json!("XSS")), ("severity", serde_json::json!("high"))])).unwrap();
+        create(&conn, "s1", "vulns", &map(&[("ip", serde_json::json!("10.10.10.2")), ("port", serde_json::json!(80)), ("name", serde_json::json!("SQLi")), ("severity", serde_json::json!("critical"))])).unwrap();
+        let filters = map(&[("ip", serde_json::json!("10.10.10.2"))]);
+        let rows = query(&conn, "s1", "vulns", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["name"], "SQLi");
+    }
+
+    #[test]
+    fn query_ip_filter_joins_hosts_for_web_paths() {
+        let conn = setup();
+        create(&conn, "s1", "web_paths", &map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(80)), ("scheme", serde_json::json!("http")), ("path", serde_json::json!("/admin"))])).unwrap();
+        create(&conn, "s1", "web_paths", &map(&[("ip", serde_json::json!("10.10.10.2")), ("port", serde_json::json!(443)), ("scheme", serde_json::json!("https")), ("path", serde_json::json!("/api"))])).unwrap();
+        let filters = map(&[("ip", serde_json::json!("10.10.10.2"))]);
+        let rows = query(&conn, "s1", "web_paths", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["path"], "/api");
+    }
+
+    #[test]
+    fn query_ip_filter_combined_with_other_filters() {
+        let conn = setup();
+        create(&conn, "s1", "ports", &map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(22)), ("protocol", serde_json::json!("tcp"))])).unwrap();
+        create(&conn, "s1", "ports", &map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(80)), ("protocol", serde_json::json!("tcp"))])).unwrap();
+        let filters = map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(22))]);
+        let rows = query(&conn, "s1", "ports", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["port"], 22);
+    }
+
+    #[test]
+    fn query_empty_result() {
+        let conn = setup();
+        let rows = query(&conn, "s1", "hosts", &HashMap::new()).unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn query_all_10_tables() {
+        let conn = setup();
+        for (name, _) in TABLES {
+            let rows = query(&conn, "s1", name, &HashMap::new()).unwrap();
+            assert!(rows.is_empty(), "table {name} should return empty vec");
+        }
+    }
+
+    #[test]
+    fn query_ip_not_virtual_on_hosts() {
+        let conn = setup();
+        create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let filters = map(&[("ip", serde_json::json!("10.10.10.1"))]);
+        let rows = query(&conn, "s1", "hosts", &filters).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["ip"], "10.10.10.1");
     }
 }

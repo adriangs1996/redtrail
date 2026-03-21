@@ -410,6 +410,83 @@ fn valid_evidence_severity(v: &serde_json::Value) -> bool {
     matches!(v.as_str(), Some("info" | "low" | "medium" | "high" | "critical"))
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateResult {
+    pub updated: bool,
+}
+
+pub fn update(
+    conn: &Connection,
+    session_id: &str,
+    table: &str,
+    id: i64,
+    data: &HashMap<String, serde_json::Value>,
+) -> Result<UpdateResult, Error> {
+    let def = lookup_table(table)?;
+
+    if data.is_empty() {
+        return Err(Error::Db("no columns to update".into()));
+    }
+
+    if data.contains_key("session_id") {
+        return Err(Error::Db("session_id cannot be updated".into()));
+    }
+
+    if data.contains_key("id") {
+        return Err(Error::Db("id cannot be updated".into()));
+    }
+
+    for key in data.keys() {
+        if !def.columns.contains(&key.as_str()) {
+            return Err(Error::Db(format!(
+                "column '{key}' not allowed for table '{table}'; allowed: {:?}",
+                def.columns
+            )));
+        }
+    }
+
+    for &(col, validator) in def.validators {
+        if let Some(val) = data.get(col) {
+            if !val.is_null() && !validator(val) {
+                return Err(Error::Db(format!(
+                    "invalid value for '{table}.{col}': {val}"
+                )));
+            }
+        }
+    }
+
+    let mut set_clauses = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
+
+    for col in def.columns {
+        if *col == "ip" && IP_RESOLVABLE_TABLES.contains(&table) { continue; }
+        if let Some(val) = data.get(*col) {
+            set_clauses.push(format!("{col} = ?{idx}"));
+            values.push(json_to_sql(val));
+            idx += 1;
+        }
+    }
+
+    values.push(Box::new(id));
+    let id_idx = idx;
+    idx += 1;
+    values.push(Box::new(session_id.to_string()));
+    let sid_idx = idx;
+
+    let sql = format!(
+        "UPDATE {table} SET {sets} WHERE id = ?{id_idx} AND session_id = ?{sid_idx}",
+        sets = set_clauses.join(", "),
+    );
+
+    let params: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let rows_changed = conn
+        .execute(&sql, params_from_iter(params.iter()))
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    Ok(UpdateResult { updated: rows_changed > 0 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -930,6 +1007,129 @@ mod tests {
             let rows = query(&conn, "s1", name, &HashMap::new()).unwrap();
             assert!(rows.is_empty(), "table {name} should return empty vec");
         }
+    }
+
+    // --- update tests ---
+
+    #[test]
+    fn update_modifies_writable_column() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1")), ("os", serde_json::json!("Linux"))])).unwrap();
+        let ur = update(&conn, "s1", "hosts", r.id, &map(&[("os", serde_json::json!("Windows"))])).unwrap();
+        assert!(ur.updated);
+        let rows = query(&conn, "s1", "hosts", &map(&[("id", serde_json::json!(r.id))])).unwrap();
+        assert_eq!(rows[0]["os"], "Windows");
+    }
+
+    #[test]
+    fn update_rejects_unknown_column() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let err = update(&conn, "s1", "hosts", r.id, &map(&[("bogus", serde_json::json!("x"))])).unwrap_err();
+        assert!(err.to_string().contains("not allowed"));
+        assert!(err.to_string().contains("bogus"));
+    }
+
+    #[test]
+    fn update_validates_enum_constraint() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let err = update(&conn, "s1", "hosts", r.id, &map(&[("status", serde_json::json!("maybe"))])).unwrap_err();
+        assert!(err.to_string().contains("invalid value"));
+    }
+
+    #[test]
+    fn update_validates_range_constraint() {
+        let conn = setup();
+        let r = create(&conn, "s1", "ports", &map(&[("ip", serde_json::json!("10.10.10.1")), ("port", serde_json::json!(22)), ("protocol", serde_json::json!("tcp"))])).unwrap();
+        let err = update(&conn, "s1", "ports", r.id, &map(&[("port", serde_json::json!(99999))])).unwrap_err();
+        assert!(err.to_string().contains("invalid value"));
+    }
+
+    #[test]
+    fn update_nonexistent_id_returns_not_updated() {
+        let conn = setup();
+        let ur = update(&conn, "s1", "hosts", 9999, &map(&[("os", serde_json::json!("Linux"))])).unwrap();
+        assert!(!ur.updated);
+    }
+
+    #[test]
+    fn update_wrong_session_returns_not_updated() {
+        let conn = setup();
+        conn.execute("INSERT INTO sessions (id, name) VALUES ('s2', 'other')", []).unwrap();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let ur = update(&conn, "s2", "hosts", r.id, &map(&[("os", serde_json::json!("Linux"))])).unwrap();
+        assert!(!ur.updated);
+    }
+
+    #[test]
+    fn update_rejects_session_id_column() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let err = update(&conn, "s1", "hosts", r.id, &map(&[("session_id", serde_json::json!("s2"))])).unwrap_err();
+        assert!(err.to_string().contains("session_id cannot be updated"));
+    }
+
+    #[test]
+    fn update_rejects_id_column() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let err = update(&conn, "s1", "hosts", r.id, &map(&[("id", serde_json::json!(99))])).unwrap_err();
+        assert!(err.to_string().contains("id cannot be updated"));
+    }
+
+    #[test]
+    fn update_rejects_empty_data() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let err = update(&conn, "s1", "hosts", r.id, &HashMap::new()).unwrap_err();
+        assert!(err.to_string().contains("no columns to update"));
+    }
+
+    #[test]
+    fn update_rejects_protected_table() {
+        let conn = setup();
+        let err = update(&conn, "s1", "sessions", 1, &map(&[("name", serde_json::json!("x"))])).unwrap_err();
+        assert!(err.to_string().contains("protected"));
+    }
+
+    #[test]
+    fn update_rejects_unknown_table() {
+        let conn = setup();
+        let err = update(&conn, "s1", "nonexistent", 1, &map(&[("x", serde_json::json!("y"))])).unwrap_err();
+        assert!(err.to_string().contains("unknown table"));
+    }
+
+    #[test]
+    fn update_multiple_columns() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
+        let ur = update(&conn, "s1", "hosts", r.id, &map(&[("os", serde_json::json!("FreeBSD")), ("hostname", serde_json::json!("target")), ("status", serde_json::json!("up"))])).unwrap();
+        assert!(ur.updated);
+        let rows = query(&conn, "s1", "hosts", &map(&[("id", serde_json::json!(r.id))])).unwrap();
+        assert_eq!(rows[0]["os"], "FreeBSD");
+        assert_eq!(rows[0]["hostname"], "target");
+        assert_eq!(rows[0]["status"], "up");
+    }
+
+    #[test]
+    fn update_null_value_clears_field() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1")), ("os", serde_json::json!("Linux"))])).unwrap();
+        let ur = update(&conn, "s1", "hosts", r.id, &map(&[("os", serde_json::Value::Null)])).unwrap();
+        assert!(ur.updated);
+        let rows = query(&conn, "s1", "hosts", &map(&[("id", serde_json::json!(r.id))])).unwrap();
+        assert!(rows[0]["os"].is_null());
+    }
+
+    #[test]
+    fn update_hypothesis_status() {
+        let conn = setup();
+        let r = create(&conn, "s1", "hypotheses", &map(&[("statement", serde_json::json!("SSH weak")), ("category", serde_json::json!("auth")), ("status", serde_json::json!("pending"))])).unwrap();
+        let ur = update(&conn, "s1", "hypotheses", r.id, &map(&[("status", serde_json::json!("confirmed")), ("confidence", serde_json::json!(0.95))])).unwrap();
+        assert!(ur.updated);
+        let rows = query(&conn, "s1", "hypotheses", &map(&[("id", serde_json::json!(r.id))])).unwrap();
+        assert_eq!(rows[0]["status"], "confirmed");
     }
 
     #[test]

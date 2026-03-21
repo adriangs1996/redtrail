@@ -218,6 +218,16 @@ impl Config {
             {
                 self.general.auto_extract = b;
             }
+            if let Some(v) = g.get("llm_provider")
+                && let Some(s) = v.as_str()
+            {
+                self.general.llm_provider = s.to_string();
+            }
+            if let Some(v) = g.get("llm_model")
+                && let Some(s) = v.as_str()
+            {
+                self.general.llm_model = s.to_string();
+            }
         }
 
         if let Some(toml::Value::Table(s)) = ws_table.get("scope") {
@@ -339,5 +349,25 @@ autonomy = "balanced"
 "#;
         let merged = global.merge_workspace(ws_toml).unwrap();
         assert_eq!(merged.general.autonomy, "balanced");
+    }
+
+    #[test]
+    fn test_default_llm_provider() {
+        let cfg = Config::default();
+        assert_eq!(cfg.general.llm_provider, "anthropic");
+        assert_eq!(cfg.general.llm_model, "claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn test_merge_workspace_overrides_llm_fields() {
+        let global = Config::default();
+        let ws_toml = r#"
+[general]
+llm_provider = "ollama"
+llm_model = "llama3"
+"#;
+        let merged = global.merge_workspace(ws_toml).unwrap();
+        assert_eq!(merged.general.llm_provider, "ollama");
+        assert_eq!(merged.general.llm_model, "llama3");
     }
 }

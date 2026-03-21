@@ -1,14 +1,33 @@
 pub mod tools;
 
+use aisdk::core::DynamicModel;
 use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
 use aisdk::core::language_model::request::LanguageModelRequest;
 use aisdk::core::language_model::LanguageModel;
 use aisdk::core::language_model::generate_text::GenerateTextResponse;
 use aisdk::core::language_model::stream_text::StreamTextResponse;
 use aisdk::core::tools::Tool;
+use aisdk::providers::anthropic::Anthropic;
+use crate::config::Config;
+use crate::error::Error;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+pub fn create_model(config: &Config) -> Result<Anthropic<DynamicModel>, Error> {
+    match config.general.llm_provider.as_str() {
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .map_err(|_| Error::Config("ANTHROPIC_API_KEY not set".into()))?;
+            Anthropic::<DynamicModel>::builder()
+                .model_name(&config.general.llm_model)
+                .api_key(api_key)
+                .build()
+                .map_err(|e| Error::Config(format!("anthropic provider: {e}")))
+        }
+        other => Err(Error::Config(format!("unsupported llm_provider: {other}"))),
+    }
+}
 
 pub struct ToolContext {
     pub conn: Arc<Mutex<Connection>>,
@@ -206,6 +225,30 @@ mod tests {
         let rows = parsed.as_array().unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["ip"], "10.10.10.1");
+    }
+
+    #[test]
+    fn create_model_from_default_config() {
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "test-key-123") };
+        let config = crate::config::Config::default();
+        let model = super::create_model(&config).unwrap();
+        assert_eq!(model.settings.provider_name, "anthropic");
+    }
+
+    #[test]
+    fn create_model_unsupported_provider() {
+        let mut config = crate::config::Config::default();
+        config.general.llm_provider = "unsupported".into();
+        let result = super::create_model(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_model_custom_model_name() {
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "test-key-123") };
+        let mut config = crate::config::Config::default();
+        config.general.llm_model = "claude-opus-4-20250514".into();
+        let _model = super::create_model(&config).unwrap();
     }
 
     #[test]

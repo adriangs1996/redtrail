@@ -1434,6 +1434,7 @@ dependencies = [
  "colored",
  "dialoguer",
  "dirs",
+ "futures",
  "portable-pty",
  "regex",
  "reqwest",

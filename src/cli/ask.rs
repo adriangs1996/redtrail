@@ -1,14 +1,12 @@
+use crate::agent;
+use crate::agent::assistant;
 use crate::config::Config;
 use crate::db;
 use crate::error::Error;
-use crate::skill_loader;
 use crate::workspace;
-use rusqlite::Connection;
-use serde_json::{Value, json};
-use std::path::Path;
-
-const MAX_TOOL_ROUNDS: usize = 20;
-const MAX_OUTPUT_CHARS: usize = 12000;
+use futures::StreamExt;
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 pub fn run(
     message: Option<&str>,
@@ -34,75 +32,48 @@ pub fn run(
     }
 
     let message = message.ok_or(Error::Config("no message provided".into()))?;
-    let config = Config::resolved(&ws)?;
-    let model = model_override.unwrap_or(&config.general.llm_model);
-    let system = build_system_prompt(&conn, &session_id, &cwd, skill_override, no_skill)?;
+    let mut config = Config::resolved(&ws)?;
+    if let Some(m) = model_override {
+        config.general.llm_model = m.to_string();
+    }
 
-    let mut messages: Vec<Value> = if keep_history {
+    let history: Vec<(String, String)> = if keep_history {
         db::chat::load(&conn, &session_id)?
-            .into_iter()
-            .map(|(role, content)| json!({"role": role, "content": content}))
-            .collect()
     } else {
         vec![]
     };
 
-    messages.push(json!({"role": "user", "content": message}));
-
-    let client = build_client()?;
-    let tools = tool_definitions();
-
-    let mut final_text = String::new();
-
-    for _ in 0..MAX_TOOL_ROUNDS {
-        let response = call_api(&client, model, &system, &messages, &tools)?;
-        let stop_reason = response["stop_reason"].as_str().unwrap_or("end_turn");
-        let content = response["content"].clone();
-
-        messages.push(json!({"role": "assistant", "content": content}));
-
-        let blocks = content.as_array().cloned().unwrap_or_default();
-
-        for block in &blocks {
-            if block["type"] == "text"
-                && let Some(text) = block["text"].as_str()
-            {
-                print!("{text}");
-                final_text.push_str(text);
-            }
+    let mut prompt = String::new();
+    if !history.is_empty() {
+        prompt.push_str("## Conversation History\n");
+        for (role, content) in &history {
+            prompt.push_str(&format!("[{role}]: {content}\n\n"));
         }
-
-        if stop_reason != "tool_use" {
-            println!();
-            break;
-        }
-
-        let mut tool_results = vec![];
-        for block in &blocks {
-            if block["type"] == "tool_use" {
-                let tool_id = block["id"].as_str().unwrap_or("");
-                let tool_name = block["name"].as_str().unwrap_or("");
-                let input = &block["input"];
-
-                let result = execute_tool(tool_name, input, &conn, &cwd);
-                let (content, is_error) = match result {
-                    Ok(output) => (output, false),
-                    Err(e) => (format!("error: {e}"), true),
-                };
-
-                tool_results.push(json!({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": content,
-                    "is_error": is_error,
-                }));
-            }
-        }
-
-        messages.push(json!({"role": "user", "content": tool_results}));
+        prompt.push_str("## Current Message\n");
     }
+    prompt.push_str(message);
+
+    let model = agent::create_model(&config)?;
+    let conn_arc = Arc::new(Mutex::new(conn));
+
+    let agent = assistant::build_assistant_agent(
+        model,
+        conn_arc.clone(),
+        session_id.clone(),
+        cwd,
+        skill_override,
+        no_skill,
+    )?;
+
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| Error::Config(format!("tokio runtime: {e}")))?;
+
+    let final_text = rt.block_on(async {
+        stream_response(&agent, &prompt).await
+    })?;
 
     if keep_history {
+        let conn = conn_arc.lock().map_err(|e| Error::Config(format!("db lock: {e}")))?;
         db::chat::save(&conn, &session_id, "user", message)?;
         if !final_text.is_empty() {
             db::chat::save(&conn, &session_id, "assistant", &final_text)?;
@@ -112,325 +83,153 @@ pub fn run(
     Ok(())
 }
 
-fn build_client() -> Result<reqwest::blocking::Client, Error> {
-    reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| Error::Config(e.to_string()))
-}
+async fn stream_response<M>(
+    agent: &agent::Agent<M>,
+    prompt: &str,
+) -> Result<String, Error>
+where
+    M: aisdk::core::language_model::LanguageModel
+        + aisdk::core::capabilities::TextInputSupport
+        + aisdk::core::capabilities::ToolCallSupport,
+{
+    let mut response = agent.stream(prompt).await
+        .map_err(|e| Error::Config(format!("stream: {e}")))?;
 
-fn call_api(
-    client: &reqwest::blocking::Client,
-    model: &str,
-    system: &str,
-    messages: &[Value],
-    tools: &[Value],
-) -> Result<Value, Error> {
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| Error::Config("ANTHROPIC_API_KEY not set".into()))?;
+    let mut collected = String::new();
 
-    let mut body = json!({
-        "model": model,
-        "max_tokens": 8192,
-        "system": system,
-        "messages": messages,
-    });
-    if !tools.is_empty() {
-        body["tools"] = json!(tools);
-    }
-
-    let resp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .map_err(|e| Error::Config(format!("API request failed: {e}")))?;
-
-    let response: Value = resp
-        .json()
-        .map_err(|e| Error::Config(format!("API response parse failed: {e}")))?;
-
-    if let Some(err) = response.get("error") {
-        return Err(Error::Config(format!("API error: {}", err)));
-    }
-
-    Ok(response)
-}
-
-fn tool_definitions() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "run_command",
-            "description": "Execute a shell command in the workspace directory. Use for running pentesting tools, checking files, network operations, etc. Output is captured and returned.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Shell command to execute"
-                    }
-                },
-                "required": ["command"]
+    while let Some(chunk) = response.stream.next().await {
+        use aisdk::core::language_model::LanguageModelStreamChunkType;
+        match chunk {
+            LanguageModelStreamChunkType::Text(text) => {
+                print!("{text}");
+                std::io::stdout().flush().ok();
+                collected.push_str(&text);
             }
-        }),
-        json!({
-            "name": "sql_query",
-            "description": "Execute a read-only SQL query against the redtrail SQLite database. Tables: sessions, hosts, ports, credentials, access_levels, flags, hypotheses, evidence, command_history, notes, chat_messages. All tables have session_id column.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "SQL SELECT query"
-                    }
-                },
-                "required": ["query"]
+            LanguageModelStreamChunkType::Failed(err) => {
+                eprintln!("\n[error] {err}");
+                return Err(Error::Config(format!("stream failed: {err}")));
             }
-        }),
-    ]
-}
-
-fn execute_tool(name: &str, input: &Value, conn: &Connection, cwd: &Path) -> Result<String, Error> {
-    match name {
-        "run_command" => {
-            let command = input["command"]
-                .as_str()
-                .ok_or(Error::Config("missing command".into()))?;
-            eprintln!("[tool] $ {command}");
-            execute_command(command, cwd)
+            _ => {}
         }
-        "sql_query" => {
-            let query = input["query"]
-                .as_str()
-                .ok_or(Error::Config("missing query".into()))?;
-            eprintln!("[tool] sql: {query}");
-            super::sql::execute_readonly_to_string(conn, query)
-        }
-        _ => Err(Error::Config(format!("unknown tool: {name}"))),
-    }
-}
-
-fn execute_command(command: &str, cwd: &Path) -> Result<String, Error> {
-    let output = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .current_dir(cwd)
-        .output()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    let mut result = String::new();
-    if !stdout.is_empty() {
-        result.push_str(&stdout);
-    }
-    if !stderr.is_empty() {
-        if !result.is_empty() {
-            result.push('\n');
-        }
-        result.push_str(&stderr);
-    }
-    if !output.status.success() {
-        result.push_str(&format!(
-            "\n(exit code: {})",
-            output.status.code().unwrap_or(-1)
-        ));
     }
 
-    if result.len() > MAX_OUTPUT_CHARS {
-        let mut end = MAX_OUTPUT_CHARS;
-        while end > 0 && !result.is_char_boundary(end) {
-            end -= 1;
-        }
-        result.truncate(end);
-        result.push_str("\n... (output truncated)");
+    if !collected.is_empty() && !collected.ends_with('\n') {
+        println!();
     }
 
-    Ok(result)
-}
-
-pub(crate) fn build_system_prompt(
-    conn: &Connection,
-    session_id: &str,
-    cwd: &Path,
-    skill_override: Option<&str>,
-    no_skill: bool,
-) -> Result<String, Error> {
-    let skill_content: Option<(String, String)> = if no_skill {
-        None
-    } else if let Some(name) = skill_override {
-        let prompt = skill_loader::load_skill_prompt(name, Some(cwd))?;
-        eprintln!("[skill] loading {name} (manual override)");
-        Some((name.to_string(), prompt))
-    } else {
-        match skill_loader::detect_phase(conn, session_id)? {
-            Some(m) => match skill_loader::load_skill_prompt(&m.skill_name, Some(cwd)) {
-                Ok(prompt) => {
-                    eprintln!(
-                        "[phase] {} ({}) — loading {}",
-                        m.phase_name, m.context, m.skill_name
-                    );
-                    Some((m.skill_name, prompt))
+    let tool_results = response.tool_results().await;
+    if let Some(results) = tool_results {
+        for res in &results {
+            let name = &res.tool.name;
+            let output = match &res.output {
+                Ok(v) => v.as_str().unwrap_or("").to_string(),
+                Err(_) => continue,
+            };
+            if name == "suggest" {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
+                    let text = parsed["text"].as_str().unwrap_or("");
+                    let priority = parsed["priority"].as_str().unwrap_or("medium");
+                    let indicator = match priority {
+                        "critical" => "\x1b[1;31m[!!!]\x1b[0m",
+                        "high" => "\x1b[1;33m[!!]\x1b[0m",
+                        "medium" => "\x1b[1;36m[!]\x1b[0m",
+                        _ => "\x1b[2m[·]\x1b[0m",
+                    };
+                    eprintln!("\n{indicator} {text}");
                 }
-                Err(_) => {
-                    eprintln!(
-                        "[phase] {} ({}) — skill {} not found, using generic",
-                        m.phase_name, m.context, m.skill_name
-                    );
-                    None
+            }
+            if name == "respond" {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
+                    if let Some(text) = parsed["text"].as_str() {
+                        if collected.is_empty() {
+                            render_markdown(text);
+                            collected.push_str(text);
+                        }
+                    }
                 }
-            },
-            None => None,
+            }
         }
-    };
-
-    let session = db::session::get_session(conn, session_id)?;
-    let summary = db::session::status_summary(conn, session_id)?;
-    let hosts = db::kb::list_hosts(conn, session_id)?;
-    let ports = db::kb::list_ports(conn, session_id, None)?;
-    let creds = db::kb::list_credentials(conn, session_id)?;
-    let flags = db::kb::list_flags(conn, session_id)?;
-    let access = db::kb::list_access(conn, session_id)?;
-    let notes = db::kb::list_notes(conn, session_id)?;
-    let history = db::kb::list_history(conn, session_id, 30)?;
-    let hypotheses = db::hypothesis::list(conn, session_id, None)?;
-
-    let target = session["target"].as_str().unwrap_or("(none)");
-    let scope = session["scope"].as_str().unwrap_or("(unrestricted)");
-    let goal = session["goal"].as_str().unwrap_or("general");
-    let phase = summary["phase"].as_str().unwrap_or("L0");
-    let noise = summary["noise_budget"].as_f64().unwrap_or(1.0);
-
-    let mut p = String::with_capacity(8192);
-
-    if let Some((skill_name, skill_prompt)) = &skill_content {
-        p.push_str(&format!("Active skill: {skill_name}\n---\n"));
-        p.push_str(skill_prompt);
-        p.push_str("\n---\n\n");
-    } else {
-        p.push_str("You are Redtrail, a pentesting advisor embedded in a workspace. You help the operator by analyzing data, suggesting next steps, running commands, and querying the knowledge base.\n\n");
-        p.push_str("Be concise and direct. Use pentesting terminology. When suggesting commands, prefer the tools already aliased in the workspace.\n\n");
     }
 
-    p.push_str(&format!("Target: {target}\nScope: {scope}\nGoal: {goal}\n"));
-    if skill_content.is_none() {
-        p.push_str(&format!("Phase: {phase}\n"));
-    }
-    p.push_str(&format!(
-        "Noise budget: {noise:.2}\nCWD: {}\n\n",
-        cwd.display()
-    ));
+    Ok(collected)
+}
 
-    if !hosts.is_empty() {
-        p.push_str("=== Hosts ===\n");
-        for h in &hosts {
-            p.push_str(&format!(
-                "  {} {} {}\n",
-                h["ip"].as_str().unwrap_or(""),
-                h["hostname"].as_str().unwrap_or("-"),
-                h["os"].as_str().unwrap_or("-"),
-            ));
+fn render_markdown(text: &str) {
+    let mut in_code_block = false;
+    for line in text.lines() {
+        if line.starts_with("```") {
+            in_code_block = !in_code_block;
+            if in_code_block {
+                println!("\x1b[2m{line}\x1b[0m");
+            } else {
+                println!("\x1b[2m```\x1b[0m");
+            }
+            continue;
         }
-        p.push('\n');
-    }
 
-    if !ports.is_empty() {
-        p.push_str("=== Ports ===\n");
-        for port in &ports {
-            p.push_str(&format!(
-                "  {}:{}/{} {} {}\n",
-                port["ip"].as_str().unwrap_or(""),
-                port["port"].as_i64().unwrap_or(0),
-                port["protocol"].as_str().unwrap_or("tcp"),
-                port["service"].as_str().unwrap_or("-"),
-                port["version"].as_str().unwrap_or(""),
-            ));
+        if in_code_block {
+            println!("\x1b[36m  {line}\x1b[0m");
+            continue;
         }
-        p.push('\n');
-    }
 
-    if !creds.is_empty() {
-        p.push_str("=== Credentials ===\n");
-        for c in &creds {
-            p.push_str(&format!(
-                "  {}:{} @ {} ({})\n",
-                c["username"].as_str().unwrap_or(""),
-                c["password"].as_str().unwrap_or("***"),
-                c["host"].as_str().unwrap_or("-"),
-                c["source"].as_str().unwrap_or("-"),
-            ));
+        let rendered = render_inline(line);
+
+        if rendered.starts_with("# ") {
+            println!("\x1b[1;4m{}\x1b[0m", &rendered[2..]);
+        } else if rendered.starts_with("## ") {
+            println!("\x1b[1m{}\x1b[0m", &rendered[3..]);
+        } else if rendered.starts_with("### ") {
+            println!("\x1b[1m{}\x1b[0m", &rendered[4..]);
+        } else if rendered.starts_with("- ") || rendered.starts_with("* ") {
+            println!("  \x1b[33m•\x1b[0m {}", &rendered[2..]);
+        } else if rendered.starts_with("> ") {
+            println!("\x1b[2m│\x1b[0m {}", &rendered[2..]);
+        } else {
+            println!("{rendered}");
         }
-        p.push('\n');
     }
+}
 
-    if !flags.is_empty() {
-        p.push_str("=== Flags ===\n");
-        for f in &flags {
-            p.push_str(&format!(
-                "  {} ({})\n",
-                f["value"].as_str().unwrap_or(""),
-                f["source"].as_str().unwrap_or("-"),
-            ));
+fn render_inline(line: &str) -> String {
+    let mut result = String::with_capacity(line.len() + 32);
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*' {
+            if let Some(end) = find_double_star(&chars, i + 2) {
+                result.push_str("\x1b[1m");
+                for c in &chars[i + 2..end] {
+                    result.push(*c);
+                }
+                result.push_str("\x1b[0m");
+                i = end + 2;
+                continue;
+            }
         }
-        p.push('\n');
-    }
-
-    if !access.is_empty() {
-        p.push_str("=== Access ===\n");
-        for a in &access {
-            p.push_str(&format!(
-                "  {}@{} level={} method={}\n",
-                a["user"].as_str().unwrap_or(""),
-                a["host"].as_str().unwrap_or(""),
-                a["level"].as_str().unwrap_or(""),
-                a["method"].as_str().unwrap_or("-"),
-            ));
+        if chars[i] == '`' {
+            if let Some(end) = chars[i + 1..].iter().position(|&c| c == '`') {
+                result.push_str("\x1b[36m");
+                for c in &chars[i + 1..i + 1 + end] {
+                    result.push(*c);
+                }
+                result.push_str("\x1b[0m");
+                i = i + 2 + end;
+                continue;
+            }
         }
-        p.push('\n');
+        result.push(chars[i]);
+        i += 1;
     }
+    result
+}
 
-    if !hypotheses.is_empty() {
-        p.push_str("=== Hypotheses ===\n");
-        for h in &hypotheses {
-            p.push_str(&format!(
-                "  [{}] {} — {} (priority={}, conf={:.1})\n",
-                h["id"],
-                h["statement"].as_str().unwrap_or(""),
-                h["status"].as_str().unwrap_or(""),
-                h["priority"].as_str().unwrap_or(""),
-                h["confidence"].as_f64().unwrap_or(0.0),
-            ));
+fn find_double_star(chars: &[char], start: usize) -> Option<usize> {
+    let mut i = start;
+    while i + 1 < chars.len() {
+        if chars[i] == '*' && chars[i + 1] == '*' {
+            return Some(i);
         }
-        p.push('\n');
+        i += 1;
     }
-
-    if !notes.is_empty() {
-        p.push_str("=== Notes ===\n");
-        for n in notes.iter().rev().take(10) {
-            p.push_str(&format!("  {}\n", n["text"].as_str().unwrap_or("")));
-        }
-        p.push('\n');
-    }
-
-    if !history.is_empty() {
-        p.push_str("=== Recent Commands ===\n");
-        for h in history.iter().rev().take(20) {
-            let exit = h["exit_code"]
-                .as_i64()
-                .map(|c| c.to_string())
-                .unwrap_or("-".to_string());
-            p.push_str(&format!(
-                "  [exit={}] {}\n",
-                exit,
-                h["command"].as_str().unwrap_or(""),
-            ));
-        }
-        p.push('\n');
-    }
-
-    p.push_str("You have two tools:\n- run_command: execute shell commands\n- sql_query: query the redtrail database (read-only)\n\nUse them when needed to answer questions or perform actions. Always explain what you're doing.");
-
-    Ok(p)
+    None
 }

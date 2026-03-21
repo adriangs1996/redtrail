@@ -85,6 +85,62 @@ pub fn make_update_tool(ctx: Arc<ToolContext>) -> Tool {
     }
 }
 
+const MAX_OUTPUT_CHARS: usize = 12000;
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RunCommandInput {
+    pub command: String,
+}
+
+pub fn make_run_command_tool(ctx: Arc<ToolContext>) -> Tool {
+    Tool {
+        name: "run_command".into(),
+        description: "Execute a shell command in the workspace directory. Use for running pentesting tools, checking files, network operations. Output is captured and returned.".into(),
+        input_schema: schema_for!(RunCommandInput),
+        execute: ToolExecute::new(Box::new(move |params| {
+            let input: RunCommandInput = serde_json::from_value(params)
+                .map_err(|e| format!("invalid input: {e}"))?;
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&input.command)
+                .current_dir(&ctx.cwd)
+                .output()
+                .map_err(|e| format!("exec: {e}"))?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            let mut result = String::new();
+            if !stdout.is_empty() {
+                result.push_str(&stdout);
+            }
+            if !stderr.is_empty() {
+                if !result.is_empty() {
+                    result.push('\n');
+                }
+                result.push_str(&stderr);
+            }
+            if !output.status.success() {
+                result.push_str(&format!(
+                    "\n(exit code: {})",
+                    output.status.code().unwrap_or(-1)
+                ));
+            }
+
+            if result.len() > MAX_OUTPUT_CHARS {
+                let mut end = MAX_OUTPUT_CHARS;
+                while end > 0 && !result.is_char_boundary(end) {
+                    end -= 1;
+                }
+                result.truncate(end);
+                result.push_str("\n... (output truncated)");
+            }
+
+            Ok(result)
+        })),
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SuggestInput {
     pub text: String,

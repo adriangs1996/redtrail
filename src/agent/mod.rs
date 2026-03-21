@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod extraction;
 pub mod tools;
 

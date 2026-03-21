@@ -244,7 +244,7 @@ mod tests {
         .unwrap();
 
         let prompt =
-            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+            crate::agent::assistant::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
         assert!(
             prompt.contains("Recon skill"),
@@ -266,7 +266,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         let prompt =
-            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, true).unwrap();
+            crate::agent::assistant::build_system_prompt(&conn, "s1", tmp.path(), None, true).unwrap();
 
         assert!(
             prompt.contains("You are Redtrail, a pentesting advisor"),
@@ -290,7 +290,7 @@ mod tests {
         )
         .unwrap();
 
-        let prompt = crate::cli::ask::build_system_prompt(
+        let prompt = crate::agent::assistant::build_system_prompt(
             &conn,
             "s1",
             tmp.path(),
@@ -315,7 +315,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         let prompt =
-            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+            crate::agent::assistant::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
         assert!(
             prompt.contains("Active skill: redtrail-recon"),
@@ -368,7 +368,7 @@ mod tests {
         std::fs::write(skill_dir.join("prompt.md"), "# Hypothesize").unwrap();
 
         let prompt =
-            crate::cli::ask::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
+            crate::agent::assistant::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
         assert!(prompt.contains("=== Hosts ==="), "should contain KB dump");
         assert!(prompt.contains("10.10.10.1"), "should contain host data");

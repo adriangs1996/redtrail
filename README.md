@@ -293,7 +293,7 @@ Please open an issue commenting on what you like, what you don't, and what you'd
 
 ## License
 
-This project is not yet licensed. A license will be added before the first public release. If you have preferences, open an issue.
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 

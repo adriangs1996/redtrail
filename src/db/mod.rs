@@ -4,6 +4,7 @@ pub mod config;
 pub mod dispatcher;
 pub mod hypothesis;
 pub mod kb;
+pub mod briefing;
 pub mod schema;
 pub(crate) mod session;
 

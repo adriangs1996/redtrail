@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/logo.png" alt="RedTrail" width="200">
+</p>
+
 # RedTrail
 
 **Your terminal has memory now**. Bring a searchable brain to your pentest engagements.

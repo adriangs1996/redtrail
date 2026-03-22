@@ -1,4 +1,4 @@
-use crate::db::kb;
+use crate::db::{hypothesis, kb};
 use crate::error::Error;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -65,6 +65,8 @@ pub fn build_briefing_with_limits(
     build_credentials_section(conn, session_id, &mut out)?;
     build_access_section(conn, session_id, &mut out)?;
     build_flags_section(conn, session_id, &mut out)?;
+    build_hypotheses_section(conn, session_id, limits, &mut out)?;
+    build_orphan_evidence_section(conn, session_id, &mut out)?;
 
     if out.is_empty() {
         return Ok("## KB Status\nNo data recorded yet. The knowledge base is empty.\n".into());
@@ -343,6 +345,97 @@ fn build_flags_section(
     Ok(())
 }
 
+fn status_sort_key(status: &str) -> u8 {
+    match status {
+        "confirmed" => 0,
+        "testing" => 1,
+        "pending" => 2,
+        "refuted" => 3,
+        _ => 4,
+    }
+}
+
+fn build_hypotheses_section(
+    conn: &Connection,
+    session_id: &str,
+    limits: &BriefingLimits,
+    out: &mut String,
+) -> Result<(), Error> {
+    let mut hyps = hypothesis::list(conn, session_id, None)?;
+    if hyps.is_empty() {
+        return Ok(());
+    }
+
+    hyps.sort_by_key(|h| status_sort_key(h["status"].as_str().unwrap_or("")));
+
+    out.push_str("## Hypotheses\n");
+    for h in &hyps {
+        let id = h["id"].as_i64().unwrap_or(0);
+        let status = h["status"].as_str().unwrap_or("pending").to_uppercase();
+        let priority = h["priority"].as_str().unwrap_or("medium");
+        let confidence = h["confidence"].as_f64().unwrap_or(0.5);
+        let statement = h["statement"].as_str().unwrap_or("?");
+        let category = h["category"].as_str().unwrap_or("");
+
+        let cat_part = if category.is_empty() {
+            String::new()
+        } else {
+            format!(" [{category}]")
+        };
+
+        if status == "REFUTED" {
+            let evidence = hypothesis::list_evidence(conn, session_id, Some(id))?;
+            out.push_str(&format!(
+                "[{id}] REFUTED {statement}{cat_part} ({} evidence)\n",
+                evidence.len()
+            ));
+            continue;
+        }
+
+        out.push_str(&format!(
+            "[{id}] {status} ({priority}, {confidence}) {statement}{cat_part}\n"
+        ));
+
+        let evidence = hypothesis::list_evidence(conn, session_id, Some(id))?;
+        let shown = evidence.len().min(limits.max_evidence_per_hyp);
+        for e in &evidence[..shown] {
+            let finding = e["finding"].as_str().unwrap_or("?");
+            let severity = e["severity"].as_str().unwrap_or("info");
+            out.push_str(&format!("  + \"{finding}\" [{severity}]\n"));
+        }
+        if evidence.len() > shown {
+            out.push_str(&format!("  ... +{} more evidence\n", evidence.len() - shown));
+        }
+    }
+
+    Ok(())
+}
+
+fn build_orphan_evidence_section(
+    conn: &Connection,
+    session_id: &str,
+    out: &mut String,
+) -> Result<(), Error> {
+    let all_evidence = hypothesis::list_evidence(conn, session_id, None)?;
+    let orphans: Vec<&serde_json::Value> = all_evidence
+        .iter()
+        .filter(|e| e["hypothesis_id"].is_null())
+        .collect();
+
+    if orphans.is_empty() {
+        return Ok(());
+    }
+
+    out.push_str("## Unlinked Evidence\n");
+    for e in orphans.iter().take(5) {
+        let finding = e["finding"].as_str().unwrap_or("?");
+        let severity = e["severity"].as_str().unwrap_or("info");
+        out.push_str(&format!("  + \"{finding}\" [{severity}]\n"));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,5 +638,72 @@ mod tests {
         };
         let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
         assert!(result.contains("... and 5 more hosts"));
+    }
+
+    fn insert_hypothesis(conn: &Connection, statement: &str, category: &str, status: &str, priority: &str, confidence: f64) -> i64 {
+        conn.execute(
+            "INSERT INTO hypotheses (session_id, statement, category, status, priority, confidence) VALUES ('s1', ?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![statement, category, status, priority, confidence],
+        ).unwrap();
+        conn.last_insert_rowid()
+    }
+
+    fn insert_evidence(conn: &Connection, hypothesis_id: Option<i64>, finding: &str, severity: &str) {
+        conn.execute(
+            "INSERT INTO evidence (session_id, hypothesis_id, finding, severity) VALUES ('s1', ?1, ?2, ?3)",
+            rusqlite::params![hypothesis_id, finding, severity],
+        ).unwrap();
+    }
+
+    #[test]
+    fn briefing_hypotheses_with_evidence() {
+        let conn = setup();
+        let hid = insert_hypothesis(&conn, "Apache smuggling allows auth bypass", "Banner", "confirmed", "critical", 0.9);
+        insert_evidence(&conn, Some(hid), "Smuggled request reached /admin with 200 OK", "high");
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("## Hypotheses"), "missing header");
+        assert!(result.contains("CONFIRMED"), "missing CONFIRMED status");
+        assert!(result.contains("Apache smuggling allows auth bypass"), "missing statement");
+        assert!(result.contains("Smuggled request reached /admin with 200 OK"), "missing evidence finding");
+    }
+
+    #[test]
+    fn briefing_refuted_hypotheses_collapsed() {
+        let conn = setup();
+        let hid = insert_hypothesis(&conn, "SSH brute force on root", "Session", "refuted", "high", 0.3);
+        insert_evidence(&conn, Some(hid), "fail2ban blocks after 3 attempts", "info");
+        insert_evidence(&conn, Some(hid), "root login disabled in sshd_config", "info");
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("REFUTED"), "missing REFUTED status");
+        assert!(result.contains("(2 evidence)"), "missing evidence count");
+        assert!(!result.contains("fail2ban"), "refuted should NOT show evidence body");
+    }
+
+    #[test]
+    fn briefing_evidence_truncation() {
+        let conn = setup();
+        let hid = insert_hypothesis(&conn, "Multiple attack vectors", "Network", "confirmed", "high", 0.8);
+        for i in 0..10 {
+            insert_evidence(&conn, Some(hid), &format!("evidence item {i}"), "info");
+        }
+
+        let limits = BriefingLimits { max_evidence_per_hyp: 3, ..BriefingLimits::default() };
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("... +"), "missing truncation hint");
+    }
+
+    #[test]
+    fn briefing_orphan_evidence() {
+        let conn = setup();
+        insert_evidence(&conn, None, "Anonymous FTP login successful", "medium");
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("## Unlinked Evidence"), "missing orphan evidence header");
+        assert!(result.contains("Anonymous FTP login successful"), "missing orphan finding");
     }
 }

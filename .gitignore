@@ -1,1 +1,8 @@
 /target
+.claude/
+.beads/
+.env*
+.redtrail/
+*.db
+*.sqlite
+.DS_Store

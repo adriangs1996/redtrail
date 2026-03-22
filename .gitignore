@@ -6,3 +6,13 @@
 *.db
 *.sqlite
 .DS_Store
+
+PENTESTER_MINDSET.md
+TESTING_PLAN.md
+
+# Plans and PRDs
+plans/
+tasks/prd*.json
+tasks/prd*.md
+docs/prd-*.md
+docs/superpowers/plans/

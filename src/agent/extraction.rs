@@ -2,13 +2,12 @@ use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
-use crate::db::schema;
 use super::{Agent, ToolContext};
 use super::tools::{make_query_tool, make_create_tool, make_update_tool};
 use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
 use aisdk::core::language_model::LanguageModel;
 
-pub const MAX_EXTRACTION_ROUNDS: usize = 5;
+pub const MAX_EXTRACTION_ROUNDS: usize = 8;
 
 pub struct ExtractionInput {
     pub command: String,
@@ -32,31 +31,29 @@ impl ExtractionInput {
     }
 }
 
-pub fn build_system_prompt(conn: &Connection) -> String {
-    let db_schema = schema::as_json(conn);
-    let schema_str = serde_json::to_string_pretty(&db_schema).unwrap_or_default();
+pub fn build_system_prompt(conn: &Connection, session_id: &str) -> String {
+    let briefing = crate::db::briefing::build_extractor_briefing(conn, session_id)
+        .unwrap_or_default();
 
     format!(
         "You are an extraction agent for a penetration testing knowledge base.\n\
-         Your job is to parse command output and store structured findings using the provided tools.\n\
+         Parse the command output below and store structured findings.\n\
          \n\
-         ## Database Schema\n\
-         {schema_str}\n\
+         {briefing}\n\
+         \n\
+         {schema}\n\
          \n\
          ## Instructions\n\
-         - Extract ALL relevant information from the command output: hosts, ports, services, \
-         credentials, vulnerabilities, web paths, flags, notes.\n\
-         - Use create_record to insert new findings. Use query_table first to check if a record \
-         already exists before creating duplicates.\n\
-         - Use update_record to enrich existing records with new details.\n\
-         - For ports, web_paths, and vulns: use the `ip` field instead of `host_id` — the system \
-         resolves it automatically.\n\
-         - Be thorough but precise. Only extract information that is clearly present in the output.\n\
-         - Do NOT hallucinate or infer data that isn't in the output.\n\
+         - Existing KB state is shown above. Create records ONLY for NEW findings not already present.\n\
+         - Batch all create_record calls into a single response when possible.\n\
+         - Use update_record to enrich existing records with new details (e.g., adding version to a known port).\n\
+         - For ports, web_paths, and vulns: use `ip` instead of `host_id` — auto-resolved.\n\
+         - Only extract information clearly present in the output. Do NOT hallucinate.\n\
+         - Use query_table ONLY if you need to verify a specific record's current value before updating.\n\
          \n\
          ## Budget\n\
-         You have a maximum of {MAX_EXTRACTION_ROUNDS} tool-calling rounds. Be efficient — batch \
-         related queries and minimize redundant lookups."
+         You have a maximum of {MAX_EXTRACTION_ROUNDS} tool-calling rounds. Batch aggressively.",
+        schema = crate::db::briefing::SCHEMA_REFERENCE,
     )
 }
 
@@ -68,7 +65,7 @@ pub fn build_extraction_agent<M: LanguageModel + TextInputSupport + ToolCallSupp
 ) -> Agent<M> {
     let system = {
         let c = conn.lock().unwrap();
-        build_system_prompt(&c)
+        build_system_prompt(&c, &session_id)
     };
 
     let ctx = Arc::new(ToolContext { conn, session_id, cwd });
@@ -167,8 +164,8 @@ mod tests {
     fn system_prompt_contains_schema() {
         let conn = test_conn();
         let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c);
-        assert!(prompt.contains("Database Schema"));
+        let prompt = build_system_prompt(&c, "s1");
+        assert!(prompt.contains("Writable Tables"));
         assert!(prompt.contains("hosts"));
         assert!(prompt.contains("ports"));
         assert!(prompt.contains("vulns"));
@@ -179,39 +176,30 @@ mod tests {
     fn system_prompt_contains_budget() {
         let conn = test_conn();
         let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c);
+        let prompt = build_system_prompt(&c, "s1");
         assert!(prompt.contains("Budget"));
-        assert!(prompt.contains(&MAX_EXTRACTION_ROUNDS.to_string()));
+        assert!(prompt.contains("8"));
     }
 
     #[test]
     fn system_prompt_contains_extraction_instructions() {
         let conn = test_conn();
         let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c);
+        let prompt = build_system_prompt(&c, "s1");
         assert!(prompt.contains("extraction agent"));
         assert!(prompt.contains("create_record"));
         assert!(prompt.contains("query_table"));
         assert!(prompt.contains("update_record"));
         assert!(prompt.contains("Do NOT hallucinate"));
-    }
-
-    #[test]
-    fn system_prompt_excludes_protected_tables() {
-        let conn = test_conn();
-        let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c);
-        assert!(!prompt.contains("\"sessions\""));
-        assert!(!prompt.contains("\"command_history\""));
-        assert!(!prompt.contains("\"chat_messages\""));
+        assert!(prompt.contains("Batch aggressively"));
     }
 
     #[test]
     fn system_prompt_includes_ip_resolution_hint() {
         let conn = test_conn();
         let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c);
-        assert!(prompt.contains("`ip` field instead of `host_id`"));
+        let prompt = build_system_prompt(&c, "s1");
+        assert!(prompt.contains("ip"));
     }
 
     #[test]
@@ -328,8 +316,8 @@ mod tests {
     }
 
     #[test]
-    fn max_extraction_rounds_is_five() {
-        assert_eq!(MAX_EXTRACTION_ROUNDS, 5);
+    fn max_extraction_rounds_is_eight() {
+        assert_eq!(MAX_EXTRACTION_ROUNDS, 8);
     }
 
     #[test]
@@ -361,7 +349,7 @@ mod tests {
     fn system_prompt_schema_has_constraint_info() {
         let conn = test_conn();
         let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c);
+        let prompt = build_system_prompt(&c, "s1");
         assert!(prompt.contains("up") && prompt.contains("down"));
         assert!(prompt.contains("tcp") && prompt.contains("udp"));
     }

@@ -61,6 +61,7 @@ pub fn build_briefing_with_limits(
 
     build_hosts_section(conn, session_id, limits, &mut out)?;
     build_web_paths_section(conn, session_id, limits, &mut out)?;
+    build_vulns_section(conn, session_id, &mut out)?;
 
     if out.is_empty() {
         return Ok("## KB Status\nNo data recorded yet. The knowledge base is empty.\n".into());
@@ -218,6 +219,64 @@ fn build_web_paths_section(
     Ok(())
 }
 
+fn build_vulns_section(
+    conn: &Connection,
+    session_id: &str,
+    out: &mut String,
+) -> Result<(), Error> {
+    let vulns = kb::list_vulns(conn, session_id, None, None)?;
+    if vulns.is_empty() {
+        return Ok(());
+    }
+
+    let mut by_severity: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
+    for v in &vulns {
+        let sev = v["severity"].as_str().unwrap_or("info").to_string();
+        by_severity.entry(sev).or_default().push(v);
+    }
+
+    let severity_order = ["critical", "high", "medium", "low", "info"];
+    let total = vulns.len();
+    let counts: Vec<String> = severity_order.iter()
+        .filter_map(|s| by_severity.get(*s).map(|v| format!("{} {s}", v.len())))
+        .collect();
+    out.push_str(&format!("## Vulns ({total} total: {})\n", counts.join(", ")));
+
+    for sev in &["critical", "high"] {
+        if let Some(vs) = by_severity.get(*sev) {
+            for v in vs {
+                let ip = v["ip"].as_str().unwrap_or("?");
+                let port = v["port"].as_i64().unwrap_or(0);
+                let cve = v["cve"].as_str().unwrap_or("");
+                let name = v["name"].as_str().unwrap_or("?");
+                let cve_part = if cve.is_empty() { String::new() } else { format!("{cve} ") };
+                out.push_str(&format!("{ip}:{port} {cve_part}[{sev}] {name}\n"));
+            }
+        }
+    }
+
+    let mut collapsed: Vec<&serde_json::Value> = Vec::new();
+    for sev in &["medium", "low", "info"] {
+        if let Some(vs) = by_severity.get(*sev) {
+            collapsed.extend(vs);
+        }
+    }
+    if !collapsed.is_empty() {
+        let mut cat_counts: BTreeMap<String, usize> = BTreeMap::new();
+        for v in &collapsed {
+            let name = v["name"].as_str().unwrap_or("unknown");
+            let cat = name.split(&['-', '_', ' '][..]).next().unwrap_or(name).to_string();
+            *cat_counts.entry(cat).or_default() += 1;
+        }
+        let mut sorted_cats: Vec<(String, usize)> = cat_counts.into_iter().collect();
+        sorted_cats.sort_by(|a, b| b.1.cmp(&a.1));
+        let cat_summary: Vec<String> = sorted_cats.iter().map(|(c, n)| format!("{n}\u{00d7}{c}")).collect();
+        out.push_str(&format!("... +{} medium/low/info ({})\n", collapsed.len(), cat_summary.join(", ")));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +375,47 @@ mod tests {
         let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
         assert!(result.contains("/.git/config"), "pattern-matched .git path missing");
         assert!(result.contains("/.env"), "pattern-matched .env path missing");
+    }
+
+    fn insert_vuln(conn: &Connection, host_id: i64, port: i64, name: &str, severity: &str, cve: &str) {
+        conn.execute(
+            "INSERT INTO vulns (session_id, host_id, port, name, severity, cve) VALUES ('s1', ?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![host_id, port, name, severity, cve],
+        ).unwrap();
+    }
+
+    #[test]
+    fn briefing_vulns_severity_grouping() {
+        let conn = setup();
+        let hid = insert_host(&conn, "10.10.10.1");
+        insert_vuln(&conn, hid, 80, "Apache HTTP Request Smuggling", "critical", "CVE-2023-25690");
+        insert_vuln(&conn, hid, 80, "XSS-reflected", "medium", "");
+        insert_vuln(&conn, hid, 80, "XSS-stored", "medium", "");
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("## Vulns"), "missing header");
+        assert!(result.contains("critical"), "missing critical");
+        assert!(result.contains("CVE-2023-25690"), "missing CVE");
+        assert!(result.contains("Apache HTTP Request Smuggling"), "missing vuln name");
+        assert!(result.contains("medium"), "missing medium count");
+    }
+
+    #[test]
+    fn briefing_vulns_category_frequency_sort() {
+        let conn = setup();
+        let hid = insert_host(&conn, "10.10.10.1");
+        for i in 0..5 {
+            insert_vuln(&conn, hid, 80, &format!("XSS-variant{i}"), "medium", "");
+        }
+        for i in 0..3 {
+            insert_vuln(&conn, hid, 80, &format!("info-disclosure{i}"), "low", "");
+        }
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("5\u{00d7}XSS") || result.contains("5×XSS"), "missing XSS count");
+        assert!(result.contains("3\u{00d7}info") || result.contains("3×info"), "missing info count");
     }
 
     #[test]

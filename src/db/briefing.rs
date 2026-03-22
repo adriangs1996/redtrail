@@ -62,6 +62,9 @@ pub fn build_briefing_with_limits(
     build_hosts_section(conn, session_id, limits, &mut out)?;
     build_web_paths_section(conn, session_id, limits, &mut out)?;
     build_vulns_section(conn, session_id, &mut out)?;
+    build_credentials_section(conn, session_id, &mut out)?;
+    build_access_section(conn, session_id, &mut out)?;
+    build_flags_section(conn, session_id, &mut out)?;
 
     if out.is_empty() {
         return Ok("## KB Status\nNo data recorded yet. The knowledge base is empty.\n".into());
@@ -277,6 +280,69 @@ fn build_vulns_section(
     Ok(())
 }
 
+fn build_credentials_section(
+    conn: &Connection,
+    session_id: &str,
+    out: &mut String,
+) -> Result<(), Error> {
+    let creds = kb::list_credentials(conn, session_id)?;
+    if creds.is_empty() {
+        return Ok(());
+    }
+    out.push_str("## Credentials\n");
+    for c in &creds {
+        let user = c["username"].as_str().unwrap_or("?");
+        let pass = c["password"].as_str().unwrap_or("");
+        let host = c["host"].as_str().unwrap_or("");
+        let source = c["source"].as_str().unwrap_or("");
+        let cred = if pass.is_empty() { user.to_string() } else { format!("{user}:{pass}") };
+        let host_part = if host.is_empty() { String::new() } else { format!(" @ {host}") };
+        let source_part = if source.is_empty() { String::new() } else { format!(" ({source})") };
+        out.push_str(&format!("{cred}{host_part}{source_part}\n"));
+    }
+    Ok(())
+}
+
+fn build_access_section(
+    conn: &Connection,
+    session_id: &str,
+    out: &mut String,
+) -> Result<(), Error> {
+    let access = kb::list_access(conn, session_id)?;
+    if access.is_empty() {
+        return Ok(());
+    }
+    out.push_str("## Access\n");
+    for a in &access {
+        let user = a["user"].as_str().unwrap_or("?");
+        let host = a["host"].as_str().unwrap_or("?");
+        let level = a["level"].as_str().unwrap_or("?");
+        let method = a["method"].as_str().unwrap_or("");
+        let method_part = if method.is_empty() { String::new() } else { format!(" method={method}") };
+        out.push_str(&format!("{user}@{host} level={level}{method_part}\n"));
+    }
+    Ok(())
+}
+
+fn build_flags_section(
+    conn: &Connection,
+    session_id: &str,
+    out: &mut String,
+) -> Result<(), Error> {
+    let flags = kb::list_flags(conn, session_id)?;
+    if flags.is_empty() {
+        return Ok(());
+    }
+    out.push_str("## Flags\n");
+    for f in &flags {
+        let value = f["value"].as_str().unwrap_or("?");
+        let source = f["source"].as_str().unwrap_or("");
+        let source_part = if source.is_empty() { String::new() } else { format!(" ({source})") };
+        out.push_str(&format!("{value}{source_part}\n"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +495,38 @@ mod tests {
         let limits = BriefingLimits::default();
         let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
         assert!(result.contains("... +"), "missing overflow hint");
+    }
+
+    #[test]
+    fn briefing_creds_access_flags() {
+        let conn = setup();
+        insert_host(&conn, "10.10.10.1");
+        conn.execute(
+            "INSERT INTO credentials (session_id, username, password, host, source) VALUES ('s1', 'admin', 'admin123', '10.10.10.1', 'hydra')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO access_levels (session_id, host, user, level, method) VALUES ('s1', '10.10.10.1', 'admin', 'user', 'ssh')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO flags (session_id, value, source) VALUES ('s1', 'HTB{abc123}', '/root/root.txt')",
+            [],
+        ).unwrap();
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("## Credentials"), "missing credentials header");
+        assert!(result.contains("admin:admin123"), "missing cred");
+        assert!(result.contains("10.10.10.1"), "missing host in cred");
+        assert!(result.contains("hydra"), "missing source");
+        assert!(result.contains("## Access"), "missing access header");
+        assert!(result.contains("admin@10.10.10.1"), "missing access entry");
+        assert!(result.contains("level=user"), "missing level");
+        assert!(result.contains("method=ssh"), "missing method");
+        assert!(result.contains("## Flags"), "missing flags header");
+        assert!(result.contains("HTB{abc123}"), "missing flag value");
+        assert!(result.contains("/root/root.txt"), "missing flag source");
     }
 
     #[test]

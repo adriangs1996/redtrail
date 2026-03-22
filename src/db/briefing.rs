@@ -1,7 +1,8 @@
 use crate::db::{hypothesis, kb};
 use crate::error::Error;
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 const MAX_BRIEFING_CHARS: usize = 8000;
 
@@ -67,6 +68,8 @@ pub fn build_briefing_with_limits(
     build_flags_section(conn, session_id, &mut out)?;
     build_hypotheses_section(conn, session_id, limits, &mut out)?;
     build_orphan_evidence_section(conn, session_id, &mut out)?;
+    build_notes_section(conn, session_id, limits, &mut out)?;
+    build_commands_section(conn, session_id, limits, &mut out)?;
 
     if out.is_empty() {
         return Ok("## KB Status\nNo data recorded yet. The knowledge base is empty.\n".into());
@@ -342,6 +345,111 @@ fn build_flags_section(
         let source_part = if source.is_empty() { String::new() } else { format!(" ({source})") };
         out.push_str(&format!("{value}{source_part}\n"));
     }
+    Ok(())
+}
+
+static RE_IP: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b").unwrap()
+});
+static RE_WORDLIST: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(-[wP]|--wordlist)\s+\S+").unwrap()
+});
+static RE_OUTPUT: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(-o|--output)\s+\S+").unwrap()
+});
+
+fn normalize_command(cmd: &str) -> String {
+    let s = RE_WORDLIST.replace_all(cmd, "");
+    let s = RE_OUTPUT.replace_all(&s, "");
+    RE_IP.replace_all(&s, "<IP>").to_string()
+}
+
+fn build_notes_section(
+    conn: &Connection,
+    session_id: &str,
+    limits: &BriefingLimits,
+    out: &mut String,
+) -> Result<(), Error> {
+    let mut stmt = conn.prepare(
+        "SELECT text FROM notes WHERE session_id = ?1 ORDER BY created_at DESC LIMIT ?2"
+    ).map_err(|e| Error::Db(e.to_string()))?;
+    let notes: Vec<String> = stmt
+        .query_map(params![session_id, limits.max_notes as i64], |r| r.get(0))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    if notes.is_empty() {
+        return Ok(());
+    }
+
+    out.push_str(&format!("## Notes (last {})\n", notes.len()));
+    for text in &notes {
+        out.push_str(text);
+        out.push('\n');
+    }
+
+    Ok(())
+}
+
+fn build_commands_section(
+    conn: &Connection,
+    session_id: &str,
+    limits: &BriefingLimits,
+    out: &mut String,
+) -> Result<(), Error> {
+    let cmds = kb::list_history(conn, session_id, limits.max_commands * 3)?;
+    if cmds.is_empty() {
+        return Ok(());
+    }
+
+    let mut groups: Vec<(String, Vec<String>, Vec<i64>)> = Vec::new();
+    for c in &cmds {
+        let raw = c["command"].as_str().unwrap_or("");
+        let exit_code = c["exit_code"].as_i64().unwrap_or(0);
+        let normalized = normalize_command(raw);
+        let target = RE_IP.find(raw).map(|m| m.as_str().to_string()).unwrap_or_default();
+
+        if let Some(g) = groups.iter_mut().find(|(tmpl, _, _)| *tmpl == normalized) {
+            if !target.is_empty() && !g.1.contains(&target) {
+                g.1.push(target);
+            }
+            if !g.2.contains(&exit_code) {
+                g.2.push(exit_code);
+            }
+        } else {
+            let targets = if target.is_empty() { vec![] } else { vec![target] };
+            groups.push((normalized, targets, vec![exit_code]));
+        }
+    }
+
+    out.push_str("## Recent Commands\n");
+    let shown = groups.len().min(limits.max_commands);
+    for (tmpl, targets, exits) in &groups[..shown] {
+        let count = cmds.iter().filter(|c| normalize_command(c["command"].as_str().unwrap_or("")) == *tmpl).count();
+        let display = if tmpl.len() > 120 { &tmpl[..120] } else { tmpl };
+
+        let mut line = display.to_string();
+        if count > 1 {
+            let target_str = if targets.is_empty() {
+                String::new()
+            } else {
+                let short: Vec<&str> = targets.iter().map(|t| {
+                    t.rsplit('.').next().unwrap_or(t)
+                }).collect();
+                format!(", targets: {}", short.join(", "))
+            };
+            line = format!("{display} (\u{00d7}{count}{target_str})");
+        }
+
+        let exit_str: Vec<String> = exits.iter().map(|e| e.to_string()).collect();
+        out.push_str(&format!("{line} [exit={}]\n", exit_str.join(",")));
+    }
+
+    if groups.len() > shown {
+        out.push_str(&format!("... +{} more\n", groups.len() - shown));
+    }
+
     Ok(())
 }
 
@@ -705,5 +813,63 @@ mod tests {
         let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
         assert!(result.contains("## Unlinked Evidence"), "missing orphan evidence header");
         assert!(result.contains("Anonymous FTP login successful"), "missing orphan finding");
+    }
+
+    fn insert_note(conn: &Connection, text: &str) {
+        conn.execute(
+            "INSERT INTO notes (session_id, text) VALUES ('s1', ?1)",
+            [text],
+        ).unwrap();
+    }
+
+    fn insert_command(conn: &Connection, command: &str, exit_code: i64) {
+        conn.execute(
+            "INSERT INTO command_history (session_id, command, exit_code) VALUES ('s1', ?1, ?2)",
+            rusqlite::params![command, exit_code],
+        ).unwrap();
+    }
+
+    #[test]
+    fn briefing_notes_ordering() {
+        let conn = setup();
+        conn.execute("INSERT INTO notes (session_id, text, created_at) VALUES ('s1', 'first note', '2025-01-01 00:00:01')", []).unwrap();
+        conn.execute("INSERT INTO notes (session_id, text, created_at) VALUES ('s1', 'second note', '2025-01-01 00:00:02')", []).unwrap();
+        conn.execute("INSERT INTO notes (session_id, text, created_at) VALUES ('s1', 'third note', '2025-01-01 00:00:03')", []).unwrap();
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("## Notes"), "missing notes header");
+        let third_pos = result.find("third").expect("missing third");
+        let first_pos = result.find("first").expect("missing first");
+        assert!(third_pos < first_pos, "third note should appear before first (most recent first)");
+    }
+
+    #[test]
+    fn briefing_commands_dedup() {
+        let conn = setup();
+        insert_command(&conn, "nmap -sV 10.10.10.1", 0);
+        insert_command(&conn, "nmap -sV 10.10.10.2", 0);
+        insert_command(&conn, "gobuster dir -u http://10.10.10.1", 0);
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("## Recent Commands"), "missing commands header");
+        assert!(result.contains("nmap"), "missing nmap");
+        assert!(result.contains("gobuster"), "missing gobuster");
+    }
+
+    #[test]
+    fn briefing_commands_normalization() {
+        let conn = setup();
+        insert_command(&conn, "nmap -sV 10.10.10.1", 0);
+        insert_command(&conn, "nmap -sV 10.10.10.2", 0);
+        insert_command(&conn, "nmap -sV 10.10.10.3", 0);
+
+        let limits = BriefingLimits::default();
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(
+            result.contains("\u{00d7}3") || result.contains("×3"),
+            "missing count indicator for 3 deduped nmap commands: {result}"
+        );
     }
 }

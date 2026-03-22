@@ -1,9 +1,8 @@
 use crate::agent;
 use crate::agent::assistant;
-use crate::config::Config;
 use crate::db;
 use crate::error::Error;
-use crate::workspace;
+use crate::resolve;
 use std::sync::{Arc, Mutex};
 
 pub fn run(
@@ -15,13 +14,9 @@ pub fn run(
     no_skill: bool,
 ) -> Result<(), Error> {
     let cwd = std::env::current_dir()?;
-    let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db_path = workspace::db_path(&ws);
-    let db_path_str = db_path
-        .to_str()
-        .ok_or(Error::Config("invalid db path".into()))?;
-    let conn = db::open_connection(db_path_str)?;
-    let session_id = db::session::active_session_id(&conn)?;
+    let ctx = resolve::resolve(&cwd)?;
+    let session_id = ctx.session_id.clone();
+    let conn = ctx.conn;
 
     if clear {
         let deleted = db::chat::clear(&conn, &session_id)?;
@@ -30,7 +25,7 @@ pub fn run(
     }
 
     let message = message.ok_or(Error::Config("no message provided".into()))?;
-    let mut config = Config::resolved(&ws)?;
+    let mut config = ctx.config.clone();
     if let Some(m) = model_override {
         config.general.llm_model = m.to_string();
     }
@@ -92,6 +87,8 @@ where
 {
     let response = agent.run(prompt).await
         .map_err(|e| Error::Config(format!("agent: {e}")))?;
+
+    crate::agent::tools::status_clear();
 
     let mut collected = String::new();
 

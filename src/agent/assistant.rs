@@ -290,7 +290,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         conn.execute_batch(db::SCHEMA).unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, name, target, scope, goal) VALUES ('s1', 'test', '10.10.10.1', '10.10.10.0/24', 'ctf')",
+            "INSERT INTO sessions (id, name, workspace_path, target, scope, goal) VALUES ('s1', 'test', '/tmp/test', '10.10.10.1', '10.10.10.0/24', 'ctf')",
             [],
         ).unwrap();
         Arc::new(Mutex::new(conn))

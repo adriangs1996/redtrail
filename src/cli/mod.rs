@@ -19,7 +19,6 @@ pub mod status;
 
 use crate::db::SessionOps;
 use crate::error::Error;
-use crate::workspace;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -191,12 +190,23 @@ fn resolve_session() -> Result<
     ),
     Error,
 > {
+    let ctx = crate::resolve::resolve_global()?;
     let cwd = std::env::current_dir()?;
-    let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db_path = workspace::db_path(&ws);
-    let db = crate::db::open(db_path.to_str().unwrap())?;
-    let session_id = db.active_session_id()?;
-    Ok((db, session_id))
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+
+    let mut dir = cwd.clone();
+    loop {
+        if let Some((session_id, _ws_path)) = ctx.find_session(&dir)? {
+            let db_path = crate::resolve::global_db_path()?;
+            let db = crate::db::open(db_path.to_str().unwrap())?;
+            let _ = db.active_session_id(&dir.to_string_lossy())?;
+            return Ok((db, session_id));
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    Err(Error::NoActiveSession)
 }
 
 const KNOWN_SUBCOMMANDS: &[&str] = &[
@@ -271,8 +281,8 @@ pub fn run() -> Result<(), Error> {
             evidence::run(&db, &sid, command)
         }
         Some(Commands::Session { command }) => {
-            let (db, sid) = resolve_session()?;
-            session::run(&db, &sid, command)
+            let ctx = crate::resolve::resolve_global()?;
+            session::run_with_conn(&ctx.conn, command)
         }
         Some(Commands::Scope { command }) => {
             let (db, sid) = resolve_session()?;
@@ -285,12 +295,12 @@ pub fn run() -> Result<(), Error> {
             Some(setup::SetupCommands::Aliases(args)) => setup::run_aliases(args),
         },
         Some(Commands::Ingest { file, tool }) => {
-            let (db, sid) = resolve_session()?;
             let cwd = std::env::current_dir()?;
-            let auto_extract = workspace::find_workspace(&cwd)
-                .and_then(|ws| crate::config::Config::resolved(&ws).ok())
-                .map(|c| c.general.auto_extract)
-                .unwrap_or(true);
+            let ctx = crate::resolve::resolve(&cwd)?;
+            let auto_extract = ctx.config.general.auto_extract;
+            let sid = ctx.session_id.clone();
+            let db_path = crate::resolve::global_db_path()?;
+            let db = crate::db::open(db_path.to_str().unwrap())?;
             ingest::run(&db, &sid, &file, tool, auto_extract)
         }
         Some(Commands::Report { command }) => {
@@ -299,8 +309,13 @@ pub fn run() -> Result<(), Error> {
         }
         Some(Commands::Pipeline { command }) => pipeline_cmd::run(command),
         Some(Commands::Env) => {
-            let (db, sid) = resolve_session()?;
-            env::run(&db, &sid)
+            let cwd = std::env::current_dir()?;
+            let ctx = crate::resolve::resolve(&cwd)?;
+            let config = ctx.config.clone();
+            let sid = ctx.session_id.clone();
+            let db_path = crate::resolve::global_db_path()?;
+            let db = crate::db::open(db_path.to_str().unwrap())?;
+            env::run(&db, &sid, &config)
         }
         Some(Commands::Deactivate) => env::deactivate(),
         Some(Commands::Skill { command }) => skill::run(command),

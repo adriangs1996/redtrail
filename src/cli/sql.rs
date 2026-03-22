@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::workspace;
+use crate::resolve;
 use rusqlite::Connection;
 
 pub fn run(sql: &str, json: bool) -> Result<(), Error> {
@@ -23,9 +23,7 @@ pub fn run_file(path: &str, json: bool) -> Result<(), Error> {
 }
 
 fn open_db() -> Result<Connection, Error> {
-    let cwd = std::env::current_dir()?;
-    let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db_path = workspace::db_path(&ws);
+    let db_path = resolve::global_db_path()?;
     crate::db::open_connection(db_path.to_str().unwrap())
 }
 

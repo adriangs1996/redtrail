@@ -87,6 +87,7 @@ mod tests {
             &conn,
             "s1",
             "test",
+            "/tmp/test",
             Some("10.10.10.1"),
             Some("10.10.10.0/24"),
             "general",

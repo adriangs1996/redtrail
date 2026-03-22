@@ -64,7 +64,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         conn.execute_batch(db::SCHEMA).unwrap();
-        db::session::create_session(&conn, "s1", "test", None, None, "general").unwrap();
+        db::session::create_session(&conn, "s1", "test", "/tmp/test", None, None, "general").unwrap();
         conn
     }
 

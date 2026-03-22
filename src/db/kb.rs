@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn test_list_hosts_empty() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general").unwrap();
         let hosts = db.list_hosts("s1").unwrap();
         assert!(hosts.is_empty());
     }
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn test_list_ports_empty() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general").unwrap();
         let ports = db.list_ports("s1", None).unwrap();
         assert!(ports.is_empty());
     }

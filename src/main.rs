@@ -7,7 +7,7 @@ mod net;
 mod pipeline;
 mod skill_loader;
 mod spawn;
-mod workspace;
+mod resolve;
 
 fn main() {
     if let Err(e) = cli::run() {

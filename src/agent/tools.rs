@@ -3,12 +3,23 @@ use regex::Regex;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::db::{commands, dispatcher};
 #[allow(unused_imports)]
 use super::ToolContext;
+
+fn status(msg: &str) {
+    eprint!("\r\x1b[2K\x1b[2m⟳ {msg}\x1b[0m");
+    std::io::stderr().flush().ok();
+}
+
+pub fn status_clear() {
+    eprint!("\r\x1b[2K");
+    std::io::stderr().flush().ok();
+}
 
 #[derive(Deserialize, JsonSchema)]
 pub struct QueryInput {
@@ -38,7 +49,7 @@ pub fn make_query_tool(ctx: Arc<ToolContext>) -> Tool {
         execute: ToolExecute::new(Box::new(move |params| {
             let input: QueryInput = serde_json::from_value(params)
                 .map_err(|e| format!("invalid input: {e}"))?;
-            eprintln!("\x1b[2m⟳ query: {}\x1b[0m", input.table);
+            status(&format!("query: {}", input.table));
             let conn = ctx.conn.lock()
                 .map_err(|e| format!("db lock: {e}"))?;
             let rows = dispatcher::query(&conn, &ctx.session_id, &input.table, &input.filters)
@@ -57,7 +68,7 @@ pub fn make_create_tool(ctx: Arc<ToolContext>) -> Tool {
         execute: ToolExecute::new(Box::new(move |params| {
             let input: CreateInput = serde_json::from_value(params)
                 .map_err(|e| format!("invalid input: {e}"))?;
-            eprintln!("\x1b[2m⟳ create: {}\x1b[0m", input.table);
+            status(&format!("create: {}", input.table));
             let conn = ctx.conn.lock()
                 .map_err(|e| format!("db lock: {e}"))?;
             let result = dispatcher::create(&conn, &ctx.session_id, &input.table, &input.data)
@@ -78,7 +89,7 @@ pub fn make_update_tool(ctx: Arc<ToolContext>) -> Tool {
         execute: ToolExecute::new(Box::new(move |params| {
             let input: UpdateInput = serde_json::from_value(params)
                 .map_err(|e| format!("invalid input: {e}"))?;
-            eprintln!("\x1b[2m⟳ update: {} id={}\x1b[0m", input.table, input.id);
+            status(&format!("update: {} id={}", input.table, input.id));
             let conn = ctx.conn.lock()
                 .map_err(|e| format!("db lock: {e}"))?;
             let result = dispatcher::update(&conn, &ctx.session_id, &input.table, input.id, &input.data)
@@ -162,9 +173,7 @@ pub fn make_run_command_tool(ctx: Arc<ToolContext>) -> Tool {
             let input: RunCommandInput = serde_json::from_value(params)
                 .map_err(|e| format!("invalid input: {e}"))?;
 
-            eprint!("\x1b[2m⟳ run: {}\x1b[0m", input.command);
-            use std::io::Write;
-            std::io::stderr().flush().ok();
+            status(&format!("run: {}", input.command));
 
             let cmd_id = {
                 let conn = ctx.conn.lock().map_err(|e| format!("db lock: {e}"))?;
@@ -193,9 +202,6 @@ pub fn make_run_command_tool(ctx: Arc<ToolContext>) -> Tool {
                     return Err(format!("command timed out after {}s", COMMAND_TIMEOUT.as_secs()));
                 }
             };
-
-            eprint!("\r\x1b[2K");
-            std::io::stderr().flush().ok();
 
             let elapsed = start.elapsed().as_millis() as i64;
             let exit_code = output.status.code().unwrap_or(-1);

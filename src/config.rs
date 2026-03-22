@@ -1,6 +1,6 @@
 use crate::error::Error;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 fn default_autonomy() -> String {
     "balanced".to_string()
@@ -173,134 +173,91 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load_global() -> Result<Self, Error> {
-        let path = dirs::home_dir()
-            .ok_or_else(|| Error::Config("cannot determine home directory".to_string()))?
-            .join(".redtrail/config.toml");
+    pub fn resolved(conn: &Connection, session_id: &str) -> Result<Self, Error> {
+        let mut cfg = Self::default();
 
-        if !path.exists() {
-            return Ok(Self::default());
+        let global = crate::db::config::get_global_config(conn)?;
+        for (key, value) in &global {
+            cfg.apply_key(key, value);
         }
 
-        let content = std::fs::read_to_string(&path)?;
-        toml::from_str(&content).map_err(|e| Error::Config(e.to_string()))
+        let session = crate::db::config::get_session_config(conn, session_id)?;
+        for (key, value) in &session {
+            cfg.apply_key(key, value);
+        }
+
+        Ok(cfg)
     }
 
-    pub fn load_workspace(workspace_path: &Path) -> Result<Option<String>, Error> {
-        let path = workspace_path.join(".redtrail/config.toml");
-        if !path.exists() {
-            return Ok(None);
+    pub fn resolved_global(conn: &Connection) -> Result<Self, Error> {
+        let mut cfg = Self::default();
+        let global = crate::db::config::get_global_config(conn)?;
+        for (key, value) in &global {
+            cfg.apply_key(key, value);
         }
-        Ok(Some(std::fs::read_to_string(&path)?))
+        Ok(cfg)
     }
 
-    pub fn merge_workspace(mut self, ws_toml: &str) -> Result<Self, Error> {
-        let ws_val: toml::Value =
-            toml::from_str(ws_toml).map_err(|e| Error::Config(e.to_string()))?;
-
-        let ws_table = match &ws_val {
-            toml::Value::Table(t) => t,
-            _ => {
-                return Err(Error::Config(
-                    "workspace config must be a TOML table".to_string(),
-                ));
+    pub fn apply_key(&mut self, key: &str, value: &str) {
+        match key {
+            "general.autonomy" => self.general.autonomy = value.to_string(),
+            "general.auto_extract" => {
+                self.general.auto_extract = value.parse().unwrap_or(self.general.auto_extract)
             }
-        };
-
-        if let Some(toml::Value::Table(g)) = ws_table.get("general") {
-            if let Some(v) = g.get("autonomy")
-                && let Some(s) = v.as_str()
-            {
-                self.general.autonomy = s.to_string();
+            "general.llm_provider" => self.general.llm_provider = value.to_string(),
+            "general.llm_model" => self.general.llm_model = value.to_string(),
+            "noise.threshold" => {
+                self.noise.threshold = value.parse().unwrap_or(self.noise.threshold)
             }
-            if let Some(v) = g.get("auto_extract")
-                && let Some(b) = v.as_bool()
-            {
-                self.general.auto_extract = b;
+            "noise.filter_duplicates" => {
+                self.noise.filter_duplicates =
+                    value.parse().unwrap_or(self.noise.filter_duplicates)
             }
-            if let Some(v) = g.get("llm_provider")
-                && let Some(s) = v.as_str()
-            {
-                self.general.llm_provider = s.to_string();
+            "flags.patterns" => {
+                if let Ok(v) = serde_json::from_str::<Vec<String>>(value) {
+                    self.flags.patterns = v;
+                }
             }
-            if let Some(v) = g.get("llm_model")
-                && let Some(s) = v.as_str()
-            {
-                self.general.llm_model = s.to_string();
+            "flags.auto_capture" => {
+                self.flags.auto_capture = value.parse().unwrap_or(self.flags.auto_capture)
             }
+            "tools.aliases" => {
+                if let Ok(v) = serde_json::from_str::<Vec<String>>(value) {
+                    self.tools.aliases = v;
+                }
+            }
+            "scope.strict" => self.scope.strict = value.parse().unwrap_or(self.scope.strict),
+            "scope.allowed_hosts" => {
+                if let Ok(v) = serde_json::from_str::<Vec<String>>(value) {
+                    self.scope.allowed_hosts = v;
+                }
+            }
+            "session.max_sessions" => {
+                self.session.max_sessions = value.parse().unwrap_or(self.session.max_sessions)
+            }
+            "session.auto_save" => {
+                self.session.auto_save = value.parse().unwrap_or(self.session.auto_save)
+            }
+            _ => {}
         }
-
-        if let Some(toml::Value::Table(s)) = ws_table.get("scope") {
-            if let Some(v) = s.get("strict")
-                && let Some(b) = v.as_bool()
-            {
-                self.scope.strict = b;
-            }
-            if let Some(toml::Value::Array(hosts)) = s.get("allowed_hosts") {
-                self.scope.allowed_hosts = hosts
-                    .iter()
-                    .filter_map(|h| h.as_str().map(String::from))
-                    .collect();
-            }
-        }
-
-        if let Some(toml::Value::Table(n)) = ws_table.get("noise") {
-            if let Some(v) = n.get("threshold")
-                && let Some(i) = v.as_integer()
-            {
-                self.noise.threshold = i as u8;
-            }
-            if let Some(v) = n.get("filter_duplicates")
-                && let Some(b) = v.as_bool()
-            {
-                self.noise.filter_duplicates = b;
-            }
-        }
-
-        if let Some(toml::Value::Table(f)) = ws_table.get("flags") {
-            if let Some(toml::Value::Array(patterns)) = f.get("patterns") {
-                self.flags.patterns = patterns
-                    .iter()
-                    .filter_map(|p| p.as_str().map(String::from))
-                    .collect();
-            }
-            if let Some(v) = f.get("auto_capture")
-                && let Some(b) = v.as_bool()
-            {
-                self.flags.auto_capture = b;
-            }
-        }
-
-        if let Some(toml::Value::Table(t)) = ws_table.get("tools")
-            && let Some(toml::Value::Array(aliases)) = t.get("aliases")
-        {
-            self.tools.aliases = aliases
-                .iter()
-                .filter_map(|a| a.as_str().map(String::from))
-                .collect();
-        }
-
-        if let Some(toml::Value::Table(s)) = ws_table.get("session") {
-            if let Some(v) = s.get("max_sessions")
-                && let Some(i) = v.as_integer()
-            {
-                self.session.max_sessions = i as u32;
-            }
-            if let Some(v) = s.get("auto_save")
-                && let Some(b) = v.as_bool()
-            {
-                self.session.auto_save = b;
-            }
-        }
-
-        Ok(self)
     }
 
-    pub fn resolved(workspace_dir: &Path) -> Result<Self, Error> {
-        let global = Self::load_global()?;
-        match Self::load_workspace(workspace_dir)? {
-            Some(ws_toml) => global.merge_workspace(&ws_toml),
-            None => Ok(global),
+    pub fn get_key(&self, key: &str) -> Option<String> {
+        match key {
+            "general.autonomy" => Some(self.general.autonomy.clone()),
+            "general.auto_extract" => Some(self.general.auto_extract.to_string()),
+            "general.llm_provider" => Some(self.general.llm_provider.clone()),
+            "general.llm_model" => Some(self.general.llm_model.clone()),
+            "noise.threshold" => Some(self.noise.threshold.to_string()),
+            "noise.filter_duplicates" => Some(self.noise.filter_duplicates.to_string()),
+            "flags.patterns" => serde_json::to_string(&self.flags.patterns).ok(),
+            "flags.auto_capture" => Some(self.flags.auto_capture.to_string()),
+            "tools.aliases" => serde_json::to_string(&self.tools.aliases).ok(),
+            "scope.strict" => Some(self.scope.strict.to_string()),
+            "scope.allowed_hosts" => serde_json::to_string(&self.scope.allowed_hosts).ok(),
+            "session.max_sessions" => Some(self.session.max_sessions.to_string()),
+            "session.auto_save" => Some(self.session.auto_save.to_string()),
+            _ => None,
         }
     }
 }
@@ -309,46 +266,25 @@ impl Config {
 mod tests {
     use super::*;
 
+    fn test_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(crate::db::SCHEMA).unwrap();
+        conn
+    }
+
+    fn insert_session(conn: &Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO sessions (id, name, workspace_path, target, scope, goal) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, "test", "/tmp/test", "", "", "general"],
+        ).unwrap();
+    }
+
     #[test]
     fn test_default_config() {
         let cfg = Config::default();
         assert_eq!(cfg.general.autonomy, "balanced");
         assert!(cfg.tools.aliases.contains(&"nmap".to_string()));
-    }
-
-    #[test]
-    fn test_merge_workspace_overrides_tools() {
-        let global = Config::default();
-        let ws_toml = r#"
-[tools]
-aliases = ["nmap", "curl"]
-"#;
-        let merged = global.merge_workspace(ws_toml).unwrap();
-        assert_eq!(merged.tools.aliases, vec!["nmap", "curl"]);
-    }
-
-    #[test]
-    fn test_merge_workspace_preserves_unset_fields() {
-        let global = Config::default();
-        let ws_toml = r#"
-[scope]
-strict = true
-"#;
-        let merged = global.merge_workspace(ws_toml).unwrap();
-        assert!(merged.scope.strict);
-        assert_eq!(merged.general.autonomy, "balanced");
-    }
-
-    #[test]
-    fn test_merge_can_override_back_to_default() {
-        let mut global = Config::default();
-        global.general.autonomy = "autonomous".to_string();
-        let ws_toml = r#"
-[general]
-autonomy = "balanced"
-"#;
-        let merged = global.merge_workspace(ws_toml).unwrap();
-        assert_eq!(merged.general.autonomy, "balanced");
     }
 
     #[test]
@@ -359,15 +295,117 @@ autonomy = "balanced"
     }
 
     #[test]
-    fn test_merge_workspace_overrides_llm_fields() {
-        let global = Config::default();
-        let ws_toml = r#"
-[general]
-llm_provider = "ollama"
-llm_model = "llama3"
-"#;
-        let merged = global.merge_workspace(ws_toml).unwrap();
-        assert_eq!(merged.general.llm_provider, "ollama");
-        assert_eq!(merged.general.llm_model, "llama3");
+    fn test_resolved_defaults_only() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert_eq!(cfg.general.autonomy, "balanced");
+        assert_eq!(cfg.noise.threshold, 5);
+        assert!(cfg.general.auto_extract);
+    }
+
+    #[test]
+    fn test_resolved_global_overrides_defaults() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        crate::db::config::set_global_config(&conn, "general.autonomy", "cautious").unwrap();
+        crate::db::config::set_global_config(&conn, "noise.threshold", "3").unwrap();
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert_eq!(cfg.general.autonomy, "cautious");
+        assert_eq!(cfg.noise.threshold, 3);
+    }
+
+    #[test]
+    fn test_resolved_session_overrides_global() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        crate::db::config::set_global_config(&conn, "general.autonomy", "cautious").unwrap();
+        crate::db::config::set_session_config(&conn, "s1", "general.autonomy", "autonomous")
+            .unwrap();
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert_eq!(cfg.general.autonomy, "autonomous");
+    }
+
+    #[test]
+    fn test_resolved_bool_parsing() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        crate::db::config::set_global_config(&conn, "general.auto_extract", "false").unwrap();
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert!(!cfg.general.auto_extract);
+    }
+
+    #[test]
+    fn test_resolved_json_array_parsing() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        crate::db::config::set_session_config(
+            &conn,
+            "s1",
+            "tools.aliases",
+            r#"["nmap","curl"]"#,
+        )
+        .unwrap();
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert_eq!(cfg.tools.aliases, vec!["nmap", "curl"]);
+    }
+
+    #[test]
+    fn test_resolved_unknown_key_ignored() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        crate::db::config::set_global_config(&conn, "unknown.key", "whatever").unwrap();
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert_eq!(cfg.general.autonomy, "balanced");
+    }
+
+    #[test]
+    fn test_get_key() {
+        let cfg = Config::default();
+        assert_eq!(cfg.get_key("general.autonomy"), Some("balanced".to_string()));
+        assert_eq!(cfg.get_key("noise.threshold"), Some("5".to_string()));
+        assert!(cfg.get_key("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_apply_key_string() {
+        let mut cfg = Config::default();
+        cfg.apply_key("general.llm_model", "llama3");
+        assert_eq!(cfg.general.llm_model, "llama3");
+    }
+
+    #[test]
+    fn test_apply_key_bool() {
+        let mut cfg = Config::default();
+        cfg.apply_key("scope.strict", "true");
+        assert!(cfg.scope.strict);
+    }
+
+    #[test]
+    fn test_apply_key_json_array() {
+        let mut cfg = Config::default();
+        cfg.apply_key("scope.allowed_hosts", r#"["10.0.0.1","10.0.0.2"]"#);
+        assert_eq!(
+            cfg.scope.allowed_hosts,
+            vec!["10.0.0.1".to_string(), "10.0.0.2".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_resolved_global_only() {
+        let conn = test_conn();
+        crate::db::config::set_global_config(&conn, "general.autonomy", "cautious").unwrap();
+        let cfg = Config::resolved_global(&conn).unwrap();
+        assert_eq!(cfg.general.autonomy, "cautious");
+        assert_eq!(cfg.noise.threshold, 5);
+    }
+
+    #[test]
+    fn test_set_get_roundtrip() {
+        let conn = test_conn();
+        insert_session(&conn, "s1");
+        crate::db::config::set_session_config(&conn, "s1", "general.llm_model", "gpt-4").unwrap();
+        let cfg = Config::resolved(&conn, "s1").unwrap();
+        assert_eq!(cfg.get_key("general.llm_model"), Some("gpt-4".to_string()));
     }
 }

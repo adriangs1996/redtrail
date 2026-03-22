@@ -202,7 +202,7 @@ mod tests {
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(crate::db::SCHEMA).unwrap();
-        conn.execute("INSERT INTO sessions (id, name) VALUES ('s1', 'test')", [])
+        conn.execute("INSERT INTO sessions (id, name, workspace_path) VALUES ('s1', 'test', '/tmp/test')", [])
             .unwrap();
         conn
     }

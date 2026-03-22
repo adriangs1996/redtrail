@@ -492,7 +492,7 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         conn.execute_batch(db::SCHEMA).unwrap();
         conn.execute(
-            "INSERT INTO sessions (id, name) VALUES ('s1', 'test')",
+            "INSERT INTO sessions (id, name, workspace_path) VALUES ('s1', 'test', '/tmp/test')",
             [],
         ).unwrap();
         conn
@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn create_evidence_validates_hypothesis_session() {
         let conn = setup();
-        conn.execute("INSERT INTO sessions (id, name) VALUES ('s2', 'other')", []).unwrap();
+        conn.execute("INSERT INTO sessions (id, name, workspace_path, active) VALUES ('s2', 'other', '/tmp/other', 0)", []).unwrap();
         conn.execute("INSERT INTO hypotheses (session_id, statement, category) VALUES ('s2', 'test', 'auth')", []).unwrap();
         let hyp_id: i64 = conn.query_row("SELECT id FROM hypotheses WHERE session_id='s2'", [], |r| r.get(0)).unwrap();
         let data = map(&[("hypothesis_id", serde_json::json!(hyp_id)), ("finding", serde_json::json!("found")), ("severity", serde_json::json!("info"))]);
@@ -880,7 +880,7 @@ mod tests {
     #[test]
     fn query_filters_by_session() {
         let conn = setup();
-        conn.execute("INSERT INTO sessions (id, name) VALUES ('s2', 'other')", []).unwrap();
+        conn.execute("INSERT INTO sessions (id, name, workspace_path, active) VALUES ('s2', 'other', '/tmp/other', 0)", []).unwrap();
         create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
         create(&conn, "s2", "hosts", &map(&[("ip", serde_json::json!("10.10.10.2"))])).unwrap();
         let rows = query(&conn, "s1", "hosts", &HashMap::new()).unwrap();
@@ -1051,7 +1051,7 @@ mod tests {
     #[test]
     fn update_wrong_session_returns_not_updated() {
         let conn = setup();
-        conn.execute("INSERT INTO sessions (id, name) VALUES ('s2', 'other')", []).unwrap();
+        conn.execute("INSERT INTO sessions (id, name, workspace_path, active) VALUES ('s2', 'other', '/tmp/other', 0)", []).unwrap();
         let r = create(&conn, "s1", "hosts", &map(&[("ip", serde_json::json!("10.10.10.1"))])).unwrap();
         let ur = update(&conn, "s2", "hosts", r.id, &map(&[("os", serde_json::json!("Linux"))])).unwrap();
         assert!(!ur.updated);

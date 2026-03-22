@@ -1,5 +1,6 @@
 pub mod chat;
 pub mod commands;
+pub mod config;
 pub mod dispatcher;
 pub mod hypothesis;
 pub mod kb;
@@ -12,16 +13,33 @@ use rusqlite::Connection;
 pub(crate) const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    name TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    workspace_path TEXT NOT NULL,
+    active INTEGER DEFAULT 1,
     target TEXT,
     scope TEXT,
     goal TEXT DEFAULT 'general',
     goal_meta TEXT DEFAULT '{}',
     phase TEXT DEFAULT 'L0',
     noise_budget REAL DEFAULT 1.0,
-    autonomy TEXT DEFAULT 'balanced',
     created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(name, workspace_path)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_per_workspace
+    ON sessions(workspace_path) WHERE active = 1;
+
+CREATE TABLE IF NOT EXISTS global_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS session_config (
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (session_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS hosts (
@@ -217,16 +235,20 @@ pub trait CommandLog {
     ) -> Result<(), Error>;
 }
 
+#[allow(dead_code)]
 pub trait SessionOps {
-    fn active_session_id(&self) -> Result<String, Error>;
+    fn active_session_id(&self, workspace_path: &str) -> Result<String, Error>;
     fn create_session(
         &self,
         id: &str,
         name: &str,
+        workspace_path: &str,
         target: Option<&str>,
         scope: Option<&str>,
         goal: &str,
     ) -> Result<(), Error>;
+    fn deactivate_session(&self, workspace_path: &str) -> Result<(), Error>;
+    fn activate_session(&self, session_id: &str) -> Result<(), Error>;
     fn get_session(&self, session_id: &str) -> Result<serde_json::Value, Error>;
     fn load_scope(&self, session_id: &str) -> Result<Option<String>, Error>;
     fn status_summary(&self, session_id: &str) -> Result<serde_json::Value, Error>;
@@ -373,18 +395,25 @@ impl CommandLog for SqliteDb {
 }
 
 impl SessionOps for SqliteDb {
-    fn active_session_id(&self) -> Result<String, Error> {
-        session::active_session_id(&self.conn)
+    fn active_session_id(&self, workspace_path: &str) -> Result<String, Error> {
+        session::active_session_id(&self.conn, workspace_path)
     }
     fn create_session(
         &self,
         id: &str,
         name: &str,
+        workspace_path: &str,
         target: Option<&str>,
         scope: Option<&str>,
         goal: &str,
     ) -> Result<(), Error> {
-        session::create_session(&self.conn, id, name, target, scope, goal)
+        session::create_session(&self.conn, id, name, workspace_path, target, scope, goal)
+    }
+    fn deactivate_session(&self, workspace_path: &str) -> Result<(), Error> {
+        session::deactivate_session(&self.conn, workspace_path)
+    }
+    fn activate_session(&self, session_id: &str) -> Result<(), Error> {
+        session::activate_session(&self.conn, session_id)
     }
     fn get_session(&self, session_id: &str) -> Result<serde_json::Value, Error> {
         session::get_session(&self.conn, session_id)
@@ -404,16 +433,16 @@ mod tests {
     #[test]
     fn test_open_creates_schema() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general")
+        db.create_session("s1", "test", "/tmp/test", None, None, "general")
             .unwrap();
-        let id = db.active_session_id().unwrap();
+        let id = db.active_session_id("/tmp/test").unwrap();
         assert_eq!(id, "s1");
     }
 
     #[test]
     fn test_knowledge_base_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", Some("10.10.10.1"), None, "general")
+        db.create_session("s1", "test", "/tmp/test", Some("10.10.10.1"), None, "general")
             .unwrap();
         let hosts = db.list_hosts("s1").unwrap();
         assert!(hosts.is_empty());
@@ -422,7 +451,7 @@ mod tests {
     #[test]
     fn test_command_log_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general")
+        db.create_session("s1", "test", "/tmp/test", None, None, "general")
             .unwrap();
         let id = db
             .insert_command("s1", "nmap 10.10.10.1", Some("nmap"))
@@ -434,7 +463,7 @@ mod tests {
     #[test]
     fn test_hypotheses_list_via_factory() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general")
+        db.create_session("s1", "test", "/tmp/test", None, None, "general")
             .unwrap();
         let rows = db.list_hypotheses("s1", None).unwrap();
         assert!(rows.is_empty());
@@ -446,14 +475,35 @@ mod tests {
         db.create_session(
             "s1",
             "test",
+            "/tmp/test",
             Some("10.10.10.1"),
             Some("10.10.10.0/24"),
             "general",
         )
         .unwrap();
-        let id = db.active_session_id().unwrap();
+        let id = db.active_session_id("/tmp/test").unwrap();
         assert_eq!(id, "s1");
         let scope = db.load_scope("s1").unwrap();
         assert_eq!(scope.as_deref(), Some("10.10.10.0/24"));
+    }
+
+    #[test]
+    fn test_deactivate_session() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general")
+            .unwrap();
+        db.deactivate_session("/tmp/test").unwrap();
+        assert!(db.active_session_id("/tmp/test").is_err());
+    }
+
+    #[test]
+    fn test_activate_session() {
+        let db = open_in_memory().unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general")
+            .unwrap();
+        db.deactivate_session("/tmp/test").unwrap();
+        db.activate_session("s1").unwrap();
+        let id = db.active_session_id("/tmp/test").unwrap();
+        assert_eq!(id, "s1");
     }
 }

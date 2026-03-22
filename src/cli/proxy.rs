@@ -1,6 +1,5 @@
-use crate::db;
 use crate::error::Error;
-use crate::workspace;
+use crate::resolve;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::time::Instant;
@@ -14,7 +13,6 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     let tool = args.first().map(|s| s.as_str());
 
     let cwd = std::env::current_dir()?;
-    let ws = workspace::find_workspace(&cwd);
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -67,30 +65,28 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     let duration_ms = start.elapsed().as_millis() as i64;
     let output_str = String::from_utf8_lossy(&output).to_string();
 
-    if let Some(ws) = ws {
-        let db_path = workspace::db_path(&ws);
-        if let Ok(conn) = db::open_connection(db_path.to_str().unwrap())
-            && let Ok(session_id) = db::session::active_session_id(&conn)
-            && let Ok(result) = crate::pipeline::process_command(
-                &conn,
-                &session_id,
-                &cmd_str,
-                exit_code,
-                duration_ms,
-                &output_str,
-                tool,
-            )
-        {
+    if let Ok(ctx) = resolve::resolve(&cwd) {
+        let config = ctx.config.clone();
+        let conn = ctx.conn;
+        let session_id = ctx.session_id;
+        if let Ok(result) = crate::pipeline::process_command(
+            &conn,
+            &session_id,
+            &cmd_str,
+            exit_code,
+            duration_ms,
+            &output_str,
+            tool,
+        ) {
             for flag in &result.flags_found {
                 eprintln!("[rt] flag captured: {flag}");
             }
             for warn in &result.scope_warnings {
                 eprintln!("[rt] warning: {warn}");
             }
-            if let Ok(config) = crate::config::Config::resolved(&ws)
-                && config.general.auto_extract {
-                    crate::spawn::spawn_extraction(result.command_id);
-                }
+            if config.general.auto_extract {
+                crate::spawn::spawn_extraction(result.command_id);
+            }
         }
     }
 

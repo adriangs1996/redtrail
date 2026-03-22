@@ -1,24 +1,17 @@
 use crate::agent;
 use crate::agent::strategist::{self, AdviseInput, collect_suggestions};
-use crate::config::Config;
-use crate::db;
 use crate::error::Error;
-use crate::workspace;
+use crate::resolve;
 use std::sync::{Arc, Mutex};
 
 pub fn run(question: &str) -> Result<(), Error> {
     let cwd = std::env::current_dir()?;
-    let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db_path = workspace::db_path(&ws);
-    let db_path_str = db_path
-        .to_str()
-        .ok_or(Error::Config("invalid db path".into()))?;
-    let conn = db::open_connection(db_path_str)?;
-    let session_id = db::session::active_session_id(&conn)?;
-    let config = Config::resolved(&ws)?;
+    let ctx = resolve::resolve(&cwd)?;
+    let session_id = ctx.session_id.clone();
+    let config = ctx.config.clone();
 
     let model = agent::create_model(&config)?;
-    let conn_arc = Arc::new(Mutex::new(conn));
+    let conn_arc = Arc::new(Mutex::new(ctx.conn));
 
     let agent = strategist::build_strategist_agent(
         model,

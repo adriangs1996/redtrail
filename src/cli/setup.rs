@@ -1,6 +1,7 @@
 use crate::config::Config;
+use crate::db::config::set_global_config;
 use crate::error::Error;
-use crate::workspace;
+use crate::resolve;
 use clap::{Args, Subcommand};
 
 const KNOWN_TOOLS: &[&str] = &[
@@ -49,12 +50,6 @@ pub struct AliasesArgs {
     pub list: bool,
 }
 
-fn global_config_path() -> Result<std::path::PathBuf, Error> {
-    Ok(dirs::home_dir()
-        .ok_or_else(|| Error::Config("cannot determine home directory".to_string()))?
-        .join(".redtrail/config.toml"))
-}
-
 fn detect_shell() -> String {
     std::env::var("SHELL")
         .ok()
@@ -76,14 +71,17 @@ fn scan_tools() -> Vec<String> {
         .collect()
 }
 
-fn write_global_config(config: &Config) -> Result<std::path::PathBuf, Error> {
-    let path = global_config_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let toml_str = toml::to_string_pretty(config).map_err(|e| Error::Config(e.to_string()))?;
-    std::fs::write(&path, toml_str)?;
-    Ok(path)
+fn save_config_to_db(config: &Config) -> Result<(), Error> {
+    let ctx = resolve::resolve_global()?;
+    let conn = &ctx.conn;
+    set_global_config(conn, "general.autonomy", &config.general.autonomy)?;
+    set_global_config(conn, "general.auto_extract", &config.general.auto_extract.to_string())?;
+    set_global_config(conn, "general.llm_provider", &config.general.llm_provider)?;
+    set_global_config(conn, "general.llm_model", &config.general.llm_model)?;
+    let aliases_json = serde_json::to_string(&config.tools.aliases)
+        .map_err(|e| Error::Config(e.to_string()))?;
+    set_global_config(conn, "tools.aliases", &aliases_json)?;
+    Ok(())
 }
 
 pub fn run_wizard() -> Result<(), Error> {
@@ -134,36 +132,45 @@ pub fn run_wizard() -> Result<(), Error> {
         .interact()
         .map_err(|e| Error::Config(e.to_string()))?;
 
-    let mut config = Config::load_global().unwrap_or_default();
+    let mut config = resolve::resolve_global()
+        .ok()
+        .and_then(|ctx| Config::resolved_global(&ctx.conn).ok())
+        .unwrap_or_default();
     config.general.autonomy = autonomy_opts[autonomy_idx].to_string();
     config.tools.aliases = selected_tools;
 
     if provider_idx < 2 {
         config.general.auto_extract = true;
+        config.general.llm_provider = providers[provider_idx].to_string();
     }
 
-    let path = write_global_config(&config)?;
-    println!("Config written to {}", path.display());
+    save_config_to_db(&config)?;
+    println!("Config saved to global database");
     Ok(())
 }
 
 pub fn run_status(json: bool) -> Result<(), Error> {
-    let config = Config::load_global().unwrap_or_default();
-    let config_path = global_config_path()?;
-    let installed = config_path.exists();
+    let config = resolve::resolve_global()
+        .ok()
+        .and_then(|ctx| Config::resolved_global(&ctx.conn).ok())
+        .unwrap_or_default();
+    let db_path = resolve::global_db_path()?;
+    let installed = db_path.exists();
     let shell = detect_shell();
 
     let cwd = std::env::current_dir()?;
-    let active_workspace = workspace::find_workspace(&cwd).map(|p| p.to_string_lossy().to_string());
+    let active_workspace = resolve::resolve(&cwd)
+        .ok()
+        .map(|ctx| ctx.workspace_path.to_string_lossy().to_string());
 
     if json {
         let obj = serde_json::json!({
             "installed": installed,
             "shell": shell,
-            "config_path": config_path.to_string_lossy(),
+            "db_path": db_path.to_string_lossy(),
             "autonomy": config.general.autonomy,
             "auto_extract": config.general.auto_extract,
-            "llm_provider": "anthropic",
+            "llm_provider": config.general.llm_provider,
             "tools": config.tools.aliases,
             "active_workspace": active_workspace,
         });
@@ -173,7 +180,7 @@ pub fn run_status(json: bool) -> Result<(), Error> {
 
     println!("installed:        {}", installed);
     println!("shell:            {}", shell);
-    println!("config_path:      {}", config_path.display());
+    println!("db_path:          {}", db_path.display());
     println!("autonomy:         {}", config.general.autonomy);
     println!("auto_extract:     {}", config.general.auto_extract);
     println!("tools:            {}", config.tools.aliases.join(", "));
@@ -184,14 +191,15 @@ pub fn run_status(json: bool) -> Result<(), Error> {
 }
 
 pub fn run_aliases(args: AliasesArgs) -> Result<(), Error> {
-    let config_path = global_config_path()?;
-
-    let mut config = Config::load_global().unwrap_or_default();
+    let mut config = resolve::resolve_global()
+        .ok()
+        .and_then(|ctx| Config::resolved_global(&ctx.conn).ok())
+        .unwrap_or_default();
 
     if let Some(tool) = args.add {
         if !config.tools.aliases.contains(&tool) {
             config.tools.aliases.push(tool);
-            write_global_config(&config)?;
+            save_config_to_db(&config)?;
             println!("added");
         } else {
             println!("already present");
@@ -203,7 +211,7 @@ pub fn run_aliases(args: AliasesArgs) -> Result<(), Error> {
         let before = config.tools.aliases.len();
         config.tools.aliases.retain(|t| t != &tool);
         if config.tools.aliases.len() < before {
-            write_global_config(&config)?;
+            save_config_to_db(&config)?;
             println!("removed");
         } else {
             println!("not found");
@@ -219,6 +227,5 @@ pub fn run_aliases(args: AliasesArgs) -> Result<(), Error> {
     }
 
     println!("Usage: rt setup aliases [--add <tool>] [--remove <tool>] [--list]");
-    let _ = config_path;
     Ok(())
 }

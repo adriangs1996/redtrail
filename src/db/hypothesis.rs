@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_list_hypotheses_empty() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general").unwrap();
         let rows = db.list_hypotheses("s1", None).unwrap();
         assert!(rows.is_empty());
     }
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_list_evidence_empty() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general").unwrap();
         let rows = db.list_evidence("s1", None).unwrap();
         assert!(rows.is_empty());
     }
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn test_export_evidence_empty() {
         let db = open_in_memory().unwrap();
-        db.create_session("s1", "test", None, None, "general").unwrap();
+        db.create_session("s1", "test", "/tmp/test", None, None, "general").unwrap();
         let rows = db.export_evidence("s1").unwrap();
         assert!(rows.is_empty());
     }

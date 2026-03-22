@@ -5,7 +5,7 @@ use crate::agent::strategist::{
 use crate::config::Config;
 use crate::db::commands;
 use crate::error::Error;
-use crate::workspace;
+use crate::resolve;
 use clap::Subcommand;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
@@ -27,10 +27,11 @@ pub fn run(command: PipelineCommands) -> Result<(), Error> {
 
 fn run_extract(cmd_id: i64) -> Result<(), Error> {
     let cwd = std::env::current_dir()?;
-    let ws = workspace::find_workspace(&cwd).ok_or(Error::NoWorkspace)?;
-    let db_path = workspace::db_path(&ws);
-    let conn = Connection::open(db_path).map_err(|e| Error::Db(e.to_string()))?;
+    let db_path = resolve::global_db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| Error::Db(e.to_string()))?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch(crate::db::SCHEMA)
         .map_err(|e| Error::Db(e.to_string()))?;
 
     let (session_id, command, tool, output) = commands::get_for_extraction(&conn, cmd_id)?;
@@ -46,7 +47,7 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
         return Ok(());
     }
 
-    let config = Config::resolved(&ws)?;
+    let config = Config::resolved(&conn, &session_id)?;
     let model = match crate::agent::create_model(&config) {
         Ok(m) => m,
         Err(e) => {

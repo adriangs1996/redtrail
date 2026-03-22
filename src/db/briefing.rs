@@ -53,6 +53,55 @@ pub fn build_briefing(conn: &Connection, session_id: &str) -> Result<String, Err
     build_briefing_with_limits(conn, session_id, &l2)
 }
 
+pub fn build_extractor_briefing(conn: &Connection, session_id: &str) -> Result<String, Error> {
+    let hosts = kb::list_hosts(conn, session_id)?;
+    if hosts.is_empty() {
+        return Ok("## Existing Records\nKB is empty — all findings are new.\n".into());
+    }
+
+    let mut out = String::with_capacity(2048);
+    out.push_str("## Existing Records (for deduplication)\n");
+
+    for h in &hosts {
+        let ip = h["ip"].as_str().unwrap_or("");
+        out.push_str(ip);
+        out.push('\n');
+        let ports = kb::list_ports(conn, session_id, Some(ip))?;
+        for p in &ports {
+            out.push_str(&format!(
+                "  {}/{}\n",
+                p["port"].as_i64().unwrap_or(0),
+                p["protocol"].as_str().unwrap_or("tcp"),
+            ));
+        }
+    }
+
+    let creds = kb::list_credentials(conn, session_id)?;
+    if !creds.is_empty() {
+        out.push_str("Credentials: ");
+        let items: Vec<String> = creds.iter().map(|c| {
+            format!("{} @ {}",
+                c["username"].as_str().unwrap_or(""),
+                c["host"].as_str().unwrap_or("-"),
+            )
+        }).collect();
+        out.push_str(&items.join(", "));
+        out.push('\n');
+    }
+
+    let web_paths = kb::list_web_paths(conn, session_id, None)?;
+    if !web_paths.is_empty() {
+        out.push_str(&format!("Web paths: {} known\n", web_paths.len()));
+    }
+
+    let vulns = kb::list_vulns(conn, session_id, None, None)?;
+    if !vulns.is_empty() {
+        out.push_str(&format!("Vulns: {} known\n", vulns.len()));
+    }
+
+    Ok(out)
+}
+
 pub fn build_briefing_with_limits(
     conn: &Connection,
     session_id: &str,
@@ -931,5 +980,23 @@ mod tests {
         let limits = BriefingLimits { max_hosts: 5, ..BriefingLimits::default() };
         let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
         assert!(result.contains("... and 20 more hosts"));
+    }
+
+    #[test]
+    fn extractor_briefing_lightweight() {
+        let conn = setup();
+        let hid = insert_host(&conn, "10.10.10.1");
+        conn.execute("INSERT INTO ports (session_id, host_id, port, protocol, service, version) VALUES ('s1', ?1, 22, 'tcp', 'ssh', 'OpenSSH 8.9')", [hid]).unwrap();
+        conn.execute("INSERT INTO credentials (session_id, username, password, host, source) VALUES ('s1', 'admin', 'secret', '10.10.10.1', 'hydra')", []).unwrap();
+        conn.execute("INSERT INTO hypotheses (session_id, statement, category, status, priority, confidence) VALUES ('s1', 'test', 'Banner', 'pending', 'high', 0.5)", []).unwrap();
+        conn.execute("INSERT INTO notes (session_id, text) VALUES ('s1', 'some note')", []).unwrap();
+
+        let result = build_extractor_briefing(&conn, "s1").unwrap();
+        assert!(result.contains("10.10.10.1"));
+        assert!(result.contains("22/tcp"));
+        assert!(result.contains("admin"));
+        assert!(!result.contains("secret"));
+        assert!(!result.contains("Hypotheses"));
+        assert!(!result.contains("some note"));
     }
 }

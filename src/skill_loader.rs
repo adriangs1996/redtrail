@@ -430,10 +430,10 @@ mod tests {
         let prompt =
             crate::agent::assistant::build_system_prompt(&conn, "s1", tmp.path(), None, false).unwrap();
 
-        assert!(prompt.contains("=== Hosts ==="), "should contain KB dump");
+        assert!(prompt.contains("## Hosts"), "should contain KB dump");
         assert!(prompt.contains("10.10.10.1"), "should contain host data");
         let skill_pos = prompt.find("Hypothesize").unwrap();
-        let kb_pos = prompt.find("=== Hosts ===").unwrap();
+        let kb_pos = prompt.find("## Hosts").unwrap();
         assert!(skill_pos < kb_pos, "skill content should precede KB dump");
     }
 

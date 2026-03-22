@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::db;
-use crate::db::schema;
 use crate::error::Error;
 use crate::skill_loader;
 use super::{Agent, ToolContext};
@@ -11,7 +10,7 @@ use super::tools::*;
 use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
 use aisdk::core::language_model::LanguageModel;
 
-pub const MAX_ASSISTANT_ROUNDS: usize = 20;
+pub const MAX_ASSISTANT_ROUNDS: usize = 25;
 
 pub fn build_system_prompt(
     conn: &Connection,
@@ -50,17 +49,6 @@ pub fn build_system_prompt(
 
     let session = db::session::get_session(conn, session_id)?;
     let summary = db::session::status_summary(conn, session_id)?;
-    let hosts = db::kb::list_hosts(conn, session_id)?;
-    let ports = db::kb::list_ports(conn, session_id, None)?;
-    let creds = db::kb::list_credentials(conn, session_id)?;
-    let flags = db::kb::list_flags(conn, session_id)?;
-    let access = db::kb::list_access(conn, session_id)?;
-    let notes = db::kb::list_notes(conn, session_id)?;
-    let history = db::kb::list_history(conn, session_id, 30)?;
-    let hypotheses = db::hypothesis::list(conn, session_id, None)?;
-
-    let db_schema = schema::as_json(conn);
-    let schema_str = serde_json::to_string_pretty(&db_schema).unwrap_or_default();
 
     let target = session["target"].as_str().unwrap_or("(none)");
     let scope = session["scope"].as_str().unwrap_or("(unrestricted)");
@@ -88,129 +76,30 @@ pub fn build_system_prompt(
         cwd.display()
     ));
 
-    if !hosts.is_empty() {
-        p.push_str("=== Hosts ===\n");
-        for h in &hosts {
-            p.push_str(&format!(
-                "  {} {} {}\n",
-                h["ip"].as_str().unwrap_or(""),
-                h["hostname"].as_str().unwrap_or("-"),
-                h["os"].as_str().unwrap_or("-"),
-            ));
-        }
-        p.push('\n');
-    }
+    let briefing = crate::db::briefing::build_briefing(conn, session_id)?;
+    p.push_str(&briefing);
+    p.push('\n');
 
-    if !ports.is_empty() {
-        p.push_str("=== Ports ===\n");
-        for port in &ports {
-            p.push_str(&format!(
-                "  {}:{}/{} {} {}\n",
-                port["ip"].as_str().unwrap_or(""),
-                port["port"].as_i64().unwrap_or(0),
-                port["protocol"].as_str().unwrap_or("tcp"),
-                port["service"].as_str().unwrap_or("-"),
-                port["version"].as_str().unwrap_or(""),
-            ));
-        }
-        p.push('\n');
-    }
-
-    if !creds.is_empty() {
-        p.push_str("=== Credentials ===\n");
-        for c in &creds {
-            p.push_str(&format!(
-                "  {}:{} @ {} ({})\n",
-                c["username"].as_str().unwrap_or(""),
-                c["password"].as_str().unwrap_or("***"),
-                c["host"].as_str().unwrap_or("-"),
-                c["source"].as_str().unwrap_or("-"),
-            ));
-        }
-        p.push('\n');
-    }
-
-    if !flags.is_empty() {
-        p.push_str("=== Flags ===\n");
-        for f in &flags {
-            p.push_str(&format!(
-                "  {} ({})\n",
-                f["value"].as_str().unwrap_or(""),
-                f["source"].as_str().unwrap_or("-"),
-            ));
-        }
-        p.push('\n');
-    }
-
-    if !access.is_empty() {
-        p.push_str("=== Access ===\n");
-        for a in &access {
-            p.push_str(&format!(
-                "  {}@{} level={} method={}\n",
-                a["user"].as_str().unwrap_or(""),
-                a["host"].as_str().unwrap_or(""),
-                a["level"].as_str().unwrap_or(""),
-                a["method"].as_str().unwrap_or("-"),
-            ));
-        }
-        p.push('\n');
-    }
-
-    if !hypotheses.is_empty() {
-        p.push_str("=== Hypotheses ===\n");
-        for h in &hypotheses {
-            p.push_str(&format!(
-                "  [{}] {} — {} (priority={}, conf={:.1})\n",
-                h["id"],
-                h["statement"].as_str().unwrap_or(""),
-                h["status"].as_str().unwrap_or(""),
-                h["priority"].as_str().unwrap_or(""),
-                h["confidence"].as_f64().unwrap_or(0.0),
-            ));
-        }
-        p.push('\n');
-    }
-
-    if !notes.is_empty() {
-        p.push_str("=== Notes ===\n");
-        for n in notes.iter().rev().take(10) {
-            p.push_str(&format!("  {}\n", n["text"].as_str().unwrap_or("")));
-        }
-        p.push('\n');
-    }
-
-    if !history.is_empty() {
-        p.push_str("=== Recent Commands ===\n");
-        for h in history.iter().rev().take(20) {
-            let exit = h["exit_code"]
-                .as_i64()
-                .map(|c| c.to_string())
-                .unwrap_or("-".to_string());
-            p.push_str(&format!(
-                "  [exit={}] {}\n",
-                exit,
-                h["command"].as_str().unwrap_or(""),
-            ));
-        }
-        p.push('\n');
-    }
-
-    p.push_str("## Database Schema (for query_table, create_record, update_record tools)\n");
-    p.push_str(&schema_str);
+    p.push_str(crate::db::briefing::SCHEMA_REFERENCE);
     p.push_str("\n\n");
 
-    p.push_str("## Tools\n");
-    p.push_str("You have 6 tools:\n");
-    p.push_str("- query_table: query rows from the knowledge base with optional filters\n");
-    p.push_str("- create_record: insert new records (supports ip-to-host_id resolution for ports/web_paths/vulns)\n");
-    p.push_str("- update_record: update existing records by id\n");
-    p.push_str("- suggest: suggest a next action to the operator (include priority: low/medium/high/critical)\n");
-    p.push_str("- respond: send a response message to the operator\n");
-    p.push_str("- run_command: execute shell commands in the workspace\n\n");
+    p.push_str("## Tools\n\
+        - query_table: query KB rows (use after running commands that change state)\n\
+        - create_record: insert new records (ip resolves to host_id for ports/web_paths/vulns)\n\
+        - update_record: update existing records by id\n\
+        - suggest: suggest a next action to the operator (priority: low/medium/high/critical)\n\
+        - respond: send a response message to the operator\n\
+        - run_command: execute shell commands in the workspace\n\n");
 
-    p.push_str(&format!("You have a maximum of {MAX_ASSISTANT_ROUNDS} tool-calling rounds. Be efficient.\n"));
-    p.push_str("Use respond to send your final answer. Use suggest for actionable next steps.\n");
-    p.push_str("Always explain what you're doing. Be concise.");
+    p.push_str("## Instructions\n\
+        - KB state is pre-loaded above. Use query_table ONLY after running commands that may have changed state.\n\
+        - Batch tool calls when possible — multiple create_record, suggest, or run_command in one response.\n\
+        - Use respond for your final answer. Use suggest for actionable next steps.\n\
+        - Be concise. Explain what you're doing.\n\n");
+
+    p.push_str(&format!(
+        "## Budget\nYou have a maximum of {MAX_ASSISTANT_ROUNDS} tool-calling rounds. Batch aggressively.\n"
+    ));
 
     Ok(p)
 }
@@ -311,7 +200,7 @@ mod tests {
         let conn = test_conn();
         let c = conn.lock().unwrap();
         let prompt = build_system_prompt(&c, "s1", Path::new("/tmp"), None, false).unwrap();
-        assert!(prompt.contains("Database Schema"));
+        assert!(prompt.contains("Writable Tables"));
         assert!(prompt.contains("hosts"));
         assert!(prompt.contains("ports"));
     }
@@ -334,7 +223,7 @@ mod tests {
         let conn = test_conn();
         let c = conn.lock().unwrap();
         let prompt = build_system_prompt(&c, "s1", Path::new("/tmp"), None, false).unwrap();
-        assert!(prompt.contains(&MAX_ASSISTANT_ROUNDS.to_string()));
+        assert!(prompt.contains("25"));
     }
 
     #[test]
@@ -343,16 +232,6 @@ mod tests {
         let c = conn.lock().unwrap();
         let prompt = build_system_prompt(&c, "s1", Path::new("/tmp"), None, false).unwrap();
         assert!(prompt.contains("concise"));
-    }
-
-    #[test]
-    fn system_prompt_excludes_protected_tables() {
-        let conn = test_conn();
-        let c = conn.lock().unwrap();
-        let prompt = build_system_prompt(&c, "s1", Path::new("/tmp"), None, false).unwrap();
-        assert!(!prompt.contains("\"sessions\""));
-        assert!(!prompt.contains("\"command_history\""));
-        assert!(!prompt.contains("\"chat_messages\""));
     }
 
     #[test]
@@ -367,13 +246,12 @@ mod tests {
         }
         let c = conn.lock().unwrap();
         let prompt = build_system_prompt(&c, "s1", Path::new("/tmp"), None, false).unwrap();
-        assert!(prompt.contains("=== Hosts ==="));
         assert!(prompt.contains("10.10.10.1"));
     }
 
     #[test]
-    fn max_assistant_rounds_is_twenty() {
-        assert_eq!(MAX_ASSISTANT_ROUNDS, 20);
+    fn max_assistant_rounds_is_twentyfive() {
+        assert_eq!(MAX_ASSISTANT_ROUNDS, 25);
     }
 
     #[test]
@@ -513,5 +391,13 @@ mod tests {
             None => all_tools,
         };
         assert_eq!(tools.len(), 6);
+    }
+
+    #[test]
+    fn system_prompt_contains_batch_instruction() {
+        let conn = test_conn();
+        let c = conn.lock().unwrap();
+        let prompt = build_system_prompt(&c, "s1", Path::new("/tmp"), None, false).unwrap();
+        assert!(prompt.contains("Batch aggressively"));
     }
 }

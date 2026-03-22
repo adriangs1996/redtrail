@@ -6,6 +6,20 @@ use std::sync::LazyLock;
 
 const MAX_BRIEFING_CHARS: usize = 8000;
 
+pub const SCHEMA_REFERENCE: &str = "\
+## Writable Tables
+hosts: ip*, hostname, os, status(up|down|unknown)
+ports: ip*, port*(1-65535), protocol(tcp|udp|sctp), service, version
+credentials: username*, password, hash, service, host, source
+access_levels: host*, user*, level*, method
+flags: value*, source
+hypotheses: statement*, category*, status(pending|testing|confirmed|refuted), priority(low|medium|high|critical), confidence(0.0-1.0), target_component
+evidence: hypothesis_id, finding*, severity(info|low|medium|high|critical), poc
+web_paths: ip*, port*(1-65535), scheme(http|https), path*, status_code, content_length, content_type, redirect_to, source
+vulns: ip*, port*, name*, severity(info|low|medium|high|critical), cve, url, detail, source
+notes: text*
+(* = required, ip resolves to host_id automatically)";
+
 pub struct BriefingLimits {
     pub max_hosts: usize,
     pub max_interesting_paths: usize,
@@ -998,5 +1012,20 @@ mod tests {
         assert!(!result.contains("secret"));
         assert!(!result.contains("Hypotheses"));
         assert!(!result.contains("some note"));
+    }
+
+    #[test]
+    fn schema_reference_matches_db() {
+        let conn = setup();
+        for table in ["hosts", "ports", "credentials", "access_levels", "flags",
+                      "hypotheses", "evidence", "web_paths", "vulns", "notes"] {
+            let exists: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |r| r.get(0),
+            ).unwrap();
+            assert!(exists, "Table '{table}' in SCHEMA_REFERENCE but not in DB");
+            assert!(SCHEMA_REFERENCE.contains(table), "Table '{table}' in DB but not in SCHEMA_REFERENCE");
+        }
     }
 }

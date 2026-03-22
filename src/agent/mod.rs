@@ -1,17 +1,18 @@
 pub mod assistant;
 pub mod extraction;
+pub mod providers;
 pub mod strategist;
 pub mod tools;
 
-use aisdk::core::DynamicModel;
-use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
-use aisdk::core::language_model::request::LanguageModelRequest;
-use aisdk::core::language_model::LanguageModel;
-use aisdk::core::language_model::generate_text::GenerateTextResponse;
-use aisdk::core::tools::Tool;
-use aisdk::providers::anthropic::Anthropic;
 use crate::config::Config;
 use crate::error::Error;
+use aisdk::core::DynamicModel;
+use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
+use aisdk::core::language_model::LanguageModel;
+use aisdk::core::language_model::generate_text::GenerateTextResponse;
+use aisdk::core::language_model::request::LanguageModelRequest;
+use aisdk::core::tools::Tool;
+use aisdk::providers::anthropic::Anthropic;
 use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -46,7 +47,12 @@ pub struct Agent<M: LanguageModel + TextInputSupport + ToolCallSupport> {
 
 impl<M: LanguageModel + TextInputSupport + ToolCallSupport> Agent<M> {
     pub fn new(model: M, system: String, tools: Vec<Tool>, max_steps: usize) -> Self {
-        Self { model, system, tools, max_steps }
+        Self {
+            model,
+            system,
+            tools,
+            max_steps,
+        }
     }
 
     fn build_request(&self, prompt: &str) -> LanguageModelRequest<M> {
@@ -60,9 +66,7 @@ impl<M: LanguageModel + TextInputSupport + ToolCallSupport> Agent<M> {
         }
 
         let max_steps = self.max_steps;
-        builder = builder.stop_when(move |opts| {
-            opts.steps().len() >= max_steps
-        });
+        builder = builder.stop_when(move |opts| opts.steps().len() >= max_steps);
 
         builder.build()
     }
@@ -75,8 +79,8 @@ impl<M: LanguageModel + TextInputSupport + ToolCallSupport> Agent<M> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::tools::*;
+    use super::*;
     use crate::db;
     use schemars::schema_for;
 
@@ -173,7 +177,8 @@ mod tests {
             conn.execute(
                 "INSERT INTO hosts (session_id, ip) VALUES ('s1', '10.10.10.1')",
                 [],
-            ).unwrap();
+            )
+            .unwrap();
         }
         let tool = make_update_tool(ctx);
         let input = serde_json::json!({
@@ -206,11 +211,13 @@ mod tests {
             conn.execute(
                 "INSERT INTO hosts (session_id, ip, status) VALUES ('s1', '10.10.10.1', 'up')",
                 [],
-            ).unwrap();
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO hosts (session_id, ip, status) VALUES ('s1', '10.10.10.2', 'down')",
                 [],
-            ).unwrap();
+            )
+            .unwrap();
         }
         let tool = make_query_tool(ctx);
         let input = serde_json::json!({
@@ -304,7 +311,10 @@ mod tests {
         });
         let result = tool.execute.call(input).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert_eq!(parsed["text"], "The target appears to be running Apache 2.4");
+        assert_eq!(
+            parsed["text"],
+            "The target appears to be running Apache 2.4"
+        );
     }
 
     #[test]
@@ -388,9 +398,13 @@ mod tests {
         assert!(result.contains("exit code: 42"));
 
         let conn = ctx.conn.lock().unwrap();
-        let row: i32 = conn.query_row(
-            "SELECT exit_code FROM command_history WHERE id = 1", [], |r| r.get(0)
-        ).unwrap();
+        let row: i32 = conn
+            .query_row(
+                "SELECT exit_code FROM command_history WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(row, 42);
     }
 
@@ -402,9 +416,13 @@ mod tests {
         tool.execute.call(input).unwrap();
 
         let conn = ctx.conn.lock().unwrap();
-        let dur: i64 = conn.query_row(
-            "SELECT duration_ms FROM command_history WHERE id = 1", [], |r| r.get(0)
-        ).unwrap();
+        let dur: i64 = conn
+            .query_row(
+                "SELECT duration_ms FROM command_history WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert!(dur >= 0);
     }
 

@@ -52,8 +52,11 @@ pub fn run(db: &impl SessionOps, session_id: &str, config: &Config) -> Result<()
         out.push_str(&format!("alias {short}='rt {full}';\n"));
     }
 
+    let phase = session["phase"].as_str().unwrap_or("L0");
+    out.push_str(r#"[[ -z "$_RT_OLD_PROMPT" ]] && export _RT_OLD_PROMPT="$PROMPT";"#);
+    out.push('\n');
     out.push_str(&format!(
-        r#"_rt_precmd() {{ [[ "$PROMPT" != *"(rt:{name})"* ]] && PROMPT="(rt:{name}) ${{PROMPT}}"; }};"#
+        r#"_rt_precmd() {{ local p="%F{{red}}(rt:{name})%f"; [[ -n "$TARGET" ]] && p+=" %F{{yellow}}$TARGET%f"; [[ -n "$LHOST" ]] && p+=" %F{{cyan}}⇄$LHOST%f"; p+=" %F{{magenta}}[{phase}]%f %F{{blue}}%~%f"; PROMPT="${{p}} %F{{green}}❯%f "; }};"#
     ));
     out.push('\n');
     out.push_str("autoload -Uz add-zsh-hook;\n");
@@ -69,6 +72,8 @@ pub fn run(db: &impl SessionOps, session_id: &str, config: &Config) -> Result<()
     out.push_str("add-zsh-hook -d precmd _rt_precmd; ");
     out.push_str("unset -f _rt_precmd; ");
     out.push_str("unset RT_SESSION RT_WORKSPACE TARGET SCOPE RHOST LHOST LPORT; ");
+    out.push_str(r#"PROMPT="${_RT_OLD_PROMPT:-%(?.%F{green}.%F{red})❯%f }"; "#);
+    out.push_str("unset _RT_OLD_PROMPT; ");
     out.push_str("unset -f rt_deactivate; ");
     out.push_str("};\n");
 
@@ -92,6 +97,9 @@ pub fn deactivate() -> Result<(), Error> {
     out.push_str("add-zsh-hook -d precmd _rt_precmd 2>/dev/null;\n");
     out.push_str("unset -f _rt_precmd 2>/dev/null;\n");
     out.push_str("unset RT_SESSION RT_WORKSPACE TARGET SCOPE RHOST LHOST LPORT;\n");
+    out.push_str(r#"PROMPT="${_RT_OLD_PROMPT:-%(?.%F{green}.%F{red})❯%f }";"#);
+    out.push('\n');
+    out.push_str("unset _RT_OLD_PROMPT;\n");
     out.push_str("unset -f rt_deactivate;\n");
 
     print!("{out}");
@@ -130,6 +138,7 @@ mod tests {
                 "target": target,
                 "scope": scope,
                 "goal": "general",
+                "phase": "L2",
             }),
         };
         let config = Config::default();
@@ -165,7 +174,9 @@ mod tests {
             writeln!(w, "alias {short}='rt {full}';")?;
         }
 
-        write!(w, r#"_rt_precmd() {{ [[ "$PROMPT" != *"(rt:{name})"* ]] && PROMPT="(rt:{name}) ${{PROMPT}}"; }};"#)?;
+        let phase = session["phase"].as_str().unwrap_or("L0");
+        writeln!(w, r#"[[ -z "$_RT_OLD_PROMPT" ]] && export _RT_OLD_PROMPT="$PROMPT";"#)?;
+        write!(w, r#"_rt_precmd() {{ local p="%F{{red}}(rt:{name})%f"; [[ -n "$TARGET" ]] && p+=" %F{{yellow}}$TARGET%f"; [[ -n "$LHOST" ]] && p+=" %F{{cyan}}⇄$LHOST%f"; p+=" %F{{magenta}}[{phase}]%f %F{{blue}}%~%f"; PROMPT="${{p}} %F{{green}}❯%f "; }};"#)?;
         writeln!(w)?;
         writeln!(w, "autoload -Uz add-zsh-hook;")?;
         writeln!(w, "add-zsh-hook precmd _rt_precmd;")?;
@@ -180,6 +191,8 @@ mod tests {
         write!(w, "add-zsh-hook -d precmd _rt_precmd; ")?;
         write!(w, "unset -f _rt_precmd; ")?;
         write!(w, "unset RT_SESSION RT_WORKSPACE TARGET SCOPE RHOST LHOST LPORT; ")?;
+        write!(w, r#"PROMPT="${{_RT_OLD_PROMPT:-%(?.%F{{green}}.%F{{red}})❯%f }}"; "#)?;
+        write!(w, "unset _RT_OLD_PROMPT; ")?;
         write!(w, "unset -f rt_deactivate; ")?;
         writeln!(w, "}};")?;
 

@@ -125,11 +125,18 @@ pub fn run_with_conn(conn: &Connection, cmd: SessionCommands) -> Result<(), Erro
         SessionCommands::New { target, goal, scope } => {
             db::session::deactivate_session(conn, &workspace_path)?;
 
-            let session_name = cwd
+            let base = cwd
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("default")
                 .to_string();
+            let existing = db::session::list_sessions(conn, &workspace_path)?;
+            let count = existing.len();
+            let session_name = if count == 0 {
+                base.clone()
+            } else {
+                format!("{base}-{}", count + 1)
+            };
             let session_id = uuid::Uuid::new_v4().to_string();
 
             db::session::create_session(

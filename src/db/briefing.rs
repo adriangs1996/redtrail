@@ -872,4 +872,64 @@ mod tests {
             "missing count indicator for 3 deduped nmap commands: {result}"
         );
     }
+
+    #[test]
+    fn briefing_all_sections() {
+        let conn = setup();
+        let hid = insert_host(&conn, "10.10.10.1");
+        conn.execute("INSERT INTO ports (session_id, host_id, port, protocol, service, version) VALUES ('s1', ?1, 80, 'tcp', 'http', 'Apache')", [hid]).unwrap();
+        insert_web_path(&conn, hid, 80, "/admin", 403, "text/html", 0);
+        insert_vuln(&conn, hid, 80, "RCE", "critical", "CVE-2024-1234");
+        conn.execute("INSERT INTO credentials (session_id, username, password, host, source) VALUES ('s1', 'admin', 'pass', '10.10.10.1', 'brute')", []).unwrap();
+        conn.execute("INSERT INTO access_levels (session_id, host, user, level, method) VALUES ('s1', '10.10.10.1', 'admin', 'user', 'ssh')", []).unwrap();
+        conn.execute("INSERT INTO flags (session_id, value, source) VALUES ('s1', 'FLAG{test}', '/root/flag.txt')", []).unwrap();
+        conn.execute("INSERT INTO hypotheses (session_id, statement, category, status, priority, confidence) VALUES ('s1', 'test hyp', 'Banner', 'pending', 'high', 0.7)", []).unwrap();
+        conn.execute("INSERT INTO notes (session_id, text) VALUES ('s1', 'important note')", []).unwrap();
+        conn.execute("INSERT INTO command_history (session_id, command, exit_code) VALUES ('s1', 'nmap -sV 10.10.10.1', 0)", []).unwrap();
+
+        let result = build_briefing(&conn, "s1").unwrap();
+        for section in ["## Hosts", "## Web Paths", "## Vulns", "## Credentials", "## Access", "## Flags", "## Hypotheses", "## Notes", "## Recent Commands"] {
+            assert!(result.contains(section), "Missing section: {section}");
+        }
+    }
+
+    #[test]
+    fn briefing_size_cap() {
+        let conn = setup();
+        for i in 1..=10 {
+            let hid = insert_host(&conn, &format!("10.10.10.{i}"));
+            for p in [22, 80, 443, 8080, 8443] {
+                conn.execute(
+                    "INSERT INTO ports (session_id, host_id, port, protocol, service, version) VALUES ('s1', ?1, ?2, 'tcp', 'http', 'Apache 2.4')",
+                    rusqlite::params![hid, p],
+                ).unwrap();
+            }
+            for j in 0..10 {
+                insert_web_path(&conn, hid, 80, &format!("/path{j}"), 200, "text/html", 1024);
+            }
+            for j in 0..2 {
+                insert_vuln(&conn, hid, 80, &format!("vuln-{i}-{j}"), "medium", "");
+            }
+        }
+        for i in 0..10 {
+            conn.execute(
+                &format!("INSERT INTO hypotheses (session_id, statement, category, status, priority, confidence) VALUES ('s1', 'Hypothesis {i}', 'Banner', 'pending', 'medium', 0.5)"),
+                [],
+            ).unwrap();
+        }
+
+        let result = build_briefing(&conn, "s1").unwrap();
+        assert!(result.len() <= 8000, "Briefing is {} chars, max is 8000", result.len());
+    }
+
+    #[test]
+    fn briefing_overflow_hints_never_silent() {
+        let conn = setup();
+        for i in 1..=25 {
+            insert_host(&conn, &format!("10.10.10.{i}"));
+        }
+        let limits = BriefingLimits { max_hosts: 5, ..BriefingLimits::default() };
+        let result = build_briefing_with_limits(&conn, "s1", &limits).unwrap();
+        assert!(result.contains("... and 20 more hosts"));
+    }
 }

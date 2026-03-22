@@ -4,8 +4,6 @@ use crate::config::Config;
 use crate::db;
 use crate::error::Error;
 use crate::workspace;
-use futures::StreamExt;
-use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 pub fn run(
@@ -69,7 +67,7 @@ pub fn run(
         .map_err(|e| Error::Config(format!("tokio runtime: {e}")))?;
 
     let final_text = rt.block_on(async {
-        stream_response(&agent, &prompt).await
+        run_agent(&agent, &prompt).await
     })?;
 
     if keep_history {
@@ -83,7 +81,7 @@ pub fn run(
     Ok(())
 }
 
-async fn stream_response<M>(
+async fn run_agent<M>(
     agent: &agent::Agent<M>,
     prompt: &str,
 ) -> Result<String, Error>
@@ -92,41 +90,25 @@ where
         + aisdk::core::capabilities::TextInputSupport
         + aisdk::core::capabilities::ToolCallSupport,
 {
-    let mut response = agent.stream(prompt).await
-        .map_err(|e| Error::Config(format!("stream: {e}")))?;
+    let response = agent.run(prompt).await
+        .map_err(|e| Error::Config(format!("agent: {e}")))?;
 
     let mut collected = String::new();
 
-    while let Some(chunk) = response.stream.next().await {
-        use aisdk::core::language_model::LanguageModelStreamChunkType;
-        match chunk {
-            LanguageModelStreamChunkType::Text(text) => {
-                print!("{text}");
-                std::io::stdout().flush().ok();
-                collected.push_str(&text);
-            }
-            LanguageModelStreamChunkType::Failed(err) => {
-                eprintln!("\n[error] {err}");
-                return Err(Error::Config(format!("stream failed: {err}")));
-            }
-            _ => {}
-        }
+    if let Some(text) = response.text() {
+        render_markdown(&text);
+        collected.push_str(&text);
     }
 
-    if !collected.is_empty() && !collected.ends_with('\n') {
-        println!();
-    }
-
-    let tool_results = response.tool_results().await;
-    if let Some(results) = tool_results {
+    if let Some(results) = response.tool_results() {
         for res in &results {
             let name = &res.tool.name;
             let output = match &res.output {
                 Ok(v) => v.as_str().unwrap_or("").to_string(),
                 Err(_) => continue,
             };
-            if name == "suggest" {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
+            if name == "suggest"
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
                     let text = parsed["text"].as_str().unwrap_or("");
                     let priority = parsed["priority"].as_str().unwrap_or("medium");
                     let indicator = match priority {
@@ -135,19 +117,15 @@ where
                         "medium" => "\x1b[1;36m[!]\x1b[0m",
                         _ => "\x1b[2m[·]\x1b[0m",
                     };
-                    eprintln!("\n{indicator} {text}");
+                    eprintln!("{indicator} {text}");
                 }
-            }
-            if name == "respond" {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output) {
-                    if let Some(text) = parsed["text"].as_str() {
-                        if collected.is_empty() {
+            if name == "respond"
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&output)
+                    && let Some(text) = parsed["text"].as_str()
+                        && collected.is_empty() {
                             render_markdown(text);
                             collected.push_str(text);
                         }
-                    }
-                }
-            }
         }
     }
 
@@ -195,8 +173,8 @@ fn render_inline(line: &str) -> String {
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*' {
-            if let Some(end) = find_double_star(&chars, i + 2) {
+        if i + 1 < chars.len() && chars[i] == '*' && chars[i + 1] == '*'
+            && let Some(end) = find_double_star(&chars, i + 2) {
                 result.push_str("\x1b[1m");
                 for c in &chars[i + 2..end] {
                     result.push(*c);
@@ -205,9 +183,8 @@ fn render_inline(line: &str) -> String {
                 i = end + 2;
                 continue;
             }
-        }
-        if chars[i] == '`' {
-            if let Some(end) = chars[i + 1..].iter().position(|&c| c == '`') {
+        if chars[i] == '`'
+            && let Some(end) = chars[i + 1..].iter().position(|&c| c == '`') {
                 result.push_str("\x1b[36m");
                 for c in &chars[i + 1..i + 1 + end] {
                     result.push(*c);
@@ -216,7 +193,6 @@ fn render_inline(line: &str) -> String {
                 i = i + 2 + end;
                 continue;
             }
-        }
         result.push(chars[i]);
         i += 1;
     }

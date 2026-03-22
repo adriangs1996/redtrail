@@ -37,11 +37,10 @@ pub fn run(question: &str) -> Result<(), Error> {
 
     match rt.block_on(agent.run(&prompt)) {
         Ok(response) => {
-            if let Some(text) = response.text() {
-                if !text.is_empty() {
+            if let Some(text) = response.text()
+                && !text.is_empty() {
                     println!("{text}");
                 }
-            }
 
             let results = response.options.tool_results().unwrap_or_default();
             let suggestions = collect_suggestions(&results);

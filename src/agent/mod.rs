@@ -8,7 +8,6 @@ use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
 use aisdk::core::language_model::request::LanguageModelRequest;
 use aisdk::core::language_model::LanguageModel;
 use aisdk::core::language_model::generate_text::GenerateTextResponse;
-use aisdk::core::language_model::stream_text::StreamTextResponse;
 use aisdk::core::tools::Tool;
 use aisdk::providers::anthropic::Anthropic;
 use crate::config::Config;
@@ -71,11 +70,6 @@ impl<M: LanguageModel + TextInputSupport + ToolCallSupport> Agent<M> {
     pub async fn run(&self, prompt: &str) -> aisdk::Result<GenerateTextResponse> {
         let mut request = self.build_request(prompt);
         request.generate_text().await
-    }
-
-    pub async fn stream(&self, prompt: &str) -> aisdk::Result<StreamTextResponse> {
-        let mut request = self.build_request(prompt);
-        request.stream_text().await
     }
 }
 

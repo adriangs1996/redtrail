@@ -278,18 +278,15 @@ pub fn collect_new_records(
         if call.tool.name != "create_record" {
             continue;
         }
-        if let Ok(output) = &result.output {
-            if let Some(s) = output.as_str() {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
-                    if parsed["created"] == true {
+        if let Ok(output) = &result.output
+            && let Some(s) = output.as_str()
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s)
+                    && parsed["created"] == true {
                         records.push(serde_json::json!({
                             "table": call.input["table"],
                             "id": parsed["id"],
                         }));
                     }
-                }
-            }
-        }
     }
     records
 }
@@ -302,13 +299,11 @@ pub fn collect_suggestions(
         if result.tool.name != "suggest" {
             continue;
         }
-        if let Ok(output) = &result.output {
-            if let Some(s) = output.as_str() {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
+        if let Ok(output) = &result.output
+            && let Some(s) = output.as_str()
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) {
                     suggestions.push(parsed);
                 }
-            }
-        }
     }
     suggestions
 }

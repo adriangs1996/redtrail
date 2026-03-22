@@ -87,23 +87,20 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
     let strat_prompt = strat_input.to_prompt();
     let strat_agent = build_strategist_agent(strat_model, conn.clone(), session_id, cwd)?;
 
-    match rt.block_on(strat_agent.run(&strat_prompt)) {
-        Ok(strat_response) => {
-            let strat_results = strat_response.options.tool_results().unwrap_or_default();
-            let suggestions = collect_suggestions(&strat_results);
-            for s in &suggestions {
-                let text = s["text"].as_str().unwrap_or("");
-                let priority = s["priority"].as_str().unwrap_or("medium");
-                let indicator = match priority {
-                    "critical" => "\x1b[31m[!!!]\x1b[0m",
-                    "high" => "\x1b[33m[!!]\x1b[0m",
-                    "medium" => "\x1b[36m[!]\x1b[0m",
-                    _ => "\x1b[2m[·]\x1b[0m",
-                };
-                eprintln!("[rt] {indicator} {text}");
-            }
+    if let Ok(strat_response) = rt.block_on(strat_agent.run(&strat_prompt)) {
+        let strat_results = strat_response.options.tool_results().unwrap_or_default();
+        let suggestions = collect_suggestions(&strat_results);
+        for s in &suggestions {
+            let text = s["text"].as_str().unwrap_or("");
+            let priority = s["priority"].as_str().unwrap_or("medium");
+            let indicator = match priority {
+                "critical" => "\x1b[31m[!!!]\x1b[0m",
+                "high" => "\x1b[33m[!!]\x1b[0m",
+                "medium" => "\x1b[36m[!]\x1b[0m",
+                _ => "\x1b[2m[·]\x1b[0m",
+            };
+            eprintln!("[rt] {indicator} {text}");
         }
-        Err(_) => {}
     }
 
     Ok(())

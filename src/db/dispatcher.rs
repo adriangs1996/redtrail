@@ -104,19 +104,18 @@ pub fn create(
     }
 
     for &(col, validator) in def.validators {
-        if let Some(val) = data.get(col) {
-            if !val.is_null() && !validator(val) {
+        if let Some(val) = data.get(col)
+            && !val.is_null() && !validator(val) {
                 return Err(Error::Db(format!(
                     "invalid value for '{table}.{col}': {val}"
                 )));
             }
-        }
     }
 
     let mut data = data.clone();
 
-    if IP_RESOLVABLE_TABLES.contains(&table) {
-        if let Some(ip_val) = data.remove("ip") {
+    if IP_RESOLVABLE_TABLES.contains(&table)
+        && let Some(ip_val) = data.remove("ip") {
             if data.contains_key("host_id") {
                 return Err(Error::Db("provide either 'ip' or 'host_id', not both".into()));
             }
@@ -124,16 +123,13 @@ pub fn create(
             let host_id = resolve_host_id(conn, session_id, ip)?;
             data.insert("host_id".to_string(), serde_json::json!(host_id));
         }
-    }
 
-    if table == "evidence" {
-        if let Some(hid_val) = data.get("hypothesis_id") {
-            if !hid_val.is_null() {
+    if table == "evidence"
+        && let Some(hid_val) = data.get("hypothesis_id")
+            && !hid_val.is_null() {
                 let hid = hid_val.as_i64().ok_or_else(|| Error::Db("hypothesis_id must be an integer".into()))?;
                 validate_hypothesis_session(conn, session_id, hid)?;
             }
-        }
-    }
 
     let mut col_names = vec!["session_id".to_string()];
     let mut placeholders = vec!["?1".to_string()];
@@ -446,13 +442,12 @@ pub fn update(
     }
 
     for &(col, validator) in def.validators {
-        if let Some(val) = data.get(col) {
-            if !val.is_null() && !validator(val) {
+        if let Some(val) = data.get(col)
+            && !val.is_null() && !validator(val) {
                 return Err(Error::Db(format!(
                     "invalid value for '{table}.{col}': {val}"
                 )));
             }
-        }
     }
 
     let mut set_clauses = Vec::new();

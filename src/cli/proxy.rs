@@ -85,7 +85,9 @@ pub fn run(args: &[String]) -> Result<(), Error> {
                 eprintln!("[rt] warning: {warn}");
             }
             if config.general.auto_extract {
-                crate::spawn::spawn_extraction(result.command_id);
+                if let Err(e) = crate::spawn::spawn_extraction(result.command_id) {
+                    eprintln!("[rt] extraction spawn failed: {e}");
+                }
             }
         }
     }

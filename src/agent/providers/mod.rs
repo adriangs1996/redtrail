@@ -63,11 +63,6 @@ impl ClaudeCodeProvider {
         self
     }
 
-    pub fn with_allowed_tools(mut self, tools: Vec<String>) -> Self {
-        self.allowed_tools = tools;
-        self
-    }
-
     pub fn with_max_turns(mut self, max_turns: usize) -> Self {
         self.max_turns = Some(max_turns);
         self

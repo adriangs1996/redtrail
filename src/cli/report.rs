@@ -1,4 +1,4 @@
-use crate::db::{Hypotheses, KnowledgeBase, SessionOps};
+use crate::db::Database;
 use crate::error::Error;
 use clap::Subcommand;
 
@@ -14,7 +14,7 @@ pub enum ReportCommands {
 }
 
 pub fn run(
-    db: &(impl KnowledgeBase + Hypotheses + SessionOps),
+    db: &impl Database,
     session_id: &str,
     command: ReportCommands,
 ) -> Result<(), Error> {
@@ -50,7 +50,7 @@ fn format_finding(ev: &serde_json::Value, hypotheses: &[serde_json::Value]) -> S
 }
 
 fn build_report(
-    db: &(impl KnowledgeBase + Hypotheses + SessionOps),
+    db: &impl Database,
     session_id: &str,
 ) -> Result<String, Error> {
     let summary = db.status_summary(session_id)?;

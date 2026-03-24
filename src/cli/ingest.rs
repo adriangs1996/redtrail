@@ -25,7 +25,7 @@ pub fn run(
     );
 
     if auto_extract {
-        crate::spawn::spawn_extraction(cmd_id);
+        crate::spawn::spawn_extraction(cmd_id)?;
         println!("extraction queued");
     } else {
         println!("extraction skipped (auto_extract disabled)");

@@ -67,10 +67,8 @@ static TABLES: &[(&str, TableDef)] = &[
     }),
 ];
 
-const PROTECTED_TABLES: &[&str] = &["sessions", "command_history", "chat_messages"];
-
 fn lookup_table(name: &str) -> Result<&'static TableDef, Error> {
-    if PROTECTED_TABLES.contains(&name) {
+    if super::schema::PROTECTED_TABLES.contains(&name) {
         return Err(Error::Db(format!("table '{name}' is protected and cannot be written via dispatcher")));
     }
     TABLES

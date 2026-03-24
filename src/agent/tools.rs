@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::db::{commands, dispatcher};
-#[allow(unused_imports)]
 use super::ToolContext;
 
 fn status(msg: &str) {

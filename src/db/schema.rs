@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-const PROTECTED_TABLES: &[&str] = &["sessions", "command_history", "chat_messages"];
+pub(crate) const PROTECTED_TABLES: &[&str] = &["sessions", "command_history", "chat_messages"];
 
 struct Constraint {
     table: &'static str,
@@ -27,6 +27,7 @@ static CONSTRAINTS: &[Constraint] = &[
     Constraint { table: "evidence", column: "severity", kind: ConstraintKind::Enum(&["info", "low", "medium", "high", "critical"]) },
 ];
 
+#[allow(dead_code)] // Used in tests; will be wired into schema export command
 pub fn as_json(conn: &Connection) -> serde_json::Value {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table'")

@@ -17,7 +17,7 @@ pub mod skill;
 pub mod sql;
 pub mod status;
 
-use crate::db::SessionOps;
+use crate::db::SessionOps; // Required for trait method resolution on impl Database
 use crate::error::Error;
 use clap::{Parser, Subcommand};
 
@@ -183,13 +183,7 @@ enum Commands {
     },
 }
 
-fn resolve_session() -> Result<
-    (
-        impl crate::db::KnowledgeBase + crate::db::Hypotheses + crate::db::CommandLog + SessionOps,
-        String,
-    ),
-    Error,
-> {
+fn resolve_session() -> Result<(impl crate::db::Database, String), Error> {
     let ctx = crate::resolve::resolve_global()?;
     let cwd = std::env::current_dir()?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);

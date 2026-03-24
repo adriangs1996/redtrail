@@ -255,6 +255,12 @@ pub trait SessionOps {
     fn status_summary(&self, session_id: &str) -> Result<serde_json::Value, Error>;
 }
 
+/// Combined trait for full database access. Simplifies bounds at call sites
+/// that need multiple capabilities (e.g., `db: &impl Database` instead of
+/// `db: &(impl KnowledgeBase + Hypotheses + CommandLog + SessionOps)`).
+pub trait Database: KnowledgeBase + Hypotheses + CommandLog + SessionOps {}
+impl<T: KnowledgeBase + Hypotheses + CommandLog + SessionOps> Database for T {}
+
 struct SqliteDb {
     conn: Connection,
 }
@@ -273,9 +279,7 @@ impl SqliteDb {
     }
 }
 
-pub fn open(
-    path: &str,
-) -> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps + use<>, Error> {
+pub fn open(path: &str) -> Result<impl Database + use<>, Error> {
     let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
     let db = SqliteDb { conn };
     db.init()?;
@@ -294,8 +298,7 @@ pub fn open_connection(path: &str) -> Result<Connection, Error> {
 }
 
 #[cfg(test)]
-pub(crate) fn open_in_memory()
--> Result<impl KnowledgeBase + Hypotheses + CommandLog + SessionOps, Error> {
+pub(crate) fn open_in_memory() -> Result<impl Database, Error> {
     let conn = Connection::open_in_memory().map_err(|e| Error::Db(e.to_string()))?;
     let db = SqliteDb { conn };
     db.init()?;

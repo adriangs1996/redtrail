@@ -2,8 +2,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" 2>/dev/null
-RT="$REPO_ROOT/target/release/rt"
+if [[ -n "${RT_BIN:-}" ]]; then
+    RT="$RT_BIN"
+else
+    cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" 2>/dev/null
+    RT="$REPO_ROOT/target/release/rt"
+fi
 NMAP_FIXTURE="$REPO_ROOT/eval/tests/fixtures/nmap-scan.txt"
 
 # Isolate: override HOME so ~/.redtrail/ goes to a temp dir

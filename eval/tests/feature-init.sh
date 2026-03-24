@@ -3,8 +3,12 @@ set -euo pipefail
 
 # Build the binary
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" 2>/dev/null
-RT="$REPO_ROOT/target/release/rt"
+if [[ -n "${RT_BIN:-}" ]]; then
+    RT="$RT_BIN"
+else
+    cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml" 2>/dev/null
+    RT="$REPO_ROOT/target/release/rt"
+fi
 
 # Isolate: override HOME so ~/.redtrail/ goes to a temp dir
 ORIG_HOME="$HOME"

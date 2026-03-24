@@ -46,6 +46,12 @@ SUMMARY: <what you did and why>
 - LLM calls = -2 per call
 - **Any previously passing test that now fails = instant revert (regression)**
 
+### Architecture Notes
+- Redtrail workspace is purely database-backed at `~/.redtrail/redtrail.db`
+- All tables require `session_id` — sessions are scoped to the working directory
+- The `ClaudeCodeProvider` in `src/agent/providers/mod.rs` is already implemented
+- LLM provider is configured via `rt config set general.llm_provider <name>`
+
 ### Quality Standards
 - Follow TDD principles: tests verify behavior through public interfaces
 - Design deep modules with simple interfaces (A Philosophy of Software Design)

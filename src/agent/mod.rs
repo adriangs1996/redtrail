@@ -8,26 +8,73 @@ use crate::config::Config;
 use crate::error::Error;
 use aisdk::core::DynamicModel;
 use aisdk::core::capabilities::{TextInputSupport, ToolCallSupport};
-use aisdk::core::language_model::LanguageModel;
+use aisdk::core::language_model::{
+    LanguageModel, LanguageModelOptions, LanguageModelResponse, LanguageModelStreamChunk,
+};
 use aisdk::core::language_model::generate_text::GenerateTextResponse;
 use aisdk::core::language_model::request::LanguageModelRequest;
 use aisdk::core::tools::Tool;
 use aisdk::providers::anthropic::Anthropic;
+use async_trait::async_trait;
+use futures::Stream;
 use rusqlite::Connection;
+use std::pin::Pin;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-pub fn create_model(config: &Config) -> Result<Anthropic<DynamicModel>, Error> {
+#[derive(Debug, Clone)]
+pub enum AnyModel {
+    Anthropic(Anthropic<DynamicModel>),
+    ClaudeCode(providers::ClaudeCodeProvider),
+}
+
+impl TextInputSupport for AnyModel {}
+impl ToolCallSupport for AnyModel {}
+
+#[async_trait]
+impl LanguageModel for AnyModel {
+    fn name(&self) -> String {
+        match self {
+            Self::Anthropic(m) => m.name(),
+            Self::ClaudeCode(m) => m.name(),
+        }
+    }
+
+    async fn generate_text(
+        &mut self,
+        options: LanguageModelOptions,
+    ) -> aisdk::Result<LanguageModelResponse> {
+        match self {
+            Self::Anthropic(m) => m.generate_text(options).await,
+            Self::ClaudeCode(m) => m.generate_text(options).await,
+        }
+    }
+
+    async fn stream_text(
+        &mut self,
+        options: LanguageModelOptions,
+    ) -> aisdk::Result<Pin<Box<dyn Stream<Item = aisdk::Result<Vec<LanguageModelStreamChunk>>> + Send>>>
+    {
+        match self {
+            Self::Anthropic(m) => m.stream_text(options).await,
+            Self::ClaudeCode(m) => m.stream_text(options).await,
+        }
+    }
+}
+
+pub fn create_model(config: &Config) -> Result<AnyModel, Error> {
     match config.general.llm_provider.as_str() {
         "anthropic" => {
             let api_key = std::env::var("ANTHROPIC_API_KEY")
                 .map_err(|_| Error::Config("ANTHROPIC_API_KEY not set".into()))?;
-            Anthropic::<DynamicModel>::builder()
+            let model = Anthropic::<DynamicModel>::builder()
                 .model_name(&config.general.llm_model)
                 .api_key(api_key)
                 .build()
-                .map_err(|e| Error::Config(format!("anthropic provider: {e}")))
+                .map_err(|e| Error::Config(format!("anthropic provider: {e}")))?;
+            Ok(AnyModel::Anthropic(model))
         }
+        "claude-code" => Ok(AnyModel::ClaudeCode(providers::ClaudeCodeProvider::new())),
         other => Err(Error::Config(format!("unsupported llm_provider: {other}"))),
     }
 }
@@ -236,7 +283,7 @@ mod tests {
         unsafe { std::env::set_var("ANTHROPIC_API_KEY", "test-key-123") };
         let config = crate::config::Config::default();
         let model = super::create_model(&config).unwrap();
-        assert_eq!(model.settings.provider_name, "anthropic");
+        assert!(matches!(model, super::AnyModel::Anthropic(_)));
     }
 
     #[test]
@@ -253,6 +300,14 @@ mod tests {
         let mut config = crate::config::Config::default();
         config.general.llm_model = "claude-opus-4-20250514".into();
         let _model = super::create_model(&config).unwrap();
+    }
+
+    #[test]
+    fn create_model_claude_code_provider() {
+        let mut config = crate::config::Config::default();
+        config.general.llm_provider = "claude-code".into();
+        let model = super::create_model(&config).unwrap();
+        assert_eq!(model.name(), "claude-code");
     }
 
     #[test]

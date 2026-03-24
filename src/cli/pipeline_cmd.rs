@@ -1,4 +1,5 @@
 use crate::agent::extraction::{ExtractionInput, build_extraction_agent};
+use crate::agent::providers::ClaudeCodeProvider;
 use crate::agent::strategist::{
     StrategistInput, build_strategist_agent, collect_new_records, collect_suggestions,
 };
@@ -48,6 +49,12 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
     }
 
     let config = Config::resolved(&conn, &session_id)?;
+
+    if config.general.llm_provider == "claude-code" {
+        let conn = Arc::new(Mutex::new(conn));
+        return run_extract_claude_code(cmd_id, &session_id, &input, conn, cwd);
+    }
+
     let model = match crate::agent::create_model(&config) {
         Ok(m) => m,
         Err(e) => {
@@ -101,6 +108,66 @@ fn run_extract(cmd_id: i64) -> Result<(), Error> {
                 _ => "\x1b[2m[·]\x1b[0m",
             };
             eprintln!("[rt] {indicator} {text}");
+        }
+    }
+
+    Ok(())
+}
+
+fn run_extract_claude_code(
+    cmd_id: i64,
+    session_id: &str,
+    input: &ExtractionInput,
+    conn: Arc<Mutex<Connection>>,
+    cwd: std::path::PathBuf,
+) -> Result<(), Error> {
+    let rt_bin = std::env::current_exe()
+        .map_err(|e| Error::Config(format!("current_exe: {e}")))?;
+    let rt_path = rt_bin.display();
+
+    let system = format!(
+        "You are an extraction agent for a penetration testing knowledge base.\n\
+        Parse the tool output and insert ALL findings into the database using SQL.\n\
+        Use the Bash tool to run the commands below.\n\n\
+        Session ID: {session_id}\n\n\
+        To insert a host:\n\
+        {rt_path} sql \"INSERT OR IGNORE INTO hosts (session_id, ip, os, status) \
+        VALUES ('{session_id}', '<IP>', '<OS>', 'up')\"\n\n\
+        To insert a port (host must exist first):\n\
+        {rt_path} sql \"INSERT OR IGNORE INTO ports (session_id, host_id, port, protocol, service, version) \
+        VALUES ('{session_id}', (SELECT id FROM hosts WHERE session_id='{session_id}' AND ip='<IP>'), \
+        <PORT>, '<PROTOCOL>', '<SERVICE>', '<VERSION>')\"\n\n\
+        Rules:\n\
+        - Insert ALL hosts and ALL ports found in the output\n\
+        - Always insert hosts before their ports\n\
+        - Use exact values from the output (IPs, port numbers, service names, versions)\n\
+        - For protocol, use 'tcp' or 'udp'\n\
+        - Do NOT hallucinate data not present in the output"
+    );
+
+    let prompt = format!(
+        "Extract all hosts and ports from this output:\n\nCommand: {}\nTool: {}\n\nOutput:\n{}",
+        input.command,
+        input.tool.as_deref().unwrap_or("unknown"),
+        input.output,
+    );
+
+    let provider = ClaudeCodeProvider::new()
+        .with_cwd(cwd)
+        .with_max_turns(3);
+
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| Error::Config(format!("tokio runtime: {e}")))?;
+
+    match rt.block_on(provider.run_claude(&prompt, Some(&system))) {
+        Ok(_) => {
+            let c = conn.lock().unwrap();
+            commands::update_extraction_status(&c, cmd_id, "done")?;
+        }
+        Err(e) => {
+            let c = conn.lock().unwrap();
+            commands::update_extraction_status(&c, cmd_id, "failed")?;
+            return Err(Error::Config(format!("claude-code extraction: {e}")));
         }
     }
 

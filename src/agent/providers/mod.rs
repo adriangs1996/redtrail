@@ -156,7 +156,7 @@ impl ClaudeCodeProvider {
         contents
     }
 
-    async fn run_claude(&self, prompt: &str, system: Option<&str>) -> Result<(Vec<LanguageModelResponseContentType>, Option<f64>)> {
+    pub(crate) async fn run_claude(&self, prompt: &str, system: Option<&str>) -> Result<(Vec<LanguageModelResponseContentType>, Option<f64>)> {
         let args = self.build_args(prompt, system);
         let mut child = self.spawn_claude(&args)?;
 

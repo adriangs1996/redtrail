@@ -1,2 +1,3 @@
+feature-claude-code-extraction.llm.sh
 feature-init.sh
 feature-kb-query.sh

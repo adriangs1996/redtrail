@@ -125,28 +125,51 @@ fn run_extract_claude_code(
         .map_err(|e| Error::Config(format!("current_exe: {e}")))?;
     let rt_path = rt_bin.display();
 
+    let briefing = {
+        let c = conn.lock().unwrap();
+        crate::db::briefing::build_extractor_briefing(&c, session_id)
+            .unwrap_or_default()
+    };
+
     let system = format!(
         "You are an extraction agent for a penetration testing knowledge base.\n\
         Parse the tool output and insert ALL findings into the database using SQL.\n\
-        Use the Bash tool to run the commands below.\n\n\
+        Use the Bash tool to run `{rt_path} sql \"<SQL>\"` for each insert.\n\n\
+        {briefing}\n\n\
+        {schema}\n\n\
         Session ID: {session_id}\n\n\
-        To insert a host:\n\
+        ## SQL Templates\n\n\
+        Insert a host:\n\
         {rt_path} sql \"INSERT OR IGNORE INTO hosts (session_id, ip, os, status) \
         VALUES ('{session_id}', '<IP>', '<OS>', 'up')\"\n\n\
-        To insert a port (host must exist first):\n\
+        Insert a port (host must exist first):\n\
         {rt_path} sql \"INSERT OR IGNORE INTO ports (session_id, host_id, port, protocol, service, version) \
         VALUES ('{session_id}', (SELECT id FROM hosts WHERE session_id='{session_id}' AND ip='<IP>'), \
         <PORT>, '<PROTOCOL>', '<SERVICE>', '<VERSION>')\"\n\n\
-        Rules:\n\
-        - Insert ALL hosts and ALL ports found in the output\n\
-        - Always insert hosts before their ports\n\
-        - Use exact values from the output (IPs, port numbers, service names, versions)\n\
-        - For protocol, use 'tcp' or 'udp'\n\
-        - Do NOT hallucinate data not present in the output"
+        Insert a web path (host must exist first):\n\
+        {rt_path} sql \"INSERT OR IGNORE INTO web_paths (session_id, host_id, port, scheme, path, status_code, content_length, content_type, redirect_to, source) \
+        VALUES ('{session_id}', (SELECT id FROM hosts WHERE session_id='{session_id}' AND ip='<IP>'), \
+        <PORT>, '<SCHEME>', '<PATH>', <STATUS_CODE>, <CONTENT_LENGTH>, '<CONTENT_TYPE>', '<REDIRECT_TO>', '<SOURCE>')\"\n\n\
+        Insert a vulnerability (host must exist first):\n\
+        {rt_path} sql \"INSERT OR IGNORE INTO vulns (session_id, host_id, port, name, severity, cve, url, detail, source) \
+        VALUES ('{session_id}', (SELECT id FROM hosts WHERE session_id='{session_id}' AND ip='<IP>'), \
+        <PORT>, '<NAME>', '<SEVERITY>', '<CVE>', '<URL>', '<DETAIL>', '<SOURCE>')\"\n\n\
+        Insert credentials:\n\
+        {rt_path} sql \"INSERT OR IGNORE INTO credentials (session_id, username, password, hash, service, host, source) \
+        VALUES ('{session_id}', '<USERNAME>', '<PASSWORD>', '<HASH>', '<SERVICE>', '<HOST>', '<SOURCE>')\"\n\n\
+        ## Rules\n\
+        - Insert ALL findings from the output into the appropriate tables\n\
+        - Always insert hosts before records that reference them\n\
+        - Use exact values from the output — do NOT hallucinate data not present\n\
+        - For NULL values, use NULL (unquoted) in SQL\n\
+        - For web_paths: set source to the tool name (e.g. 'gobuster', 'feroxbuster')\n\
+        - For ports: protocol should be 'tcp' or 'udp'\n\
+        - Batch multiple inserts into a single Bash call using semicolons when possible",
+        schema = crate::db::briefing::SCHEMA_REFERENCE,
     );
 
     let prompt = format!(
-        "Extract all hosts and ports from this output:\n\nCommand: {}\nTool: {}\n\nOutput:\n{}",
+        "Extract all findings from this tool output and insert them into the database:\n\nCommand: {}\nTool: {}\n\nOutput:\n{}",
         input.command,
         input.tool.as_deref().unwrap_or("unknown"),
         input.output,
@@ -154,7 +177,7 @@ fn run_extract_claude_code(
 
     let provider = ClaudeCodeProvider::new()
         .with_cwd(cwd)
-        .with_max_turns(3);
+        .with_max_turns(5);
 
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| Error::Config(format!("tokio runtime: {e}")))?;

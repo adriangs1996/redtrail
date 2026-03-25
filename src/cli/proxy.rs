@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::resolve;
+use crate::{pipeline, resolve, spawn};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::time::Instant;
@@ -66,10 +66,9 @@ pub fn run(args: &[String]) -> Result<(), Error> {
     let output_str = String::from_utf8_lossy(&output).to_string();
 
     if let Ok(ctx) = resolve::resolve(&cwd) {
-        let config = ctx.config.clone();
         let conn = ctx.conn;
         let session_id = ctx.session_id;
-        if let Ok(result) = crate::pipeline::process_command(
+        if let Ok(result) = pipeline::process_command(
             &conn,
             &session_id,
             &cmd_str,
@@ -84,10 +83,10 @@ pub fn run(args: &[String]) -> Result<(), Error> {
             for warn in &result.scope_warnings {
                 eprintln!("[rt] warning: {warn}");
             }
-            if config.general.auto_extract {
-                if let Err(e) = crate::spawn::spawn_extraction(result.command_id) {
-                    eprintln!("[rt] extraction spawn failed: {e}");
-                }
+            if ctx.config.general.auto_extract
+                && let Err(e) = spawn::spawn_extraction(result.command_id)
+            {
+                eprintln!("[rt] extraction spawn failed: {e}");
             }
         }
     }

@@ -105,3 +105,94 @@ fn synthetize_unknown_tool() {
     let result = extractor::synthetize("curl http://example.com", Some("curl"), "hello world");
     assert!(result.is_empty());
 }
+
+// --- web_enum extractor tests ---
+
+#[test]
+fn synthetize_gobuster_fixture() {
+    let output = load_fixture("gobuster-scan.txt");
+    let result = extractor::synthetize(
+        "gobuster dir -u http://10.10.10.42 -w /usr/share/wordlists/dirb/common.txt",
+        Some("gobuster"),
+        &output,
+    );
+
+    let paths: Vec<_> = result.facts.iter().filter(|f| f.fact_type == "web_path").collect();
+    assert!(paths.len() >= 9, "expected at least 9 paths, got {}", paths.len());
+
+    let admin = paths.iter().find(|p| p.attributes["path"] == "/admin").unwrap();
+    assert_eq!(admin.attributes["status_code"], 301);
+    assert_eq!(admin.attributes["redirect_to"], "http://10.10.10.42/admin/");
+
+    let api = paths.iter().find(|p| p.attributes["path"] == "/api").unwrap();
+    assert_eq!(api.attributes["status_code"], 200);
+    assert_eq!(api.attributes["content_length"], 1245);
+
+    assert!(!result.relations.is_empty());
+}
+
+#[test]
+fn synthetize_gobuster_extracts_target_from_command() {
+    let output = "/test                 (Status: 200) [Size: 100]\n";
+    let result = extractor::synthetize(
+        "gobuster dir -u http://10.10.10.42:8080 -w wordlist.txt",
+        Some("gobuster"),
+        output,
+    );
+
+    let path = &result.facts[0];
+    assert_eq!(path.attributes["ip"], "10.10.10.42");
+    assert_eq!(path.attributes["port"], 8080);
+}
+
+#[test]
+fn synthetize_ffuf_format() {
+    let output = "admin                   [Status: 200, Size: 1234, Words: 56, Lines: 12]\n";
+    let result = extractor::synthetize(
+        "ffuf -u http://10.10.10.1/FUZZ -w wordlist.txt",
+        Some("ffuf"),
+        output,
+    );
+
+    assert!(!result.facts.is_empty());
+    let path = &result.facts[0];
+    assert_eq!(path.fact_type, "web_path");
+    assert_eq!(path.attributes["status_code"], 200);
+}
+
+#[test]
+fn synthetize_gobuster_empty_output() {
+    let result = extractor::synthetize("gobuster dir -u http://10.10.10.1 -w w.txt", Some("gobuster"), "");
+    assert!(result.is_empty());
+}
+
+// --- hydra extractor tests ---
+
+#[test]
+fn synthetize_hydra_basic() {
+    let output = "[22][ssh] host: 10.10.10.1   login: admin   password: secret123\n\
+                  [22][ssh] host: 10.10.10.1   login: root   password: toor\n";
+    let result = extractor::synthetize("hydra -l admin -P passwords.txt ssh://10.10.10.1", Some("hydra"), output);
+
+    let creds: Vec<_> = result.facts.iter().filter(|f| f.fact_type == "credential").collect();
+    assert_eq!(creds.len(), 2);
+
+    let admin = creds.iter().find(|c| c.attributes["username"] == "admin").unwrap();
+    assert_eq!(admin.attributes["password"], "secret123");
+    assert_eq!(admin.attributes["service"], "ssh");
+    assert_eq!(admin.attributes["ip"], "10.10.10.1");
+
+    let auth_rels: Vec<_> = result.relations.iter()
+        .filter(|r| r.relation_type == "authenticates_to")
+        .collect();
+    assert_eq!(auth_rels.len(), 2);
+}
+
+#[test]
+fn synthetize_hydra_no_results() {
+    let output = "Hydra (https://github.com/vanhauser-thc/thc-hydra)\n\
+                  [DATA] attacking ssh://10.10.10.1:22/\n\
+                  0 valid password found\n";
+    let result = extractor::synthetize("hydra -l admin -P pass.txt ssh://10.10.10.1", Some("hydra"), output);
+    assert!(result.facts.is_empty());
+}

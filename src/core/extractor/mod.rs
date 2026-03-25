@@ -1,4 +1,6 @@
 mod nmap;
+mod web_enum;
+mod hydra;
 
 use serde::{Deserialize, Serialize};
 

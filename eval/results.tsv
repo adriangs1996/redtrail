@@ -1,3 +1,0 @@
-experiment	description	composite_score	tests_passed	tests_total	status
-1	no improvement	51	2	3	revert:no-improvement
-2	Wired ClaudeCodeProvider into create_model() via AnyModel enum so `rt config set general.llm_provider claude-code` enables extraction via claude-code provider, making the feature-claude-code-extraction test passable.	48	2	3	revert:no-improvement

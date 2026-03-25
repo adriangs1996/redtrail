@@ -1,9 +1,0 @@
-name = "redtrail-probe"
-description = "L2 Probing — differential probes per hypothesis, confirm or refute with evidence."
-version = "1.0.0"
-
-triggers = ["probe", "verify", "test", "differential", "l2", "confirm hypothesis"]
-tools = ["query_table", "create_record", "update_record", "run_command", "suggest", "respond"]
-
-[deps]
-commands = ["rt hypotheses list", "rt status"]

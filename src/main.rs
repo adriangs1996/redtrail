@@ -1,17 +1,9 @@
-mod agent;
 mod cli;
-mod config;
-mod db;
-mod error;
-mod net;
-mod pipeline;
-mod skill_loader;
-mod spawn;
-mod resolve;
+mod cmd;
 
 fn main() {
     if let Err(e) = cli::run() {
-        eprintln!("error: {e}");
+        eprintln!("[rt] error: {e}");
         std::process::exit(1);
     }
 }

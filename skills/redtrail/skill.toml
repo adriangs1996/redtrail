@@ -1,8 +1,0 @@
-name = "redtrail"
-description = "Phase detection orchestrator. Reads workspace state and routes to the correct sub-skill."
-version = "1.0.0"
-
-triggers = ["pentest", "hacking", "ctf", "target", "engage", "start"]
-
-[deps]
-commands = ["rt status", "rt setup status"]

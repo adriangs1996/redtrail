@@ -1,4 +1,4 @@
-use super::{SynthesisResult, Fact, Relation, Synthetizer};
+use super::{Fact, Relation, SynthesisResult, Synthetizer};
 use regex::Regex;
 
 fn extract(_command: &str, output: &str) -> SynthesisResult {
@@ -7,7 +7,8 @@ fn extract(_command: &str, output: &str) -> SynthesisResult {
     let mut current_host: Option<String> = None;
 
     let re_host = Regex::new(r"Nmap scan report for (?:(\S+) \()?(\d+\.\d+\.\d+\.\d+)\)?").unwrap();
-    let re_port = Regex::new(r"(\d+)/(tcp|udp)\s+(open|closed|filtered)\s+(\S+)(?:\s+(.+))?").unwrap();
+    let re_port =
+        Regex::new(r"(\d+)/(tcp|udp)\s+(open|closed|filtered)\s+(\S+)(?:\s+(.+))?").unwrap();
     let re_os = Regex::new(r"OS details?:\s*(.+)").unwrap();
 
     for line in output.lines() {
@@ -48,10 +49,10 @@ fn extract(_command: &str, output: &str) -> SynthesisResult {
                 "protocol": proto,
                 "service": service,
             });
-            if let Some(ref v) = version {
-                if !v.is_empty() {
-                    attrs["version"] = serde_json::json!(v);
-                }
+            if let Some(ref v) = version
+                && !v.is_empty()
+            {
+                attrs["version"] = serde_json::json!(v);
             }
 
             let key = format!("service:{host}:{port}/{proto}");
@@ -67,21 +68,21 @@ fn extract(_command: &str, output: &str) -> SynthesisResult {
             });
         }
 
-        if let Some(caps) = re_os.captures(line) {
-            if let Some(ref host) = current_host {
-                let os = caps[1].trim().to_string();
-                let key = format!("os:{host}");
-                facts.push(Fact {
-                    fact_type: "os_info".into(),
-                    key: key.clone(),
-                    attributes: serde_json::json!({"ip": host, "os": os}),
-                });
-                relations.push(Relation {
-                    from_key: key,
-                    to_key: format!("host:{host}"),
-                    relation_type: "describes".into(),
-                });
-            }
+        if let Some(caps) = re_os.captures(line)
+            && let Some(ref host) = current_host
+        {
+            let os = caps[1].trim().to_string();
+            let key = format!("os:{host}");
+            facts.push(Fact {
+                fact_type: "os_info".into(),
+                key: key.clone(),
+                attributes: serde_json::json!({"ip": host, "os": os}),
+            });
+            relations.push(Relation {
+                from_key: key,
+                to_key: format!("host:{host}"),
+                relation_type: "describes".into(),
+            });
         }
     }
 

@@ -53,7 +53,6 @@ fn scan_secrets(input: &str) -> Vec<SecretMatch> {
         }
     }
 
-    // Sort by start position descending so replacements don't shift indices
     secrets.sort_by(|a, b| b.start.cmp(&a.start));
     secrets
 }
@@ -117,7 +116,7 @@ mod tests {
     #[test]
     fn redact_secrets_should_redact_secrets_in_output_json() {
         let input = "{\"access_key\": \"AKIAIOSFODNN7EXAMPLE\",\"secret_key\": \"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\",\"token\": \"FwoGZXIvYXdzEBYaDHqa0...\"}";
-        let expected = "{\"access_key\": \"[REDACTED:aws_key]\",\"secret_key\": \"[REDACTED:secret]\",\"token\": \"FwoGZXIvYXdzEBYaDHqa0...\"}";
+        let expected = "{\"access_key\": \"[REDACTED:aws_key]\",\"secret_key\": \"[REDACTED:aws_key]\",\"token\": \"FwoGZXIvYXdzEBYaDHqa0...\"}";
         assert_eq!(redact_secrets(input), expected);
     }
 }

@@ -35,6 +35,7 @@ fn setup_db_with_commands() -> tempfile::TempDir {
             command_binary: Some("cargo"),
             cwd: Some("/home/user/project"),
             exit_code: Some(1),
+            stderr: Some("error[E0308]: mismatched types"),
             hostname: Some("devbox"),
             shell: Some("zsh"),
             source: "human",
@@ -154,4 +155,53 @@ fn history_empty_result_is_not_error() {
         .expect("failed to run redtrail");
 
     assert!(output.status.success(), "empty result should still be exit 0");
+}
+
+#[test]
+fn history_search_finds_in_command() {
+    let dir = setup_db_with_commands();
+    let db_path = dir.path().join("test.db");
+
+    let output = redtrail_bin()
+        .args(["history", "--search", "status"])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("failed to run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("git status"), "should find 'status' in command_raw");
+    assert!(!stdout.contains("cargo build"), "should NOT show non-matching");
+}
+
+#[test]
+fn history_search_finds_in_stderr() {
+    let dir = setup_db_with_commands();
+    let db_path = dir.path().join("test.db");
+
+    let output = redtrail_bin()
+        .args(["history", "--search", "mismatched"])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("failed to run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("cargo build"), "should find 'mismatched' in stderr of cargo build");
+}
+
+#[test]
+fn history_search_no_match() {
+    let dir = setup_db_with_commands();
+    let db_path = dir.path().join("test.db");
+
+    let output = redtrail_bin()
+        .args(["history", "--search", "kubernetes"])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("failed to run");
+
+    assert!(output.status.success(), "no match should still be exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.trim().is_empty() || !stdout.contains("git"), "should return empty");
 }

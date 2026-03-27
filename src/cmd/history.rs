@@ -6,18 +6,33 @@ pub struct HistoryArgs<'a> {
     pub failed: bool,
     pub cmd: Option<&'a str>,
     pub cwd: Option<&'a str>,
+    pub today: bool,
+    pub search: Option<&'a str>,
     pub json: bool,
 }
 
-pub fn run(conn: &Connection, args: &HistoryArgs) -> Result<(), Error> {
-    let filter = CommandFilter {
-        failed_only: args.failed,
-        command_binary: args.cmd,
-        cwd: args.cwd,
-        ..Default::default()
-    };
+fn start_of_today() -> i64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    now - (now % 86400)
+}
 
-    let commands = db::get_commands(conn, &filter)?;
+pub fn run(conn: &Connection, args: &HistoryArgs) -> Result<(), Error> {
+    let commands = if let Some(query) = args.search {
+        db::search_commands(conn, query, 50)?
+    } else {
+        let since = if args.today { Some(start_of_today()) } else { None };
+        let filter = CommandFilter {
+            failed_only: args.failed,
+            command_binary: args.cmd,
+            cwd: args.cwd,
+            since,
+            ..Default::default()
+        };
+        db::get_commands(conn, &filter)?
+    };
 
     if args.json {
         print_json(&commands)?;

@@ -4,6 +4,13 @@ fn setup() -> rusqlite::Connection {
     db::open_in_memory().unwrap()
 }
 
+fn now_ts() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 #[test]
 fn insert_command_stores_and_retrieves() {
     let conn = setup();
@@ -156,4 +163,30 @@ fn get_commands_respects_limit() {
     assert_eq!(cmds.len(), 3);
     // Most recent first
     assert_eq!(cmds[0].command_raw, "cmd-9");
+}
+
+#[test]
+fn get_commands_filters_by_since_timestamp() {
+    let conn = setup();
+
+    // Old command (yesterday-ish)
+    db::insert_command(&conn, &db::NewCommand {
+        session_id: "s1", command_raw: "echo old",
+        timestamp_start: 1000, source: "human", ..Default::default()
+    }).unwrap();
+
+    // Recent command
+    let recent_ts = now_ts();
+    db::insert_command(&conn, &db::NewCommand {
+        session_id: "s1", command_raw: "echo recent",
+        timestamp_start: recent_ts, source: "human", ..Default::default()
+    }).unwrap();
+
+    let cmds = db::get_commands(&conn, &db::CommandFilter {
+        since: Some(recent_ts - 10),
+        ..Default::default()
+    }).unwrap();
+
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].command_raw, "echo recent");
 }

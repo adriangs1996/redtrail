@@ -1,2 +1,9 @@
+pub mod capture;
+pub mod config;
+pub mod export;
+pub mod forget;
 pub mod history;
 pub mod init;
+pub mod query;
+pub mod sessions;
+pub mod status;

@@ -183,6 +183,7 @@ pub struct NewCommand<'a> {
     pub source: &'a str,
     pub timestamp_start: i64,
     pub timestamp_end: Option<i64>,
+    pub stdout_truncated: bool,
     pub redacted: bool,
 }
 
@@ -200,6 +201,7 @@ pub struct CommandRow {
     pub timestamp_end: Option<i64>,
     pub stdout: Option<String>,
     pub stderr: Option<String>,
+    pub stdout_truncated: bool,
     pub redacted: bool,
 }
 
@@ -209,28 +211,40 @@ pub struct CommandFilter<'a> {
     pub command_binary: Option<&'a str>,
     pub cwd: Option<&'a str>,
     pub session_id: Option<&'a str>,
+    pub since: Option<i64>,
     pub limit: Option<usize>,
 }
 
 pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, cwd, git_repo, git_branch, exit_code, stdout, stderr, env_snapshot, hostname, shell, source, redacted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, cwd, git_repo, git_branch, exit_code, stdout, stderr, stdout_truncated, env_snapshot, hostname, shell, source, redacted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         rusqlite::params![
             id, cmd.session_id, cmd.timestamp_start, cmd.timestamp_end,
             cmd.command_raw, cmd.command_binary, cmd.command_subcommand,
             cmd.cwd, cmd.git_repo, cmd.git_branch, cmd.exit_code,
-            cmd.stdout, cmd.stderr, cmd.env_snapshot,
+            cmd.stdout, cmd.stderr, cmd.stdout_truncated, cmd.env_snapshot,
             cmd.hostname, cmd.shell, cmd.source, cmd.redacted,
         ],
     ).map_err(|e| Error::Db(e.to_string()))?;
+
+    // Sync FTS index
+    let rowid: i64 = conn
+        .query_row("SELECT rowid FROM commands WHERE id = ?1", [&id], |r| r.get(0))
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO commands_fts(rowid, command_raw, stdout, stderr) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![rowid, cmd.command_raw, cmd.stdout, cmd.stderr],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
     Ok(id)
 }
 
 pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<CommandRow>, Error> {
     let mut sql = String::from(
-        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, redacted FROM commands WHERE 1=1"
+        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, redacted FROM commands WHERE 1=1"
     );
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 1;
@@ -251,6 +265,11 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
     if let Some(sid) = filter.session_id {
         sql.push_str(&format!(" AND session_id = ?{idx}"));
         params.push(Box::new(sid.to_string()));
+        idx += 1;
+    }
+    if let Some(since) = filter.since {
+        sql.push_str(&format!(" AND timestamp_start >= ?{idx}"));
+        params.push(Box::new(since));
         #[allow(unused_assignments)]
         { idx += 1; }
     }
@@ -277,7 +296,8 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
             timestamp_end: row.get(10)?,
             stdout: row.get(11)?,
             stderr: row.get(12)?,
-            redacted: row.get(13)?,
+            stdout_truncated: row.get(13)?,
+            redacted: row.get(14)?,
         })
     }).map_err(|e| Error::Db(e.to_string()))?;
 
@@ -293,12 +313,12 @@ pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<St
     use crate::core::secrets::engine::redact_secrets;
 
     let redacted_raw = redact_secrets(cmd.command_raw);
-    let redacted_stdout = cmd.stdout.map(|s| redact_secrets(s));
-    let redacted_stderr = cmd.stderr.map(|s| redact_secrets(s));
+    let redacted_stdout = cmd.stdout.map(redact_secrets);
+    let redacted_stderr = cmd.stderr.map(redact_secrets);
 
     let was_redacted = redacted_raw != cmd.command_raw
-        || cmd.stdout.map_or(false, |s| redacted_stdout.as_deref() != Some(s))
-        || cmd.stderr.map_or(false, |s| redacted_stderr.as_deref() != Some(s));
+        || cmd.stdout.is_some_and(|s| redacted_stdout.as_deref() != Some(s))
+        || cmd.stderr.is_some_and(|s| redacted_stderr.as_deref() != Some(s));
 
     let redacted_cmd = NewCommand {
         command_raw: &redacted_raw,
@@ -309,4 +329,175 @@ pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<St
     };
 
     insert_command(conn, &redacted_cmd)
+}
+
+// --- Session API ---
+
+#[derive(Default)]
+pub struct NewSession<'a> {
+    pub cwd_initial: Option<&'a str>,
+    pub hostname: Option<&'a str>,
+    pub shell: Option<&'a str>,
+    pub source: &'a str,
+}
+
+pub struct SessionRow {
+    pub id: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub cwd_initial: Option<String>,
+    pub hostname: Option<String>,
+    pub shell: Option<String>,
+    pub source: String,
+    pub command_count: i64,
+    pub error_count: i64,
+}
+
+pub fn create_session(conn: &Connection, s: &NewSession) -> Result<String, Error> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT INTO sessions (id, started_at, cwd_initial, hostname, shell, source)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, now, s.cwd_initial, s.hostname, s.shell, s.source],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    Ok(id)
+}
+
+pub fn get_session(conn: &Connection, id: &str) -> Result<SessionRow, Error> {
+    conn.query_row(
+        "SELECT id, started_at, ended_at, cwd_initial, hostname, shell, source, command_count, error_count
+         FROM sessions WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(SessionRow {
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                cwd_initial: row.get(3)?,
+                hostname: row.get(4)?,
+                shell: row.get(5)?,
+                source: row.get(6)?,
+                command_count: row.get(7)?,
+                error_count: row.get(8)?,
+            })
+        },
+    )
+    .map_err(|e| Error::Db(e.to_string()))
+}
+
+pub fn list_sessions(conn: &Connection, limit: usize) -> Result<Vec<SessionRow>, Error> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, started_at, ended_at, cwd_initial, hostname, shell, source, command_count, error_count
+             FROM sessions ORDER BY started_at DESC LIMIT ?1",
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    let rows = stmt
+        .query_map([limit as i64], |row| {
+            Ok(SessionRow {
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                cwd_initial: row.get(3)?,
+                hostname: row.get(4)?,
+                shell: row.get(5)?,
+                source: row.get(6)?,
+                command_count: row.get(7)?,
+                error_count: row.get(8)?,
+            })
+        })
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| Error::Db(e.to_string()))?);
+    }
+    Ok(result)
+}
+
+// --- Full-text search ---
+
+pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<Vec<CommandRow>, Error> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.redacted
+         FROM commands_fts fts
+         JOIN commands c ON c.rowid = fts.rowid
+         WHERE commands_fts MATCH ?1
+         ORDER BY rank
+         LIMIT ?2"
+    ).map_err(|e| Error::Db(e.to_string()))?;
+
+    let rows = stmt.query_map(rusqlite::params![query, limit as i64], |row| {
+        Ok(CommandRow {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            command_raw: row.get(2)?,
+            command_binary: row.get(3)?,
+            cwd: row.get(4)?,
+            exit_code: row.get(5)?,
+            hostname: row.get(6)?,
+            shell: row.get(7)?,
+            source: row.get(8)?,
+            timestamp_start: row.get(9)?,
+            timestamp_end: row.get(10)?,
+            stdout: row.get(11)?,
+            stderr: row.get(12)?,
+            stdout_truncated: row.get(13)?,
+            redacted: row.get(14)?,
+        })
+    }).map_err(|e| Error::Db(e.to_string()))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| Error::Db(e.to_string()))?);
+    }
+    Ok(result)
+}
+
+// --- Forget / delete API ---
+
+pub fn forget_command(conn: &Connection, id: &str) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO commands_fts(commands_fts, rowid, command_raw, stdout, stderr)
+         SELECT 'delete', rowid, command_raw, stdout, stderr FROM commands WHERE id = ?1",
+        [id],
+    ).map_err(|e| Error::Db(e.to_string()))?;
+
+    conn.execute("DELETE FROM commands WHERE id = ?1", [id])
+        .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+pub fn forget_session(conn: &Connection, session_id: &str) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO commands_fts(commands_fts, rowid, command_raw, stdout, stderr)
+         SELECT 'delete', rowid, command_raw, stdout, stderr FROM commands WHERE session_id = ?1",
+        [session_id],
+    ).map_err(|e| Error::Db(e.to_string()))?;
+
+    conn.execute("DELETE FROM commands WHERE session_id = ?1", [session_id])
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute("DELETE FROM sessions WHERE id = ?1", [session_id])
+        .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+pub fn forget_since(conn: &Connection, since_ts: i64) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO commands_fts(commands_fts, rowid, command_raw, stdout, stderr)
+         SELECT 'delete', rowid, command_raw, stdout, stderr FROM commands WHERE timestamp_start >= ?1",
+        [since_ts],
+    ).map_err(|e| Error::Db(e.to_string()))?;
+
+    conn.execute("DELETE FROM commands WHERE timestamp_start >= ?1", [since_ts])
+        .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
 }

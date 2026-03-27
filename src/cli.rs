@@ -1,12 +1,10 @@
 use clap::{Parser, Subcommand};
-use crate::cmd;
-use redtrail::config::Config;
-use redtrail::context::AppContext;
-use redtrail::core;
+use redtrail::cmd;
+use redtrail::core::db;
 use redtrail::error::Error;
 
 #[derive(Parser)]
-#[command(name = "rt", about = "Terminal activity capture and knowledge extraction")]
+#[command(name = "redtrail", about = "Terminal intelligence engine")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -14,44 +12,48 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run a command through a PTY, capturing output and extracting facts
-    Proxy {
-        #[arg(trailing_var_arg = true, required = true)]
-        command: Vec<String>,
+    /// Output shell hook script for the given shell
+    Init {
+        shell: String,
     },
-    /// Execute raw SQL against the database
-    Sql {
-        query: String,
+    /// Show command history
+    History {
+        /// Show only failed commands (non-zero exit code)
+        #[arg(long)]
+        failed: bool,
+        /// Filter by command binary (e.g., git, docker)
+        #[arg(long)]
+        cmd: Option<String>,
+        /// Filter by working directory
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
-    /// Run LLM-based extraction on a stored event
-    Extract {
-        event_id: i64,
-        #[arg(long)]
-        force: bool,
-    },
+}
+
+fn open_db() -> Result<rusqlite::Connection, Error> {
+    if let Ok(path) = std::env::var("REDTRAIL_DB") {
+        db::open(&path)
+    } else {
+        let path = db::global_db_path()?;
+        db::open(path.to_str().unwrap())
+    }
 }
 
 pub fn run() -> Result<(), Error> {
     let cli = Cli::parse();
-    let db_path = core::db::global_db_path()?;
-    let conn = core::db::open(db_path.to_str().unwrap())?;
-    let cwd = std::env::current_dir()?;
-    let workspace_path = cwd.to_string_lossy().to_string();
-    let session_id = core::db::ensure_session(&conn, &workspace_path)?;
-    let config = Config::default();
-    let ctx = AppContext { conn, config, session_id };
-
     match cli.command {
-        Commands::Proxy { command } => {
-            cmd::proxy::run(&ctx, &cmd::proxy::ProxyArgs { command })
-        }
-        Commands::Sql { query, json } => {
-            cmd::sql::run(&ctx, &cmd::sql::SqlArgs { query, json })
-        }
-        Commands::Extract { event_id, force } => {
-            cmd::extract::run(&ctx, &cmd::extract::ExtractArgs { event_id, force })
+        Commands::Init { shell } => cmd::init::run(&shell),
+        Commands::History { failed, cmd, cwd, json } => {
+            let conn = open_db()?;
+            cmd::history::run(&conn, &cmd::history::HistoryArgs {
+                failed,
+                cmd: cmd.as_deref(),
+                cwd: cwd.as_deref(),
+                json,
+            })
         }
     }
 }

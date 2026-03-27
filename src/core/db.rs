@@ -1,58 +1,137 @@
-use crate::core::extractor::{Fact, Relation};
 use crate::error::Error;
 use rusqlite::Connection;
 
 const SCHEMA: &str = "
+-- Raw command capture
+CREATE TABLE IF NOT EXISTS commands (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    timestamp_start INTEGER NOT NULL,
+    timestamp_end INTEGER,
+    command_raw TEXT NOT NULL,
+    command_binary TEXT,
+    command_subcommand TEXT,
+    command_args TEXT,
+    command_flags TEXT,
+    cwd TEXT,
+    git_repo TEXT,
+    git_branch TEXT,
+    exit_code INTEGER,
+    stdout TEXT,
+    stderr TEXT,
+    stdout_truncated BOOLEAN DEFAULT 0,
+    env_snapshot TEXT,
+    hostname TEXT,
+    shell TEXT,
+    source TEXT NOT NULL DEFAULT 'human',
+    agent_session_id TEXT,
+    parent_process TEXT,
+    is_automated BOOLEAN DEFAULT 0,
+    redacted BOOLEAN DEFAULT 0,
+    extracted BOOLEAN DEFAULT 0,
+    created_at INTEGER DEFAULT (unixepoch())
+);
+
+-- Terminal sessions
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    started_at INTEGER,
+    ended_at INTEGER,
+    cwd_initial TEXT,
+    hostname TEXT,
+    shell TEXT,
+    source TEXT NOT NULL DEFAULT 'human',
+    agent_session_id TEXT,
+    command_count INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    human_command_count INTEGER DEFAULT 0,
+    agent_command_count INTEGER DEFAULT 0,
+    summary TEXT
+);
+
+-- Extracted entities
+CREATE TABLE IF NOT EXISTS entities (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
     name TEXT NOT NULL,
-    workspace_path TEXT NOT NULL UNIQUE,
-    created_at TEXT DEFAULT (datetime('now'))
+    properties TEXT,
+    first_seen INTEGER,
+    last_seen INTEGER,
+    source_command_id TEXT,
+    FOREIGN KEY (source_command_id) REFERENCES commands(id)
 );
 
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    command TEXT NOT NULL,
-    tool TEXT,
-    exit_code INTEGER,
-    duration_ms INTEGER,
-    output TEXT,
-    output_hash TEXT,
-    extraction_status TEXT DEFAULT 'stored',
-    created_at TEXT DEFAULT (datetime('now'))
+-- Entity relationships
+CREATE TABLE IF NOT EXISTS relationships (
+    id TEXT PRIMARY KEY,
+    source_entity_id TEXT NOT NULL,
+    target_entity_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    properties TEXT,
+    observed_at INTEGER,
+    source_command_id TEXT,
+    FOREIGN KEY (source_entity_id) REFERENCES entities(id),
+    FOREIGN KEY (target_entity_id) REFERENCES entities(id)
 );
 
-CREATE TABLE IF NOT EXISTS facts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    event_id INTEGER NOT NULL REFERENCES events(id),
-    fact_type TEXT NOT NULL,
-    key TEXT NOT NULL,
-    attributes TEXT NOT NULL DEFAULT '{}',
-    confidence REAL NOT NULL DEFAULT 1.0,
-    source TEXT NOT NULL DEFAULT 'regex',
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(session_id, key)
+-- Behavioral patterns
+CREATE TABLE IF NOT EXISTS patterns (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    description TEXT,
+    trigger_signature TEXT,
+    command_sequence TEXT,
+    frequency INTEGER,
+    confidence REAL,
+    last_observed INTEGER,
+    first_observed INTEGER,
+    active BOOLEAN DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS relations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    from_key TEXT NOT NULL,
-    to_key TEXT NOT NULL,
-    relation_type TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(session_id, from_key, to_key, relation_type)
+-- Error resolution mappings
+CREATE TABLE IF NOT EXISTS error_resolutions (
+    id TEXT PRIMARY KEY,
+    error_signature TEXT NOT NULL,
+    error_domain TEXT,
+    resolution_commands TEXT,
+    success_rate REAL,
+    occurrences INTEGER,
+    avg_time_to_resolve INTEGER,
+    last_seen INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id);
-CREATE INDEX IF NOT EXISTS idx_events_tool ON events(tool);
-CREATE INDEX IF NOT EXISTS idx_facts_session_type ON facts(session_id, fact_type);
-CREATE INDEX IF NOT EXISTS idx_facts_event ON facts(event_id);
-CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(session_id, from_key);
-CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(session_id, to_key);
+-- Proactive suggestions
+CREATE TABLE IF NOT EXISTS suggestions (
+    id TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    trigger_condition TEXT,
+    message TEXT,
+    source_pattern_id TEXT,
+    priority INTEGER,
+    shown_count INTEGER DEFAULT 0,
+    dismissed_count INTEGER DEFAULT 0,
+    accepted_count INTEGER DEFAULT 0,
+    active BOOLEAN DEFAULT 1,
+    FOREIGN KEY (source_pattern_id) REFERENCES patterns(id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_commands_binary_ts ON commands(command_binary, timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_commands_session_ts ON commands(session_id, timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_commands_cwd_ts ON commands(cwd, timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_commands_exit ON commands(exit_code) WHERE exit_code != 0;
+CREATE INDEX IF NOT EXISTS idx_commands_extracted ON commands(extracted) WHERE extracted = 0;
+CREATE INDEX IF NOT EXISTS idx_entities_type_name ON entities(type, name);
+CREATE INDEX IF NOT EXISTS idx_entities_last_seen ON entities(last_seen);
+CREATE INDEX IF NOT EXISTS idx_relationships_source ON relationships(source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_entity_id);
+CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(type, active);
+
+-- Full-text search
+CREATE VIRTUAL TABLE IF NOT EXISTS commands_fts USING fts5(
+    command_raw, stdout, stderr,
+    content='commands', content_rowid='rowid'
+);
 ";
 
 fn init(conn: &Connection) -> Result<(), Error> {
@@ -79,134 +158,155 @@ pub fn open_in_memory() -> Result<Connection, Error> {
 
 pub fn global_db_path() -> Result<std::path::PathBuf, Error> {
     let home = std::env::var("HOME").map_err(|_| Error::Config("HOME not set".into()))?;
-    let dir = std::path::PathBuf::from(home).join(".redtrail");
+    let dir = std::path::PathBuf::from(home).join(".local/share/redtrail");
     std::fs::create_dir_all(&dir)?;
-    Ok(dir.join("redtrail-v2.db"))
+    Ok(dir.join("redtrail.db"))
 }
 
-pub fn ensure_session(conn: &Connection, workspace_path: &str) -> Result<String, Error> {
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT id FROM sessions WHERE workspace_path = ?1",
-            [workspace_path],
-            |row| row.get(0),
-        )
-        .ok();
+// --- Command insert/query API ---
 
-    if let Some(id) = existing {
-        return Ok(id);
-    }
+#[derive(Default, Clone, Copy)]
+pub struct NewCommand<'a> {
+    pub session_id: &'a str,
+    pub command_raw: &'a str,
+    pub command_binary: Option<&'a str>,
+    pub command_subcommand: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub git_repo: Option<&'a str>,
+    pub git_branch: Option<&'a str>,
+    pub exit_code: Option<i32>,
+    pub stdout: Option<&'a str>,
+    pub stderr: Option<&'a str>,
+    pub env_snapshot: Option<&'a str>,
+    pub hostname: Option<&'a str>,
+    pub shell: Option<&'a str>,
+    pub source: &'a str,
+    pub timestamp_start: i64,
+    pub timestamp_end: Option<i64>,
+    pub redacted: bool,
+}
 
-    let dir_name = std::path::Path::new(workspace_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("session");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let id = format!("{dir_name}-{ts}");
+pub struct CommandRow {
+    pub id: String,
+    pub session_id: String,
+    pub command_raw: String,
+    pub command_binary: Option<String>,
+    pub cwd: Option<String>,
+    pub exit_code: Option<i32>,
+    pub hostname: Option<String>,
+    pub shell: Option<String>,
+    pub source: String,
+    pub timestamp_start: i64,
+    pub timestamp_end: Option<i64>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub redacted: bool,
+}
 
+#[derive(Default)]
+pub struct CommandFilter<'a> {
+    pub failed_only: bool,
+    pub command_binary: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub session_id: Option<&'a str>,
+    pub limit: Option<usize>,
+}
+
+pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
+    let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO sessions (id, name, workspace_path) VALUES (?1, ?2, ?3)",
-        rusqlite::params![id, dir_name, workspace_path],
-    )
-    .map_err(|e| Error::Db(e.to_string()))?;
-
+        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, cwd, git_repo, git_branch, exit_code, stdout, stderr, env_snapshot, hostname, shell, source, redacted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        rusqlite::params![
+            id, cmd.session_id, cmd.timestamp_start, cmd.timestamp_end,
+            cmd.command_raw, cmd.command_binary, cmd.command_subcommand,
+            cmd.cwd, cmd.git_repo, cmd.git_branch, cmd.exit_code,
+            cmd.stdout, cmd.stderr, cmd.env_snapshot,
+            cmd.hostname, cmd.shell, cmd.source, cmd.redacted,
+        ],
+    ).map_err(|e| Error::Db(e.to_string()))?;
     Ok(id)
 }
 
-pub fn insert_event(
-    conn: &Connection,
-    session_id: &str,
-    command: &str,
-    tool: Option<&str>,
-    exit_code: i32,
-    duration_ms: i64,
-    output: &str,
-    output_hash: &str,
-) -> Result<i64, Error> {
-    conn.execute(
-        "INSERT INTO events (session_id, command, tool, exit_code, duration_ms, output, output_hash)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![session_id, command, tool, exit_code, duration_ms, output, output_hash],
-    )
-    .map_err(|e| Error::Db(e.to_string()))?;
-    Ok(conn.last_insert_rowid())
-}
+pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<CommandRow>, Error> {
+    let mut sql = String::from(
+        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, redacted FROM commands WHERE 1=1"
+    );
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let mut idx = 1;
 
-pub fn update_extraction_status(
-    conn: &Connection,
-    event_id: i64,
-    status: &str,
-) -> Result<(), Error> {
-    conn.execute(
-        "UPDATE events SET extraction_status = ?1 WHERE id = ?2",
-        rusqlite::params![status, event_id],
-    )
-    .map_err(|e| Error::Db(e.to_string()))?;
-    Ok(())
-}
-
-pub fn insert_fact(
-    conn: &Connection,
-    session_id: &str,
-    event_id: i64,
-    fact_type: &str,
-    key: &str,
-    attributes: &serde_json::Value,
-    confidence: f64,
-    source: &str,
-) -> Result<i64, Error> {
-    let attr_str = serde_json::to_string(attributes).map_err(|e| Error::Db(e.to_string()))?;
-    conn.execute(
-        "INSERT INTO facts (session_id, event_id, fact_type, key, attributes, confidence, source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(session_id, key) DO UPDATE SET
-            attributes = json_patch(facts.attributes, excluded.attributes),
-            confidence = MAX(facts.confidence, excluded.confidence),
-            source = CASE WHEN excluded.confidence > facts.confidence THEN excluded.source ELSE facts.source END,
-            event_id = excluded.event_id,
-            updated_at = datetime('now')",
-        rusqlite::params![session_id, event_id, fact_type, key, attr_str, confidence, source],
-    )
-    .map_err(|e| Error::Db(e.to_string()))?;
-    Ok(conn.last_insert_rowid())
-}
-
-pub fn insert_relation(
-    conn: &Connection,
-    session_id: &str,
-    from_key: &str,
-    to_key: &str,
-    relation_type: &str,
-) -> Result<(), Error> {
-    conn.execute(
-        "INSERT OR IGNORE INTO relations (session_id, from_key, to_key, relation_type)
-         VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![session_id, from_key, to_key, relation_type],
-    )
-    .map_err(|e| Error::Db(e.to_string()))?;
-    Ok(())
-}
-
-pub fn store_extraction(
-    conn: &Connection,
-    session_id: &str,
-    event_id: i64,
-    facts: &[Fact],
-    relations: &[Relation],
-) -> Result<(), Error> {
-    let tx = conn.unchecked_transaction().map_err(|e| Error::Db(e.to_string()))?;
-
-    for fact in facts {
-        insert_fact(&tx, session_id, event_id, &fact.fact_type, &fact.key, &fact.attributes, 1.0, "regex")?;
+    if filter.failed_only {
+        sql.push_str(" AND exit_code IS NOT NULL AND exit_code != 0");
     }
-    for rel in relations {
-        insert_relation(&tx, session_id, &rel.from_key, &rel.to_key, &rel.relation_type)?;
+    if let Some(bin) = filter.command_binary {
+        sql.push_str(&format!(" AND command_binary = ?{idx}"));
+        params.push(Box::new(bin.to_string()));
+        idx += 1;
     }
-    update_extraction_status(&tx, event_id, "extracted")?;
+    if let Some(cwd) = filter.cwd {
+        sql.push_str(&format!(" AND cwd = ?{idx}"));
+        params.push(Box::new(cwd.to_string()));
+        idx += 1;
+    }
+    if let Some(sid) = filter.session_id {
+        sql.push_str(&format!(" AND session_id = ?{idx}"));
+        params.push(Box::new(sid.to_string()));
+        #[allow(unused_assignments)]
+        { idx += 1; }
+    }
 
-    tx.commit().map_err(|e| Error::Db(e.to_string()))?;
-    Ok(())
+    sql.push_str(" ORDER BY timestamp_start DESC");
+
+    let limit = filter.limit.unwrap_or(50);
+    sql.push_str(&format!(" LIMIT {limit}"));
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(|e| Error::Db(e.to_string()))?;
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        Ok(CommandRow {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            command_raw: row.get(2)?,
+            command_binary: row.get(3)?,
+            cwd: row.get(4)?,
+            exit_code: row.get(5)?,
+            hostname: row.get(6)?,
+            shell: row.get(7)?,
+            source: row.get(8)?,
+            timestamp_start: row.get(9)?,
+            timestamp_end: row.get(10)?,
+            stdout: row.get(11)?,
+            stderr: row.get(12)?,
+            redacted: row.get(13)?,
+        })
+    }).map_err(|e| Error::Db(e.to_string()))?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| Error::Db(e.to_string()))?);
+    }
+    Ok(result)
+}
+
+/// Insert a command with automatic secret redaction on command_raw, stdout, and stderr.
+pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
+    use crate::core::secrets::engine::redact_secrets;
+
+    let redacted_raw = redact_secrets(cmd.command_raw);
+    let redacted_stdout = cmd.stdout.map(|s| redact_secrets(s));
+    let redacted_stderr = cmd.stderr.map(|s| redact_secrets(s));
+
+    let was_redacted = redacted_raw != cmd.command_raw
+        || cmd.stdout.map_or(false, |s| redacted_stdout.as_deref() != Some(s))
+        || cmd.stderr.map_or(false, |s| redacted_stderr.as_deref() != Some(s));
+
+    let redacted_cmd = NewCommand {
+        command_raw: &redacted_raw,
+        stdout: redacted_stdout.as_deref(),
+        stderr: redacted_stderr.as_deref(),
+        redacted: was_redacted,
+        ..*cmd
+    };
+
+    insert_command(conn, &redacted_cmd)
 }

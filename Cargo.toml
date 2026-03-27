@@ -5,28 +5,18 @@ edition = "2024"
 license = "MIT"
 
 [[bin]]
-name = "rt"
+name = "redtrail"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 rusqlite = { version = "0.39", features = ["bundled"] }
-portable-pty = "0.9"
-aisdk = { version = "0.5", features = ["anthropic", "openaichatcompletions"] }
-futures = "0.3"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
-async-trait = "0.1.89"
-async-stream = "0.3.6"
 inventory = "0.3"
-sha2 = "0.10"
-libc = "0.2"
-schemars = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

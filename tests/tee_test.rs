@@ -1,4 +1,5 @@
-use redtrail::core::tee::{TempFileHeader, write_capture_file, read_capture_file, strip_ansi};
+use redtrail::core::tee::{TempFileHeader, write_capture_file, read_capture_file, strip_ansi, allocate_pty_pair};
+use std::os::fd::AsRawFd;
 
 #[test]
 fn write_and_read_capture_file_roundtrip() {
@@ -91,4 +92,45 @@ fn read_capture_file_with_empty_content() {
     let (h, content) = read_capture_file(&path).unwrap();
     assert_eq!(h.ts_start, 1000);
     assert_eq!(content, "");
+}
+
+#[test]
+fn pty_allocation_creates_valid_pair() {
+    let pty = allocate_pty_pair().expect("PTY allocation should succeed");
+
+    // Slave path should exist and be a PTY device
+    assert!(
+        std::path::Path::new(&pty.slave_path).exists(),
+        "slave path should exist: {}",
+        pty.slave_path
+    );
+
+    // Master fd should be valid
+    assert!(pty.master_fd.as_raw_fd() >= 0);
+}
+
+#[test]
+fn pty_relay_captures_output() {
+    use std::io::Write;
+
+    let pty = allocate_pty_pair().expect("PTY allocation should succeed");
+
+    // Write to the slave (simulating a command's stdout)
+    let mut slave = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&pty.slave_path)
+        .unwrap();
+    slave.write_all(b"hello from pty\n").unwrap();
+    // Flush to ensure data reaches the master before we read
+    slave.flush().unwrap();
+
+    // Read from the master (what redtrail tee does)
+    // Note: we read BEFORE closing slave, since closing the last slave fd
+    // causes EIO on the master on macOS.
+    let mut buf = vec![0u8; 1024];
+    let n = nix::unistd::read(pty.master_fd.as_raw_fd(), &mut buf).unwrap();
+
+    assert!(n > 0, "expected data from PTY master, got 0 bytes");
+    let output = String::from_utf8_lossy(&buf[..n]);
+    assert!(output.contains("hello from pty"), "got: {output}");
 }

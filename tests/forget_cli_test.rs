@@ -4,6 +4,13 @@ fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
 }
 
+fn now_ts() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 fn setup_db() -> (tempfile::TempDir, String, String) {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -16,7 +23,7 @@ fn setup_db() -> (tempfile::TempDir, String, String) {
     let cmd_id = redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
         session_id: &sid,
         command_raw: "echo hello",
-        timestamp_start: 1000,
+        timestamp_start: 1000, // ancient
         source: "human",
         ..Default::default()
     }).unwrap();
@@ -24,7 +31,7 @@ fn setup_db() -> (tempfile::TempDir, String, String) {
     redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
         session_id: &sid,
         command_raw: "echo world",
-        timestamp_start: 2000,
+        timestamp_start: now_ts(), // recent
         source: "human",
         ..Default::default()
     }).unwrap();
@@ -74,10 +81,9 @@ fn forget_last_duration_via_cli() {
     let (dir, _sid, _cmd_id) = setup_db();
     let db_path = dir.path().join("test.db");
 
-    // Delete everything from the last 500s (should delete the ts=2000 one since we pass --last with a relative duration)
-    // Actually, let's use a concrete since timestamp to keep it deterministic
+    // Delete the last 1 hour — should catch the "echo world" (recent) but not "echo hello" (ancient)
     let output = redtrail_bin()
-        .args(["forget", "--since", "1500"])
+        .args(["forget", "--last", "1h"])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .output()
         .expect("failed to run");
@@ -87,5 +93,5 @@ fn forget_last_duration_via_cli() {
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds.len(), 1);
-    assert_eq!(cmds[0].command_raw, "echo hello");
+    assert_eq!(cmds[0].command_raw, "echo hello", "ancient command should survive");
 }

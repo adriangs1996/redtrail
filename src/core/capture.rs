@@ -1,8 +1,5 @@
 const DEFAULT_BLACKLIST: &[&str] = &[
-    "vim", "nvim", "nano", "vi",
-    "ssh", "scp",
-    "top", "htop", "btop",
-    "less", "more", "man",
+    "vim", "nvim", "nano", "vi", "ssh", "scp", "top", "htop", "btop", "less", "more", "man",
     "tmux", "screen",
 ];
 
@@ -88,4 +85,170 @@ pub fn detect_source(
 
 pub fn is_automated(source: &str) -> bool {
     source != "human"
+}
+
+// --- Command parsing ---
+
+/// Commands that have subcommands (binary → first non-flag arg is a subcommand).
+const SUBCOMMAND_BINARIES: &[&str] = &[
+    "git",
+    "docker",
+    "docker-compose",
+    "podman",
+    "kubectl",
+    "helm",
+    "terraform",
+    "pulumi",
+    "tofu",
+    "cargo",
+    "go",
+    "npm",
+    "yarn",
+    "pnpm",
+    "pip",
+    "systemctl",
+    "journalctl",
+];
+
+pub struct ParsedCommand {
+    pub binary: String,
+    pub subcommand: Option<String>,
+    pub args: Vec<String>,
+    pub flags: std::collections::HashMap<String, serde_json::Value>,
+}
+
+pub fn parse_command(command_raw: &str) -> ParsedCommand {
+    let words = shell_words::split(command_raw).unwrap_or_default();
+    if words.is_empty() {
+        return ParsedCommand {
+            binary: String::new(),
+            subcommand: None,
+            args: Vec::new(),
+            flags: std::collections::HashMap::new(),
+        };
+    }
+
+    let binary = words[0].clone();
+    let has_subcommand = SUBCOMMAND_BINARIES.contains(&binary.as_str());
+
+    let mut subcommand = None;
+    let mut args = Vec::new();
+    let mut flags = std::collections::HashMap::new();
+    let mut found_subcommand = false;
+
+    for word in words.iter().skip(1) {
+        if word.starts_with("--") {
+            // Long flag: --amend, --force
+            if let Some((key, val)) = word.split_once('=') {
+                flags.insert(key.to_string(), serde_json::json!(val));
+            } else {
+                flags.insert(word.clone(), serde_json::json!(true));
+            }
+        } else if word.starts_with('-') {
+            // Short flag: -m, -t, -la — store as boolean
+            // We can't reliably tell which short flags take values without
+            // per-binary knowledge, so we don't consume the next word.
+            flags.insert(word.clone(), serde_json::json!(true));
+        } else if has_subcommand && !found_subcommand {
+            subcommand = Some(word.clone());
+            found_subcommand = true;
+        } else {
+            args.push(word.clone());
+        }
+    }
+
+    ParsedCommand {
+        binary,
+        subcommand,
+        args,
+        flags,
+    }
+}
+
+// --- Duration parsing ---
+
+/// Parse a human-friendly duration string into seconds.
+/// Supports: "30s", "5m", "1h", "7d", or plain seconds "3600".
+pub fn parse_duration(s: &str) -> Result<i64, crate::error::Error> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(crate::error::Error::Config("empty duration".into()));
+    }
+
+    if let Ok(secs) = s.parse::<i64>() {
+        return Ok(secs);
+    }
+
+    let (num_str, suffix) = s.split_at(s.len() - 1);
+    let num: i64 = num_str
+        .parse()
+        .map_err(|_| crate::error::Error::Config(format!("invalid duration: {s}")))?;
+
+    match suffix {
+        "s" => Ok(num),
+        "m" => Ok(num * 60),
+        "h" => Ok(num * 3600),
+        "d" => Ok(num * 86400),
+        _ => Err(crate::error::Error::Config(format!(
+            "unknown duration suffix '{suffix}' in '{s}'. Use s/m/h/d"
+        ))),
+    }
+}
+
+// --- Env snapshot ---
+
+pub const SNAPSHOT_ENV_VARS: &[&str] = &[
+    "PATH",
+    "VIRTUAL_ENV",
+    "CONDA_DEFAULT_ENV",
+    "NODE_ENV",
+    "AWS_PROFILE",
+    "KUBECONFIG",
+    "DOCKER_HOST",
+    "GOPATH",
+    "RUST_LOG",
+];
+
+pub fn env_snapshot(env: &std::collections::HashMap<String, String>) -> String {
+    let mut map = serde_json::Map::new();
+    for key in SNAPSHOT_ENV_VARS {
+        if let Some(val) = env.get(*key) {
+            map.insert(key.to_string(), serde_json::Value::String(val.clone()));
+        }
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
+// --- Git context ---
+
+pub struct GitContext {
+    pub repo: Option<String>,
+    pub branch: Option<String>,
+}
+
+pub fn git_context(cwd: &str) -> GitContext {
+    let repo = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+
+    let branch = std::process::Command::new("git")
+        .args(["branch", "--show-current"])
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| {
+            let b = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if b.is_empty() { None } else { Some(b) }
+        });
+
+    GitContext { repo, branch }
 }

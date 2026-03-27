@@ -40,6 +40,13 @@ impl SecretScanner for AwsKeyScanner {
             if !left_ok || !right_ok {
                 continue;
             }
+            // Skip if preceded by a known token prefix (e.g., ghp_, gho_, ghu_, ghs_, ghr_)
+            if m.start() >= 4 {
+                let prefix = &input[m.start() - 4..m.start()];
+                if matches!(prefix, "ghp_" | "gho_" | "ghu_" | "ghs_" | "ghr_") {
+                    continue;
+                }
+            }
             // Skip if overlapping with an already-detected key ID
             if matches
                 .iter()

@@ -115,18 +115,17 @@ fn pty_relay_captures_output() {
 
     let pty = allocate_pty_pair().expect("PTY allocation should succeed");
 
-    // Write to the slave (simulating a command's stdout)
-    let mut slave = std::fs::OpenOptions::new()
-        .write(true)
-        .open(&pty.slave_path)
-        .unwrap();
-    slave.write_all(b"hello from pty\n").unwrap();
-    // Flush to ensure data reaches the master before we read
-    slave.flush().unwrap();
+    // Write to the slave fd directly (simulating a command's stdout)
+    let mut slave_file = unsafe {
+        use std::os::fd::FromRawFd;
+        // Dup the fd so we don't close the original when slave_file drops
+        let dup_fd = nix::unistd::dup(pty.slave_fd.as_raw_fd()).unwrap();
+        std::fs::File::from_raw_fd(dup_fd)
+    };
+    slave_file.write_all(b"hello from pty\n").unwrap();
+    slave_file.flush().unwrap();
 
     // Read from the master (what redtrail tee does)
-    // Note: we read BEFORE closing slave, since closing the last slave fd
-    // causes EIO on the master on macOS.
     let mut buf = vec![0u8; 1024];
     let n = nix::unistd::read(pty.master_fd.as_raw_fd(), &mut buf).unwrap();
 

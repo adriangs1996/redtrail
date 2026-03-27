@@ -12,6 +12,8 @@ export REDTRAIL_DB="$TMPDIR/test.db"
 # .zshrc that sources our hooks
 cat > "$TMPDIR/.zshrc" <<'EOF'
 eval "$(/usr/local/bin/redtrail init zsh)"
+setopt NO_HUP
+setopt NO_CHECK_JOBS
 EOF
 
 # Commands to feed to the interactive shell

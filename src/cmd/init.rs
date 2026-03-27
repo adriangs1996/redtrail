@@ -71,21 +71,19 @@ __redtrail_precmd() {
 
     [[ -z "$__REDTRAIL_CMD" ]] && return
 
-    local stdout_arg="" stderr_arg=""
+    local -a capture_args=(
+        --session-id "$REDTRAIL_SESSION_ID"
+        --command "$__REDTRAIL_CMD"
+        --cwd "$__REDTRAIL_CWD"
+        --exit-code "$exit_code"
+        --shell zsh
+        --hostname "${HOST:-$(hostname)}"
+    )
     local out_file="/tmp/rt-out-$$" err_file="/tmp/rt-err-$$"
-    [[ -f "$out_file" ]] && stdout_arg="--stdout-file $out_file"
-    [[ -f "$err_file" ]] && stderr_arg="--stderr-file $err_file"
+    [[ -f "$out_file" ]] && capture_args+=(--stdout-file "$out_file")
+    [[ -f "$err_file" ]] && capture_args+=(--stderr-file "$err_file")
 
-    # capture runs sync in precmd, reads temp files, inserts to DB, deletes temp files
-    command redtrail capture \
-        --session-id "$REDTRAIL_SESSION_ID" \
-        --command "$__REDTRAIL_CMD" \
-        --cwd "$__REDTRAIL_CWD" \
-        --exit-code "$exit_code" \
-        --shell zsh \
-        --hostname "${HOST:-$(hostname)}" \
-        $stdout_arg $stderr_arg \
-        2>/dev/null &!
+    command redtrail capture "${capture_args[@]}" 2>/dev/null &!
 
     unset __REDTRAIL_CMD __REDTRAIL_CWD
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE
@@ -183,21 +181,20 @@ __redtrail_precmd() {
         return
     fi
 
-    local stdout_arg="" stderr_arg=""
+    local capture_args=(
+        --session-id "$REDTRAIL_SESSION_ID"
+        --command "$__REDTRAIL_CMD"
+        --cwd "$__REDTRAIL_CWD"
+        --exit-code "$exit_code"
+        --shell bash
+        --hostname "${HOSTNAME:-$(hostname)}"
+    )
     local out_file="/tmp/rt-out-$$" err_file="/tmp/rt-err-$$"
-    [[ -f "$out_file" ]] && stdout_arg="--stdout-file $out_file"
-    [[ -f "$err_file" ]] && stderr_arg="--stderr-file $err_file"
+    [[ -f "$out_file" ]] && capture_args+=(--stdout-file "$out_file")
+    [[ -f "$err_file" ]] && capture_args+=(--stderr-file "$err_file")
 
     # capture runs SYNC in bash — reads and deletes temp files before returning
-    command redtrail capture \
-        --session-id "$REDTRAIL_SESSION_ID" \
-        --command "$__REDTRAIL_CMD" \
-        --cwd "$__REDTRAIL_CWD" \
-        --exit-code "$exit_code" \
-        --shell bash \
-        --hostname "${HOSTNAME:-$(hostname)}" \
-        $stdout_arg $stderr_arg \
-        2>/dev/null
+    command redtrail capture "${capture_args[@]}" 2>/dev/null
 
     unset __REDTRAIL_CMD __REDTRAIL_CWD
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE

@@ -154,6 +154,14 @@ pub struct TeeConfig {
     pub max_bytes: usize,
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static FLUSH_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn handle_sigusr1(_: nix::libc::c_int) {
+    FLUSH_REQUESTED.store(true, Ordering::Relaxed);
+}
+
 /// Run the tee relay: allocate PTYs, write paths to FIFO, relay output, write temp files on EOF.
 pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
@@ -175,15 +183,20 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
         writeln!(fifo, "{} {}", stdout_pty.slave_path, stderr_pty.slave_path)?;
     }
 
-    // Give the shell time to read the FIFO and open the slave paths before
-    // we drop our slave fds. Without this delay, dropping immediately can cause
-    // the master to see EIO before the shell has opened its own slave fds.
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Keep slave fds alive — dropping them before the shell opens its own causes
+    // a race where the master sees EIO. Instead, we use SIGUSR1 from the shell's
+    // precmd to signal "flush and exit."
+    let _stdout_slave = stdout_pty.slave_fd;
+    let _stderr_slave = stderr_pty.slave_fd;
 
-    // Drop our slave fds. The shell now holds the only slave references.
-    // When the shell closes them (in precmd), the master sees EOF.
-    drop(stdout_pty.slave_fd);
-    drop(stderr_pty.slave_fd);
+    // Set up SIGUSR1 handler — precmd sends this to tell us to flush
+    FLUSH_REQUESTED.store(false, Ordering::Relaxed);
+    unsafe {
+        nix::sys::signal::signal(
+            nix::sys::signal::Signal::SIGUSR1,
+            nix::sys::signal::SigHandler::Handler(handle_sigusr1),
+        ).ok();
+    }
 
     // Open /dev/tty for relay output
     let mut tty = std::fs::OpenOptions::new()
@@ -219,15 +232,24 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
             ));
         }
 
-        match poll(&mut pollfds, PollTimeout::from(1000u16)) {
+        match poll(&mut pollfds, PollTimeout::from(250u16)) {
             Ok(0) => {
+                // Check if precmd signaled us to flush
+                if FLUSH_REQUESTED.load(Ordering::Relaxed) {
+                    break;
+                }
                 if last_activity.elapsed() > inactivity_timeout {
                     break;
                 }
                 continue;
             }
             Ok(_) => {}
-            Err(nix::errno::Errno::EINTR) => continue,
+            Err(nix::errno::Errno::EINTR) => {
+                if FLUSH_REQUESTED.load(Ordering::Relaxed) {
+                    break;
+                }
+                continue;
+            }
             Err(_) => break,
         }
 

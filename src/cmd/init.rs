@@ -61,12 +61,9 @@ __redtrail_precmd() {
         exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR}
         exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&-
 
-        # Wait for tee with polling timeout (max 500ms)
-        local i
-        for i in 1 2 3 4 5; do
-            kill -0 "$__RT_TEE_PID" 2>/dev/null || break
-            sleep 0.1
-        done
+        # Signal tee to flush and exit, then wait for it
+        kill -USR1 "$__RT_TEE_PID" 2>/dev/null
+        wait "$__RT_TEE_PID" 2>/dev/null
     fi
 
     [[ -z "$__REDTRAIL_CMD" ]] && return
@@ -168,12 +165,9 @@ __redtrail_precmd() {
         exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR}
         exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&-
 
-        # Wait for tee with polling timeout (max 500ms)
-        local i
-        for i in 1 2 3 4 5; do
-            kill -0 "$__RT_TEE_PID" 2>/dev/null || break
-            sleep 0.1
-        done
+        # Signal tee to flush and exit, then wait for it
+        kill -USR1 "$__RT_TEE_PID" 2>/dev/null
+        wait "$__RT_TEE_PID" 2>/dev/null
     fi
 
     if [ -z "$__REDTRAIL_CMD" ]; then

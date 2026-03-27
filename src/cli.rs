@@ -93,6 +93,18 @@ enum Commands {
         #[arg(long)]
         stderr_file: Option<String>,
     },
+    /// PTY-aware output capture (called by shell hooks)
+    #[command(hide = true)]
+    Tee {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        shell_pid: String,
+        #[arg(long)]
+        ctl_fifo: String,
+        #[arg(long)]
+        max_bytes: Option<usize>,
+    },
     /// Export captured data as JSON
     Export {
         /// Export commands from the last duration (e.g., 7d, 24h)
@@ -214,6 +226,14 @@ pub fn run() -> Result<(), Error> {
                 hostname: hostname.as_deref(),
                 stdout_file: stdout_file.as_deref(),
                 stderr_file: stderr_file.as_deref(),
+            })
+        }
+        Commands::Tee { session, shell_pid, ctl_fifo, max_bytes } => {
+            cmd::tee::run(&cmd::tee::TeeArgs {
+                session: &session,
+                shell_pid: &shell_pid,
+                ctl_fifo: &ctl_fifo,
+                max_bytes,
             })
         }
         Commands::Export { since } => {

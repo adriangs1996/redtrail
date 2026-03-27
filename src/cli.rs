@@ -62,9 +62,9 @@ enum Commands {
         /// Delete all commands in a session
         #[arg(long)]
         session: Option<String>,
-        /// Delete commands since a timestamp
+        /// Delete commands from the last duration (e.g., 1h, 30m, 7d)
         #[arg(long)]
-        since: Option<i64>,
+        last: Option<String>,
     },
     /// Generate a new session ID (called by shell hooks)
     #[command(hide = true)]
@@ -81,19 +81,23 @@ enum Commands {
         #[arg(long)]
         exit_code: Option<i32>,
         #[arg(long)]
-        ts_start: i64,
+        ts_start: Option<i64>,
         #[arg(long)]
         ts_end: Option<i64>,
         #[arg(long)]
         shell: Option<String>,
         #[arg(long)]
         hostname: Option<String>,
+        #[arg(long)]
+        stdout_file: Option<String>,
+        #[arg(long)]
+        stderr_file: Option<String>,
     },
     /// Export captured data as JSON
     Export {
-        /// Export commands since this timestamp
+        /// Export commands from the last duration (e.g., 7d, 24h)
         #[arg(long)]
-        since: Option<i64>,
+        since: Option<String>,
     },
     /// View or modify configuration
     Config {
@@ -164,8 +168,18 @@ pub fn run() -> Result<(), Error> {
             let conn = open_db()?;
             cmd::status::run(&conn, db_path().as_deref())
         }
-        Commands::Forget { command, session, since } => {
+        Commands::Forget { command, session, last } => {
             let conn = open_db()?;
+            let since = if let Some(dur) = &last {
+                let secs = redtrail::core::capture::parse_duration(dur)?;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                Some(now - secs)
+            } else {
+                None
+            };
             cmd::forget::run(&conn, &cmd::forget::ForgetArgs {
                 command: command.as_deref(),
                 session: session.as_deref(),
@@ -187,7 +201,7 @@ pub fn run() -> Result<(), Error> {
             print!("{id}");
             Ok(())
         }
-        Commands::Capture { session_id, command, cwd, exit_code, ts_start, ts_end, shell, hostname } => {
+        Commands::Capture { session_id, command, cwd, exit_code, ts_start, ts_end, shell, hostname, stdout_file, stderr_file } => {
             let conn = open_db()?;
             cmd::capture::run(&conn, &cmd::capture::CaptureArgs {
                 session_id: &session_id,
@@ -198,11 +212,23 @@ pub fn run() -> Result<(), Error> {
                 ts_end,
                 shell: shell.as_deref(),
                 hostname: hostname.as_deref(),
+                stdout_file: stdout_file.as_deref(),
+                stderr_file: stderr_file.as_deref(),
             })
         }
         Commands::Export { since } => {
             let conn = open_db()?;
-            cmd::export::run(&conn, since)
+            let since_ts = if let Some(dur) = &since {
+                let secs = redtrail::core::capture::parse_duration(dur)?;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                Some(now - secs)
+            } else {
+                None
+            };
+            cmd::export::run(&conn, since_ts)
         }
         Commands::Config { action } => {
             let config_path = config_path();

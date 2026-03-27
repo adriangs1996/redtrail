@@ -99,3 +99,100 @@ fn tee_creates_pty_and_captures_output() {
     let _ = std::fs::remove_file(&out_file);
     let _ = std::fs::remove_file(format!("/tmp/rt-err-{shell_pid}"));
 }
+
+#[test]
+fn end_to_end_tee_then_capture() {
+    // Skip if no controlling terminal
+    if std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .is_err()
+    {
+        eprintln!("skipping end_to_end_tee_then_capture: no /dev/tty");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let _conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+
+    let fifo_path = dir.path().join("ctl-fifo");
+    let shell_pid = format!("e2e-{}", std::process::id());
+
+    nix::unistd::mkfifo(
+        &fifo_path,
+        nix::sys::stat::Mode::from_bits_truncate(0o600),
+    )
+    .expect("mkfifo");
+
+    // Start tee
+    let mut tee_child = redtrail_bin()
+        .args([
+            "tee",
+            "--session", "e2e-sess",
+            "--shell-pid", &shell_pid,
+            "--ctl-fifo", fifo_path.to_str().unwrap(),
+        ])
+        .spawn()
+        .expect("start tee");
+
+    // Read PTY paths
+    let fifo_content = std::fs::read_to_string(&fifo_path).unwrap();
+    let paths: Vec<&str> = fifo_content.trim().split_whitespace().collect();
+
+    // Simulate command writing to stdout PTY
+    {
+        let mut slave = std::fs::OpenOptions::new()
+            .write(true)
+            .open(paths[0])
+            .unwrap();
+        slave.write_all(b"build output line 1\nbuild output line 2\n").unwrap();
+    }
+    // Close stderr slave
+    {
+        let _ = std::fs::OpenOptions::new().write(true).open(paths[1]);
+    }
+
+    // Wait for tee to finish
+    tee_child.wait().expect("tee wait");
+
+    // Now run capture with the temp files
+    let out_file = format!("/tmp/rt-out-{}", shell_pid);
+    let output = redtrail_bin()
+        .args([
+            "capture",
+            "--session-id", "e2e-sess",
+            "--command", "make build",
+            "--exit-code", "0",
+            "--shell", "zsh",
+            "--hostname", "devbox",
+            "--stdout-file", &out_file,
+        ])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("capture");
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    // Verify DB
+    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let cmds = redtrail::core::db::get_commands(
+        &conn,
+        &redtrail::core::db::CommandFilter::default(),
+    )
+    .unwrap();
+
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].command_raw, "make build");
+    let stdout = cmds[0].stdout.as_ref().expect("stdout should be captured");
+    assert!(stdout.contains("build output line 1"), "stdout: {stdout}");
+    assert!(stdout.contains("build output line 2"), "stdout: {stdout}");
+    assert!(cmds[0].timestamp_start > 0, "timestamp should come from tee");
+    assert!(cmds[0].timestamp_end.is_some(), "ts_end should come from tee");
+
+    // Temp files should be cleaned up by capture
+    assert!(!std::path::Path::new(&out_file).exists());
+
+    // Clean up any remaining
+    let _ = std::fs::remove_file(format!("/tmp/rt-err-{}", shell_pid));
+}

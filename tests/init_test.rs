@@ -76,3 +76,49 @@ fn init_unknown_shell_fails() {
         "error should list supported shells.\nGot:\n{stderr}"
     );
 }
+
+#[test]
+fn zsh_hook_contains_fifo_setup() {
+    let output = redtrail_bin()
+        .args(["init", "zsh"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(hook.contains("mkfifo"), "zsh hook should create FIFO");
+    assert!(hook.contains("redtrail tee"), "zsh hook should launch redtrail tee");
+    assert!(hook.contains("read -t 1"), "zsh hook should have FIFO read timeout");
+    assert!(hook.contains("__RT_BLACKLIST"), "zsh hook should have inline blacklist");
+    assert!(hook.contains("TRAPCHLD"), "zsh hook should have crash recovery");
+}
+
+#[test]
+fn bash_hook_contains_fifo_setup() {
+    let output = redtrail_bin()
+        .args(["init", "bash"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(hook.contains("mkfifo"), "bash hook should create FIFO");
+    assert!(hook.contains("redtrail tee"), "bash hook should launch redtrail tee");
+    assert!(hook.contains("read -t 1"), "bash hook should have FIFO read timeout");
+    assert!(hook.contains("history 1"), "bash hook should use history 1 for full command");
+    assert!(hook.contains("__RT_CAPTURE_ACTIVE"), "bash hook should have compound command guard");
+}
+
+#[test]
+fn hooks_do_not_use_date_nanoseconds() {
+    for shell in &["zsh", "bash"] {
+        let output = redtrail_bin()
+            .args(["init", shell])
+            .output()
+            .expect("failed to run");
+
+        let hook = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !hook.contains("date +%s%N"),
+            "{shell} hook should NOT use date +%s%N (broken on macOS)"
+        );
+    }
+}

@@ -5,6 +5,7 @@ pub enum Error {
     Db(String),
     Config(String),
     Io(std::io::Error),
+    Pty(String),
 }
 
 impl fmt::Display for Error {
@@ -13,6 +14,7 @@ impl fmt::Display for Error {
             Error::Db(e) => write!(f, "database error: {e}"),
             Error::Config(e) => write!(f, "config error: {e}"),
             Error::Io(e) => write!(f, "io error: {e}"),
+            Error::Pty(e) => write!(f, "pty error: {e}"),
         }
     }
 }

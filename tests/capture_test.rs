@@ -190,3 +190,25 @@ fn get_commands_filters_by_since_timestamp() {
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].command_raw, "echo recent");
 }
+
+#[test]
+fn insert_command_stores_stderr_truncated() {
+    let conn = setup();
+
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "make",
+            stderr: Some("error output"),
+            stderr_truncated: true,
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let cmds = db::get_commands(&conn, &db::CommandFilter::default()).unwrap();
+    assert!(cmds[0].stderr_truncated);
+}

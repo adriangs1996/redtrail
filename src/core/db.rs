@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS commands (
     stdout TEXT,
     stderr TEXT,
     stdout_truncated BOOLEAN DEFAULT 0,
+    stderr_truncated BOOLEAN DEFAULT 0,
     env_snapshot TEXT,
     hostname TEXT,
     shell TEXT,
@@ -147,8 +148,18 @@ fn init(conn: &Connection) -> Result<(), Error> {
 pub fn open(path: &str) -> Result<Connection, Error> {
     let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
     init(&conn)?;
+    set_file_permissions(path);
     Ok(conn)
 }
+
+#[cfg(unix)]
+fn set_file_permissions(path: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn set_file_permissions(_path: &str) {}
 
 pub fn open_in_memory() -> Result<Connection, Error> {
     let conn = Connection::open_in_memory().map_err(|e| Error::Db(e.to_string()))?;
@@ -171,6 +182,8 @@ pub struct NewCommand<'a> {
     pub command_raw: &'a str,
     pub command_binary: Option<&'a str>,
     pub command_subcommand: Option<&'a str>,
+    pub command_args: Option<&'a str>,
+    pub command_flags: Option<&'a str>,
     pub cwd: Option<&'a str>,
     pub git_repo: Option<&'a str>,
     pub git_branch: Option<&'a str>,
@@ -184,6 +197,7 @@ pub struct NewCommand<'a> {
     pub timestamp_start: i64,
     pub timestamp_end: Option<i64>,
     pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
     pub redacted: bool,
 }
 
@@ -202,6 +216,7 @@ pub struct CommandRow {
     pub stdout: Option<String>,
     pub stderr: Option<String>,
     pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
     pub redacted: bool,
 }
 
@@ -218,14 +233,15 @@ pub struct CommandFilter<'a> {
 pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, cwd, git_repo, git_branch, exit_code, stdout, stderr, stdout_truncated, env_snapshot, hostname, shell, source, redacted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, command_args, command_flags, cwd, git_repo, git_branch, exit_code, stdout, stderr, stdout_truncated, stderr_truncated, env_snapshot, hostname, shell, source, redacted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         rusqlite::params![
             id, cmd.session_id, cmd.timestamp_start, cmd.timestamp_end,
             cmd.command_raw, cmd.command_binary, cmd.command_subcommand,
+            cmd.command_args, cmd.command_flags,
             cmd.cwd, cmd.git_repo, cmd.git_branch, cmd.exit_code,
-            cmd.stdout, cmd.stderr, cmd.stdout_truncated, cmd.env_snapshot,
-            cmd.hostname, cmd.shell, cmd.source, cmd.redacted,
+            cmd.stdout, cmd.stderr, cmd.stdout_truncated, cmd.stderr_truncated,
+            cmd.env_snapshot, cmd.hostname, cmd.shell, cmd.source, cmd.redacted,
         ],
     ).map_err(|e| Error::Db(e.to_string()))?;
 
@@ -239,12 +255,27 @@ pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Err
     )
     .map_err(|e| Error::Db(e.to_string()))?;
 
+    // Update session counters
+    conn.execute(
+        "UPDATE sessions SET command_count = command_count + 1 WHERE id = ?1",
+        [cmd.session_id],
+    )
+    .ok(); // Best-effort: session may not exist (e.g. test without session setup)
+
+    if cmd.exit_code.is_some_and(|c| c != 0) {
+        conn.execute(
+            "UPDATE sessions SET error_count = error_count + 1 WHERE id = ?1",
+            [cmd.session_id],
+        )
+        .ok();
+    }
+
     Ok(id)
 }
 
 pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<CommandRow>, Error> {
     let mut sql = String::from(
-        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, redacted FROM commands WHERE 1=1"
+        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, stderr_truncated, redacted FROM commands WHERE 1=1"
     );
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 1;
@@ -297,7 +328,8 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
             stdout: row.get(11)?,
             stderr: row.get(12)?,
             stdout_truncated: row.get(13)?,
-            redacted: row.get(14)?,
+            stderr_truncated: row.get(14)?,
+            redacted: row.get(15)?,
         })
     }).map_err(|e| Error::Db(e.to_string()))?;
 
@@ -427,7 +459,7 @@ pub fn list_sessions(conn: &Connection, limit: usize) -> Result<Vec<SessionRow>,
 
 pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<Vec<CommandRow>, Error> {
     let mut stmt = conn.prepare(
-        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.redacted
+        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.stderr_truncated, c.redacted
          FROM commands_fts fts
          JOIN commands c ON c.rowid = fts.rowid
          WHERE commands_fts MATCH ?1
@@ -451,7 +483,8 @@ pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<V
             stdout: row.get(11)?,
             stderr: row.get(12)?,
             stdout_truncated: row.get(13)?,
-            redacted: row.get(14)?,
+            stderr_truncated: row.get(14)?,
+            redacted: row.get(15)?,
         })
     }).map_err(|e| Error::Db(e.to_string()))?;
 

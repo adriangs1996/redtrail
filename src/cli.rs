@@ -39,6 +39,9 @@ enum Commands {
         /// Filter by tool type (e.g., Bash, Edit, Write, Read)
         #[arg(long)]
         tool: Option<String>,
+        /// Include stdout/stderr inline
+        #[arg(long)]
+        verbose: bool,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -164,16 +167,28 @@ pub fn run() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Init { shell } => cmd::init::run(&shell),
-        Commands::History { failed, cmd, cwd, today, search, source, tool, json } => {
+        Commands::History { failed, cmd, cwd, today, search, source, tool, verbose, json } => {
+            let resolved_cwd = cwd.map(|c| {
+                if c == "." {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|p| p.canonicalize().ok().or(Some(p)))
+                        .and_then(|p| p.to_str().map(String::from))
+                        .unwrap_or(c)
+                } else {
+                    c
+                }
+            });
             let conn = open_db()?;
             cmd::history::run(&conn, &cmd::history::HistoryArgs {
                 failed,
                 cmd: cmd.as_deref(),
-                cwd: cwd.as_deref(),
+                cwd: resolved_cwd.as_deref(),
                 today,
                 search: search.as_deref(),
                 source: source.as_deref(),
                 tool: tool.as_deref(),
+                verbose,
                 json,
             })
         }

@@ -60,6 +60,44 @@ fn status_shows_session_count() {
 }
 
 #[test]
+fn status_shows_last_capture() {
+    let dir = setup_db();
+    let db_path = dir.path().join("test.db");
+
+    let output = redtrail_bin()
+        .args(["status"])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("failed to run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Last capture:"),
+        "should show last capture info, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn status_shows_capture_active() {
+    let dir = setup_db();
+    let db_path = dir.path().join("test.db");
+
+    let output = redtrail_bin()
+        .args(["status"])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("failed to run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Capture:"),
+        "should show capture status, got:\n{stdout}"
+    );
+}
+
+#[test]
 fn status_shows_db_size() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");

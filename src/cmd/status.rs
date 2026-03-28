@@ -44,6 +44,39 @@ pub fn run(conn: &Connection, db_path: Option<&str>) -> Result<(), Error> {
 
     let human_count = cmd_count - agent_count;
 
+    // Last capture timestamp
+    let last_capture: Option<i64> = conn
+        .query_row(
+            "SELECT MAX(timestamp_start) FROM commands",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    let last_capture_str = match last_capture {
+        Some(ts) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            let ago = (now - ts).max(0);
+            if ago < 60 {
+                "just now".into()
+            } else if ago < 3600 {
+                format!("{}m ago", ago / 60)
+            } else if ago < 86400 {
+                format!("{}h ago", ago / 3600)
+            } else {
+                format!("{}d ago", ago / 86400)
+            }
+        }
+        None => "never".into(),
+    };
+
+    // Capture status: check if REDTRAIL_SESSION_ID is set (shell hooks active)
+    let capture_active = std::env::var("REDTRAIL_SESSION_ID").is_ok();
+    let capture_str = if capture_active { "active" } else { "inactive (shell hooks not loaded)" };
+
     println!("Database:   {}", db_path.unwrap_or("in-memory"));
     println!("DB size:    {db_size}");
     println!("Commands:   {cmd_count}");
@@ -51,6 +84,8 @@ pub fn run(conn: &Connection, db_path: Option<&str>) -> Result<(), Error> {
     println!("  Agent:    {agent_count}");
     println!("Sessions:   {session_count}");
     println!("Failures:   {failed_count}");
+    println!("Last capture: {last_capture_str}");
+    println!("Capture:    {capture_str}");
 
     Ok(())
 }

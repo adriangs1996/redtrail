@@ -122,3 +122,27 @@ fn hooks_do_not_use_date_nanoseconds() {
         );
     }
 }
+
+#[test]
+fn hooks_capture_ts_start_at_preexec() {
+    for shell in &["zsh", "bash"] {
+        let output = redtrail_bin()
+            .args(["init", shell])
+            .output()
+            .expect("failed to run");
+
+        let hook = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            hook.contains("__REDTRAIL_TS_START"),
+            "{shell} hook should capture ts_start at preexec.\nGot:\n{hook}"
+        );
+        assert!(
+            hook.contains("--ts-start"),
+            "{shell} hook should pass --ts-start to capture.\nGot:\n{hook}"
+        );
+        assert!(
+            hook.contains("--ts-end"),
+            "{shell} hook should pass --ts-end to capture.\nGot:\n{hook}"
+        );
+    }
+}

@@ -15,13 +15,20 @@ pub struct CaptureArgs<'a> {
     pub hostname: Option<&'a str>,
     pub stdout_file: Option<&'a str>,
     pub stderr_file: Option<&'a str>,
+    pub config: Option<&'a crate::config::Config>,
 }
 
 pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
+    let default_config = crate::config::Config::default();
+    let config = args.config.unwrap_or(&default_config);
+
+    if !config.capture.enabled {
+        return Ok(());
+    }
+
     let parsed = capture::parse_command(args.command);
 
-    let blacklist = capture::default_blacklist();
-    if capture::is_blacklisted(&parsed.binary, &blacklist) {
+    if capture::is_blacklisted(&parsed.binary, &config.capture.blacklist_commands) {
         return Ok(());
     }
 
@@ -52,14 +59,23 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
         .or(stderr_capture.as_ref().map(|(h, _)| h.ts_end))
         .or(args.ts_end);
 
-    let stdout_content = stdout_capture.as_ref().map(|(_, c)| c.as_str());
-    let stderr_content = stderr_capture.as_ref().map(|(_, c)| c.as_str());
+    let max_bytes = config.capture.max_stdout_bytes;
+
+    // Apply config-driven truncation on top of any tee-level truncation
+    let stdout_raw = stdout_capture.as_ref().map(|(_, c)| c.as_str());
+    let stderr_raw = stderr_capture.as_ref().map(|(_, c)| c.as_str());
+    let stdout_truncated_str = stdout_raw.map(|s| capture::truncate_output(s, max_bytes));
+    let stderr_truncated_str = stderr_raw.map(|s| capture::truncate_output(s, max_bytes));
+    let stdout_content = stdout_truncated_str.as_deref();
+    let stderr_content = stderr_truncated_str.as_deref();
     let stdout_truncated = stdout_capture
         .as_ref()
-        .is_some_and(|(h, _)| h.truncated);
+        .is_some_and(|(h, _)| h.truncated)
+        || stdout_raw.is_some_and(|s| s.len() > max_bytes);
     let stderr_truncated = stderr_capture
         .as_ref()
-        .is_some_and(|(h, _)| h.truncated);
+        .is_some_and(|(h, _)| h.truncated)
+        || stderr_raw.is_some_and(|s| s.len() > max_bytes);
 
     let git = args.cwd.map(capture::git_context);
     let git_repo = git.as_ref().and_then(|g| g.repo.as_deref());
@@ -72,36 +88,99 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
     let args_json = serde_json::to_string(&parsed.args).unwrap_or_default();
     let flags_json = serde_json::to_string(&parsed.flags).unwrap_or_default();
 
-    db::insert_command_redacted(
-        conn,
-        &db::NewCommand {
-            session_id: args.session_id,
-            command_raw: args.command,
-            command_binary: if parsed.binary.is_empty() {
-                None
-            } else {
-                Some(&parsed.binary)
-            },
-            command_subcommand: parsed.subcommand.as_deref(),
-            command_args: Some(&args_json),
-            command_flags: Some(&flags_json),
-            cwd: args.cwd,
-            git_repo,
-            git_branch,
-            exit_code: args.exit_code,
-            stdout: stdout_content,
-            stderr: stderr_content,
-            stdout_truncated,
-            stderr_truncated,
-            timestamp_start: ts_start,
-            timestamp_end: ts_end,
-            shell: args.shell,
-            hostname: args.hostname,
-            env_snapshot: Some(&env_snap),
-            source,
-            ..Default::default()
+    use crate::config::OnDetect;
+    use crate::core::secrets::engine::{load_custom_patterns, redact_with_custom_patterns, CustomPattern};
+
+    let custom_patterns: Vec<CustomPattern> = config
+        .secrets
+        .patterns_file
+        .as_deref()
+        .map(load_custom_patterns)
+        .unwrap_or_default();
+
+    let base_cmd = db::NewCommand {
+        session_id: args.session_id,
+        command_raw: args.command,
+        command_binary: if parsed.binary.is_empty() {
+            None
+        } else {
+            Some(&parsed.binary)
         },
-    )?;
+        command_subcommand: parsed.subcommand.as_deref(),
+        command_args: Some(&args_json),
+        command_flags: Some(&flags_json),
+        cwd: args.cwd,
+        git_repo,
+        git_branch,
+        exit_code: args.exit_code,
+        stdout: stdout_content,
+        stderr: stderr_content,
+        stdout_truncated,
+        stderr_truncated,
+        timestamp_start: ts_start,
+        timestamp_end: ts_end,
+        shell: args.shell,
+        hostname: args.hostname,
+        env_snapshot: Some(&env_snap),
+        source,
+        ..Default::default()
+    };
+
+    match config.secrets.on_detect {
+        OnDetect::Redact => {
+            db::insert_command_redacted_with_patterns(conn, &base_cmd, &custom_patterns)?;
+        }
+        OnDetect::Warn => {
+            // Check for secrets but store unredacted
+            let (_, raw_labels) = redact_with_custom_patterns(args.command, &custom_patterns);
+            let stdout_labels: Vec<String> = stdout_content
+                .map(|s| redact_with_custom_patterns(s, &custom_patterns).1)
+                .unwrap_or_default();
+            let stderr_labels: Vec<String> = stderr_content
+                .map(|s| redact_with_custom_patterns(s, &custom_patterns).1)
+                .unwrap_or_default();
+            let has_secrets = !raw_labels.is_empty()
+                || !stdout_labels.is_empty()
+                || !stderr_labels.is_empty();
+
+            if has_secrets {
+                let all_labels: Vec<&str> = raw_labels.iter()
+                    .chain(stdout_labels.iter())
+                    .chain(stderr_labels.iter())
+                    .map(|s| s.as_str())
+                    .collect();
+                eprintln!(
+                    "[redtrail] WARN: secrets detected ({}), storing unredacted per on_detect=warn",
+                    all_labels.join(", ")
+                );
+            }
+
+            let cmd = db::NewCommand {
+                redacted: has_secrets,
+                ..base_cmd
+            };
+            db::insert_command(conn, &cmd)?;
+        }
+        OnDetect::Block => {
+            // Check for secrets — if found, refuse to store
+            let (_, raw_labels) = redact_with_custom_patterns(args.command, &custom_patterns);
+            let stdout_labels: Vec<String> = stdout_content
+                .map(|s| redact_with_custom_patterns(s, &custom_patterns).1)
+                .unwrap_or_default();
+            let stderr_labels: Vec<String> = stderr_content
+                .map(|s| redact_with_custom_patterns(s, &custom_patterns).1)
+                .unwrap_or_default();
+            let has_secrets = !raw_labels.is_empty()
+                || !stdout_labels.is_empty()
+                || !stderr_labels.is_empty();
+
+            if has_secrets {
+                // Don't store — secrets would leak
+                return Ok(());
+            }
+            db::insert_command(conn, &base_cmd)?;
+        }
+    };
 
     // Clean up temp files
     if let Some(path) = args.stdout_file {

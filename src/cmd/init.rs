@@ -12,6 +12,7 @@ __RT_BLACKLIST=":vim:nvim:nano:vi:ssh:scp:top:htop:btop:less:more:man:tmux:scree
 __redtrail_preexec() {
     __REDTRAIL_CMD="$1"
     __REDTRAIL_CWD="$PWD"
+    __REDTRAIL_TS_START="$(date +%s)"
     __RT_CAPTURE_ACTIVE=""
 
     # Blacklist check — extract binary, handle path-qualified and env-prefixed
@@ -68,11 +69,16 @@ __redtrail_precmd() {
 
     [[ -z "$__REDTRAIL_CMD" ]] && return
 
+    local ts_end
+    ts_end="$(date +%s)"
+
     local -a capture_args=(
         --session-id "$REDTRAIL_SESSION_ID"
         --command "$__REDTRAIL_CMD"
         --cwd "$__REDTRAIL_CWD"
         --exit-code "$exit_code"
+        --ts-start "$__REDTRAIL_TS_START"
+        --ts-end "$ts_end"
         --shell zsh
         --hostname "${HOST:-$(hostname)}"
     )
@@ -82,7 +88,7 @@ __redtrail_precmd() {
 
     command redtrail capture "${capture_args[@]}" 2>/dev/null &!
 
-    unset __REDTRAIL_CMD __REDTRAIL_CWD
+    unset __REDTRAIL_CMD __REDTRAIL_CWD __REDTRAIL_TS_START
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE
 }
 
@@ -118,6 +124,7 @@ __redtrail_preexec() {
     # Use history for full pipeline (BASH_COMMAND only has current simple command)
     __REDTRAIL_CMD="$(HISTTIMEFORMAT= history 1 | sed 's/^[ ]*[0-9]*[ ]*//')"
     __REDTRAIL_CWD="$PWD"
+    __REDTRAIL_TS_START="$(date +%s)"
 
     # Blacklist check
     local cmd_str="$__REDTRAIL_CMD"
@@ -175,11 +182,16 @@ __redtrail_precmd() {
         return
     fi
 
+    local ts_end
+    ts_end="$(date +%s)"
+
     local capture_args=(
         --session-id "$REDTRAIL_SESSION_ID"
         --command "$__REDTRAIL_CMD"
         --cwd "$__REDTRAIL_CWD"
         --exit-code "$exit_code"
+        --ts-start "$__REDTRAIL_TS_START"
+        --ts-end "$ts_end"
         --shell bash
         --hostname "${HOSTNAME:-$(hostname)}"
     )
@@ -190,7 +202,7 @@ __redtrail_precmd() {
     # capture runs SYNC in bash — reads and deletes temp files before returning
     command redtrail capture "${capture_args[@]}" 2>/dev/null
 
-    unset __REDTRAIL_CMD __REDTRAIL_CWD
+    unset __REDTRAIL_CMD __REDTRAIL_CWD __REDTRAIL_TS_START
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE
     unset __RT_INSIDE_PRECMD
 }

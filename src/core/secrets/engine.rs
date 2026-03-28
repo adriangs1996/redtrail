@@ -63,10 +63,53 @@ pub fn redact_secrets(input_or_output: &str) -> String {
 
 /// Redact secrets and return (redacted_string, list of pattern labels found).
 pub fn redact_secrets_with_labels(input_or_output: &str) -> (String, Vec<String>) {
-    let secrets = scan_secrets(input_or_output);
+    redact_with_custom_patterns(input_or_output, &[])
+}
+
+/// A user-defined regex pattern loaded from secrets.patterns_file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct CustomPattern {
+    pub label: String,
+    pub pattern: String,
+}
+
+/// Load custom patterns from a YAML file. Returns empty vec on any error.
+pub fn load_custom_patterns(path: &str) -> Vec<CustomPattern> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_yaml::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
+/// Redact using both static scanners and optional custom patterns.
+pub fn redact_with_custom_patterns(
+    input_or_output: &str,
+    custom: &[CustomPattern],
+) -> (String, Vec<String>) {
+    let mut secrets = scan_secrets(input_or_output);
+
+    // Apply custom patterns
+    for cp in custom {
+        if let Ok(re) = regex::Regex::new(&cp.pattern) {
+            for m in re.find_iter(input_or_output) {
+                if !already_covered(&secrets, m.start(), m.end()) {
+                    secrets.push(SecretMatch {
+                        start: m.start(),
+                        end: m.end(),
+                        label: cp.label.clone(),
+                    });
+                }
+            }
+        }
+    }
+
     if secrets.is_empty() {
         return (input_or_output.to_string(), Vec::new());
     }
+
+    // Re-sort descending by start so replace_range works correctly
+    secrets.sort_by(|a, b| b.start.cmp(&a.start));
+
     let labels: Vec<String> = secrets.iter().map(|s| s.label.clone()).collect();
     let mut result = input_or_output.to_string();
     for s in &secrets {

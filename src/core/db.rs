@@ -160,6 +160,8 @@ fn init(conn: &Connection) -> Result<(), Error> {
     conn.execute_batch(SCHEMA)
         .map_err(|e| Error::Db(e.to_string()))?;
     migrate_agent_columns(conn)?;
+    conn.execute_batch("PRAGMA optimize;")
+        .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
 }
 
@@ -393,17 +395,26 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
 
 /// Insert a command with automatic secret redaction on command_raw, stdout, and stderr.
 pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
-    use crate::core::secrets::engine::redact_secrets_with_labels;
+    insert_command_redacted_with_patterns(conn, cmd, &[])
+}
 
-    let (redacted_raw, raw_labels) = redact_secrets_with_labels(cmd.command_raw);
+/// Insert with redaction using both built-in and custom patterns.
+pub fn insert_command_redacted_with_patterns(
+    conn: &Connection,
+    cmd: &NewCommand,
+    custom: &[crate::core::secrets::engine::CustomPattern],
+) -> Result<String, Error> {
+    use crate::core::secrets::engine::redact_with_custom_patterns;
+
+    let (redacted_raw, raw_labels) = redact_with_custom_patterns(cmd.command_raw, custom);
     let (redacted_stdout, stdout_labels) = cmd
         .stdout
-        .map(redact_secrets_with_labels)
+        .map(|s| redact_with_custom_patterns(s, custom))
         .map(|(s, l)| (Some(s), l))
         .unwrap_or((None, Vec::new()));
     let (redacted_stderr, stderr_labels) = cmd
         .stderr
-        .map(redact_secrets_with_labels)
+        .map(|s| redact_with_custom_patterns(s, custom))
         .map(|(s, l)| (Some(s), l))
         .unwrap_or((None, Vec::new()));
 

@@ -242,6 +242,7 @@ pub fn run() -> Result<(), Error> {
             Ok(())
         }
         Commands::Capture { session_id, command, cwd, exit_code, ts_start, ts_end, shell, hostname, stdout_file, stderr_file } => {
+            let config = redtrail::config::Config::load(&config_path()).unwrap_or_default();
             let conn = open_db()?;
             cmd::capture::run(&conn, &cmd::capture::CaptureArgs {
                 session_id: &session_id,
@@ -254,6 +255,7 @@ pub fn run() -> Result<(), Error> {
                 hostname: hostname.as_deref(),
                 stdout_file: stdout_file.as_deref(),
                 stderr_file: stderr_file.as_deref(),
+                config: Some(&config),
             })
         }
         Commands::Ingest => {

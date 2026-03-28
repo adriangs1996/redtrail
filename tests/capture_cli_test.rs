@@ -187,7 +187,7 @@ fn capture_custom_blacklist_from_config() {
 }
 
 #[test]
-fn capture_uses_max_stdout_bytes_from_config() {
+fn capture_compresses_stdout_over_max_bytes_from_config() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
@@ -212,9 +212,10 @@ fn capture_uses_max_stdout_bytes_from_config() {
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds.len(), 1);
+    // Over-limit stdout is compressed and decompressed transparently — full content recovered
     let stdout = cmds[0].stdout.as_deref().unwrap_or("");
-    assert!(stdout.len() <= 40, "stdout should be truncated to ~20 bytes, got {} bytes", stdout.len());
-    assert!(cmds[0].stdout_truncated, "stdout_truncated flag should be set");
+    assert_eq!(stdout.len(), 100, "full stdout should be recovered via decompression, got {} bytes", stdout.len());
+    assert!(cmds[0].stdout_truncated, "stdout_truncated flag should be set for compressed output");
 }
 
 #[test]

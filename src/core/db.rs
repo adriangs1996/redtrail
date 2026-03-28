@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS commands (
     exit_code INTEGER,
     stdout TEXT,
     stderr TEXT,
+    stdout_compressed BLOB,
+    stderr_compressed BLOB,
     stdout_truncated BOOLEAN DEFAULT 0,
     stderr_truncated BOOLEAN DEFAULT 0,
     env_snapshot TEXT,
@@ -160,6 +162,7 @@ fn init(conn: &Connection) -> Result<(), Error> {
     conn.execute_batch(SCHEMA)
         .map_err(|e| Error::Db(e.to_string()))?;
     migrate_agent_columns(conn)?;
+    migrate_compressed_columns(conn)?;
     conn.execute_batch("PRAGMA optimize;")
         .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
@@ -180,6 +183,25 @@ fn migrate_agent_columns(conn: &Connection) -> Result<(), Error> {
              ALTER TABLE commands ADD COLUMN tool_input TEXT;
              ALTER TABLE commands ADD COLUMN tool_response TEXT;
              CREATE INDEX IF NOT EXISTS idx_commands_tool ON commands(tool_name) WHERE tool_name IS NOT NULL;"
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Add stdout_compressed, stderr_compressed columns if missing (for existing databases).
+fn migrate_compressed_columns(conn: &Connection) -> Result<(), Error> {
+    let has_col: bool = conn
+        .prepare("PRAGMA table_info(commands)")
+        .map_err(|e| Error::Db(e.to_string()))?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .any(|col| col.as_deref() == Ok("stdout_compressed"));
+
+    if !has_col {
+        conn.execute_batch(
+            "ALTER TABLE commands ADD COLUMN stdout_compressed BLOB;
+             ALTER TABLE commands ADD COLUMN stderr_compressed BLOB;"
         )
         .map_err(|e| Error::Db(e.to_string()))?;
     }
@@ -316,9 +338,18 @@ pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Err
     Ok(id)
 }
 
+fn decompress_blob(blob: &[u8]) -> Option<String> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+    let mut decoder = ZlibDecoder::new(blob);
+    let mut out = String::new();
+    decoder.read_to_string(&mut out).ok()?;
+    Some(out)
+}
+
 pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<CommandRow>, Error> {
     let mut sql = String::from(
-        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, stderr_truncated, redacted FROM commands WHERE 1=1"
+        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, stderr_truncated, redacted, stdout_compressed, stderr_compressed FROM commands WHERE 1=1"
     );
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 1;
@@ -366,6 +397,14 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(|e| Error::Db(e.to_string()))?;
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        let stdout_text: Option<String> = row.get(11)?;
+        let stderr_text: Option<String> = row.get(12)?;
+        let stdout_compressed: Option<Vec<u8>> = row.get(16)?;
+        let stderr_compressed: Option<Vec<u8>> = row.get(17)?;
+
+        let stdout = stdout_text.or_else(|| stdout_compressed.as_deref().and_then(decompress_blob));
+        let stderr = stderr_text.or_else(|| stderr_compressed.as_deref().and_then(decompress_blob));
+
         Ok(CommandRow {
             id: row.get(0)?,
             session_id: row.get(1)?,
@@ -378,8 +417,8 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
             source: row.get(8)?,
             timestamp_start: row.get(9)?,
             timestamp_end: row.get(10)?,
-            stdout: row.get(11)?,
-            stderr: row.get(12)?,
+            stdout,
+            stderr,
             stdout_truncated: row.get(13)?,
             stderr_truncated: row.get(14)?,
             redacted: row.get(15)?,
@@ -391,6 +430,80 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
         result.push(row.map_err(|e| Error::Db(e.to_string()))?);
     }
     Ok(result)
+}
+
+fn compress_zlib(data: &str) -> Vec<u8> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data.as_bytes()).unwrap();
+    encoder.finish().unwrap()
+}
+
+/// Insert a command, compressing stdout/stderr with zlib if they exceed max_bytes.
+pub fn insert_command_compressed(
+    conn: &Connection,
+    cmd: &NewCommand,
+    max_bytes: usize,
+) -> Result<String, Error> {
+    let id = uuid::Uuid::new_v4().to_string();
+
+    let stdout_over = cmd.stdout.is_some_and(|s| s.len() > max_bytes);
+    let stderr_over = cmd.stderr.is_some_and(|s| s.len() > max_bytes);
+
+    let stdout_compressed = if stdout_over { cmd.stdout.map(compress_zlib) } else { None };
+    let stderr_compressed = if stderr_over { cmd.stderr.map(compress_zlib) } else { None };
+
+    let stdout_text: Option<&str> = if stdout_over { None } else { cmd.stdout };
+    let stderr_text: Option<&str> = if stderr_over { None } else { cmd.stderr };
+
+    conn.execute(
+        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, command_args, command_flags, cwd, git_repo, git_branch, exit_code, stdout, stderr, stdout_compressed, stderr_compressed, stdout_truncated, stderr_truncated, env_snapshot, hostname, shell, source, redacted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+        rusqlite::params![
+            id, cmd.session_id, cmd.timestamp_start, cmd.timestamp_end,
+            cmd.command_raw, cmd.command_binary, cmd.command_subcommand,
+            cmd.command_args, cmd.command_flags,
+            cmd.cwd, cmd.git_repo, cmd.git_branch, cmd.exit_code,
+            stdout_text, stderr_text,
+            stdout_compressed, stderr_compressed,
+            stdout_over || cmd.stdout_truncated, stderr_over || cmd.stderr_truncated,
+            cmd.env_snapshot, cmd.hostname, cmd.shell, cmd.source, cmd.redacted,
+        ],
+    ).map_err(|e| Error::Db(e.to_string()))?;
+
+    // Sync FTS index — use text for search (or decompressed for compressed)
+    let fts_stdout = stdout_text.map(|s| s.to_string())
+        .or_else(|| cmd.stdout.map(|s| s.to_string()));
+    let fts_stderr = stderr_text.map(|s| s.to_string())
+        .or_else(|| cmd.stderr.map(|s| s.to_string()));
+
+    let rowid: i64 = conn
+        .query_row("SELECT rowid FROM commands WHERE id = ?1", [&id], |r| r.get(0))
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO commands_fts(rowid, command_raw, stdout, stderr) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![rowid, cmd.command_raw, fts_stdout, fts_stderr],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Update session counters
+    conn.execute(
+        "UPDATE sessions SET command_count = command_count + 1 WHERE id = ?1",
+        [cmd.session_id],
+    )
+    .ok();
+
+    if cmd.exit_code.is_some_and(|c| c != 0) {
+        conn.execute(
+            "UPDATE sessions SET error_count = error_count + 1 WHERE id = ?1",
+            [cmd.session_id],
+        )
+        .ok();
+    }
+
+    Ok(id)
 }
 
 /// Insert a command with automatic secret redaction on command_raw, stdout, and stderr.
@@ -431,6 +544,55 @@ pub fn insert_command_redacted_with_patterns(
     };
 
     let cmd_id = insert_command(conn, &redacted_cmd)?;
+
+    // Audit log
+    for label in &raw_labels {
+        log_redaction(conn, &cmd_id, "command_raw", label)?;
+    }
+    for label in &stdout_labels {
+        log_redaction(conn, &cmd_id, "stdout", label)?;
+    }
+    for label in &stderr_labels {
+        log_redaction(conn, &cmd_id, "stderr", label)?;
+    }
+
+    Ok(cmd_id)
+}
+
+/// Redact with custom patterns, then compress over-limit stdout/stderr.
+pub fn insert_command_redacted_compressed(
+    conn: &Connection,
+    cmd: &NewCommand,
+    custom: &[crate::core::secrets::engine::CustomPattern],
+    max_bytes: usize,
+) -> Result<String, Error> {
+    use crate::core::secrets::engine::redact_with_custom_patterns;
+
+    let (redacted_raw, raw_labels) = redact_with_custom_patterns(cmd.command_raw, custom);
+    let (redacted_stdout, stdout_labels) = cmd
+        .stdout
+        .map(|s| redact_with_custom_patterns(s, custom))
+        .map(|(s, l)| (Some(s), l))
+        .unwrap_or((None, Vec::new()));
+    let (redacted_stderr, stderr_labels) = cmd
+        .stderr
+        .map(|s| redact_with_custom_patterns(s, custom))
+        .map(|(s, l)| (Some(s), l))
+        .unwrap_or((None, Vec::new()));
+
+    let was_redacted = !raw_labels.is_empty()
+        || !stdout_labels.is_empty()
+        || !stderr_labels.is_empty();
+
+    let redacted_cmd = NewCommand {
+        command_raw: &redacted_raw,
+        stdout: redacted_stdout.as_deref(),
+        stderr: redacted_stderr.as_deref(),
+        redacted: was_redacted,
+        ..*cmd
+    };
+
+    let cmd_id = insert_command_compressed(conn, &redacted_cmd, max_bytes)?;
 
     // Audit log
     for label in &raw_labels {

@@ -61,21 +61,15 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
 
     let max_bytes = config.capture.max_stdout_bytes;
 
-    // Apply config-driven truncation on top of any tee-level truncation
-    let stdout_raw = stdout_capture.as_ref().map(|(_, c)| c.as_str());
-    let stderr_raw = stderr_capture.as_ref().map(|(_, c)| c.as_str());
-    let stdout_truncated_str = stdout_raw.map(|s| capture::truncate_output(s, max_bytes));
-    let stderr_truncated_str = stderr_raw.map(|s| capture::truncate_output(s, max_bytes));
-    let stdout_content = stdout_truncated_str.as_deref();
-    let stderr_content = stderr_truncated_str.as_deref();
+    // Pass full content — compression happens at the DB layer for over-limit output
+    let stdout_content = stdout_capture.as_ref().map(|(_, c)| c.as_str());
+    let stderr_content = stderr_capture.as_ref().map(|(_, c)| c.as_str());
     let stdout_truncated = stdout_capture
         .as_ref()
-        .is_some_and(|(h, _)| h.truncated)
-        || stdout_raw.is_some_and(|s| s.len() > max_bytes);
+        .is_some_and(|(h, _)| h.truncated);
     let stderr_truncated = stderr_capture
         .as_ref()
-        .is_some_and(|(h, _)| h.truncated)
-        || stderr_raw.is_some_and(|s| s.len() > max_bytes);
+        .is_some_and(|(h, _)| h.truncated);
 
     let git = args.cwd.map(capture::git_context);
     let git_repo = git.as_ref().and_then(|g| g.repo.as_deref());
@@ -128,7 +122,7 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
 
     match config.secrets.on_detect {
         OnDetect::Redact => {
-            db::insert_command_redacted_with_patterns(conn, &base_cmd, &custom_patterns)?;
+            db::insert_command_redacted_compressed(conn, &base_cmd, &custom_patterns, max_bytes)?;
         }
         OnDetect::Warn => {
             // Check for secrets but store unredacted
@@ -159,7 +153,7 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
                 redacted: has_secrets,
                 ..base_cmd
             };
-            db::insert_command(conn, &cmd)?;
+            db::insert_command_compressed(conn, &cmd, max_bytes)?;
         }
         OnDetect::Block => {
             // Check for secrets — if found, refuse to store
@@ -178,7 +172,7 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
                 // Don't store — secrets would leak
                 return Ok(());
             }
-            db::insert_command(conn, &base_cmd)?;
+            db::insert_command_compressed(conn, &base_cmd, max_bytes)?;
         }
     };
 

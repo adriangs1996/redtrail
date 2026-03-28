@@ -133,6 +133,7 @@ CREATE INDEX IF NOT EXISTS idx_relationships_source ON relationships(source_enti
 CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_entity_id);
 CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(type, active);
 CREATE INDEX IF NOT EXISTS idx_commands_tool ON commands(tool_name) WHERE tool_name IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_commands_ts ON commands(timestamp_start);
 
 -- Redaction audit log
 CREATE TABLE IF NOT EXISTS redaction_log (
@@ -935,4 +936,45 @@ pub fn forget_since(conn: &Connection, since_ts: i64) -> Result<(), Error> {
     conn.execute("DELETE FROM commands WHERE timestamp_start >= ?1", [since_ts])
         .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
+}
+
+/// Delete commands older than `retention_days`. Also cleans up FTS entries,
+/// redaction_log rows, and orphaned sessions.
+pub fn enforce_retention(conn: &Connection, retention_days: u32) -> Result<usize, Error> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+    let cutoff = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+        - (retention_days as i64 * 86_400);
+
+    // Delete FTS entries for expired commands
+    conn.execute(
+        "DELETE FROM commands_fts WHERE rowid IN (SELECT rowid FROM commands WHERE timestamp_start < ?1)",
+        [cutoff],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Delete redaction_log entries for expired commands
+    conn.execute(
+        "DELETE FROM redaction_log WHERE command_id IN (SELECT id FROM commands WHERE timestamp_start < ?1)",
+        [cutoff],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Delete the expired commands
+    let deleted = conn
+        .execute("DELETE FROM commands WHERE timestamp_start < ?1", [cutoff])
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Clean up orphaned sessions (no remaining commands)
+    conn.execute(
+        "DELETE FROM sessions WHERE id NOT IN (SELECT DISTINCT session_id FROM commands WHERE session_id IS NOT NULL)",
+        [],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    Ok(deleted)
 }

@@ -30,4 +30,6 @@ RUN useradd -m -s /bin/zsh testuser
 USER testuser
 WORKDIR /home/testuser
 
+RUN echo 'eval "$(redtrail init zsh)"' >> ~/.zshrc
+
 # No ENTRYPOINT — test scripts are passed as the command to docker run

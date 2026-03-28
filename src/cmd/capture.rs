@@ -184,5 +184,8 @@ pub fn run(conn: &Connection, args: &CaptureArgs) -> Result<(), Error> {
         let _ = std::fs::remove_file(path);
     }
 
+    // Enforce retention policy — cheap indexed DELETE, no-op when nothing expired
+    let _ = db::enforce_retention(conn, config.capture.retention_days);
+
     Ok(())
 }

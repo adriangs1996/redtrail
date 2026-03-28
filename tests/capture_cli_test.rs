@@ -4,6 +4,14 @@ fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
 }
 
+fn now_ts() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string()
+}
+
 fn setup_db() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -16,6 +24,7 @@ fn setup_db() -> tempfile::TempDir {
 fn capture_inserts_command_into_db() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args([
@@ -24,8 +33,8 @@ fn capture_inserts_command_into_db() {
             "--command", "git status",
             "--cwd", "/home/user/project",
             "--exit-code", "0",
-            "--ts-start", "1000",
-            "--ts-end", "1001",
+            "--ts-start", &ts,
+            "--ts-end", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -49,6 +58,7 @@ fn capture_inserts_command_into_db() {
 fn capture_redacts_secrets() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args([
@@ -56,7 +66,7 @@ fn capture_redacts_secrets() {
             "--session-id", "s1",
             "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -76,6 +86,7 @@ fn capture_redacts_secrets() {
 fn capture_parses_binary_from_command() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     redtrail_bin()
         .args([
@@ -83,7 +94,7 @@ fn capture_parses_binary_from_command() {
             "--session-id", "s1",
             "--command", "docker build -t myapp .",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -100,6 +111,7 @@ fn capture_parses_binary_from_command() {
 fn capture_skips_blacklisted_commands() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args([
@@ -107,7 +119,7 @@ fn capture_skips_blacklisted_commands() {
             "--session-id", "s1",
             "--command", "vim src/main.rs",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -129,6 +141,7 @@ fn capture_disabled_via_config_stores_nothing() {
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     std::fs::write(&config_path, "capture:\n  enabled: false\n").unwrap();
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args([
@@ -136,7 +149,7 @@ fn capture_disabled_via_config_stores_nothing() {
             "--session-id", "s1",
             "--command", "echo hello",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -157,13 +170,14 @@ fn capture_custom_blacklist_from_config() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
+    let ts = now_ts();
     // Custom blacklist that includes "echo" but NOT "vim"
     std::fs::write(&config_path, "capture:\n  blacklist_commands:\n    - echo\n").unwrap();
 
     // echo should now be blacklisted
     redtrail_bin()
         .args(["capture", "--session-id", "s1", "--command", "echo hello",
-               "--exit-code", "0", "--ts-start", "1000", "--shell", "zsh", "--hostname", "devbox"])
+               "--exit-code", "0", "--ts-start", &ts, "--shell", "zsh", "--hostname", "devbox"])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
         .output()
@@ -176,7 +190,7 @@ fn capture_custom_blacklist_from_config() {
     // vim should NOT be blacklisted with custom config (it replaces the default list)
     redtrail_bin()
         .args(["capture", "--session-id", "s1", "--command", "vim src/main.rs",
-               "--exit-code", "0", "--ts-start", "1000", "--shell", "zsh", "--hostname", "devbox"])
+               "--exit-code", "0", "--ts-start", &ts, "--shell", "zsh", "--hostname", "devbox"])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
         .output()
@@ -191,6 +205,7 @@ fn capture_compresses_stdout_over_max_bytes_from_config() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
+    let ts = now_ts();
     // Set a tiny max_stdout_bytes
     std::fs::write(&config_path, "capture:\n  max_stdout_bytes: 20\n").unwrap();
 
@@ -198,7 +213,7 @@ fn capture_compresses_stdout_over_max_bytes_from_config() {
     let stdout_file = dir.path().join("stdout.tmp");
     // Tee capture file format: colon headers, blank line, then content
     let long_content = "x".repeat(100);
-    std::fs::write(&stdout_file, format!("ts_start:1000\nts_end:1001\ntruncated:false\n\n{long_content}")).unwrap();
+    std::fs::write(&stdout_file, format!("ts_start:{ts}\nts_end:{ts}\ntruncated:false\n\n{long_content}")).unwrap();
 
     redtrail_bin()
         .args(["capture", "--session-id", "s1", "--command", "echo long output",
@@ -224,11 +239,12 @@ fn capture_on_detect_warn_stores_unredacted_but_flags() {
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     std::fs::write(&config_path, "secrets:\n  on_detect: warn\n").unwrap();
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args(["capture", "--session-id", "s1",
                "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
-               "--exit-code", "0", "--ts-start", "1000",
+               "--exit-code", "0", "--ts-start", &ts,
                "--shell", "zsh", "--hostname", "devbox"])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
@@ -262,11 +278,12 @@ fn capture_on_detect_block_rejects_command() {
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     std::fs::write(&config_path, "secrets:\n  on_detect: block\n").unwrap();
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args(["capture", "--session-id", "s1",
                "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
-               "--exit-code", "0", "--ts-start", "1000",
+               "--exit-code", "0", "--ts-start", &ts,
                "--shell", "zsh", "--hostname", "devbox"])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
@@ -287,6 +304,7 @@ fn capture_custom_patterns_file_detects_custom_secret() {
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     let patterns_path = dir.path().join("patterns.yaml");
+    let ts = now_ts();
 
     // Define a custom pattern that matches "CUSTOMSECRET-" followed by hex
     std::fs::write(&patterns_path, r#"
@@ -301,7 +319,7 @@ fn capture_custom_patterns_file_detects_custom_secret() {
     let output = redtrail_bin()
         .args(["capture", "--session-id", "s1",
                "--command", "curl -H 'X-Token: CUSTOMSECRET-abcdef0123456789' https://api.example.com",
-               "--exit-code", "0", "--ts-start", "1000",
+               "--exit-code", "0", "--ts-start", &ts,
                "--shell", "zsh", "--hostname", "devbox"])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
@@ -325,6 +343,7 @@ fn capture_custom_patterns_file_detects_custom_secret() {
 fn capture_is_silent_on_success() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args([
@@ -332,7 +351,7 @@ fn capture_is_silent_on_success() {
             "--session-id", "s1",
             "--command", "echo hello",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])

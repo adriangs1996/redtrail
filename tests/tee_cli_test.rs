@@ -74,6 +74,12 @@ fn tee_creates_pty_and_captures_output() {
         let _ = std::fs::OpenOptions::new().write(true).open(paths[1]);
     }
 
+    // Signal tee to flush and exit (mirrors what the shell hook's precmd does)
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child.id() as i32),
+        nix::sys::signal::Signal::SIGUSR1,
+    ).ok();
+
     // Wait for tee to exit
     let status = child.wait().expect("wait failed");
     assert!(status.success(), "tee should exit cleanly");
@@ -152,6 +158,12 @@ fn end_to_end_tee_then_capture() {
     {
         let _ = std::fs::OpenOptions::new().write(true).open(paths[1]);
     }
+
+    // Signal tee to flush and exit (mirrors what the shell hook's precmd does)
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(tee_child.id() as i32),
+        nix::sys::signal::Signal::SIGUSR1,
+    ).ok();
 
     // Wait for tee to finish
     tee_child.wait().expect("tee wait");

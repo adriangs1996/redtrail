@@ -4,6 +4,17 @@ fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
 }
 
+fn now_ts() -> String {
+    now_secs().to_string()
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 fn setup_db() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -15,13 +26,14 @@ fn setup_db() -> tempfile::TempDir {
 fn capture_reads_stdout_from_file() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let now = now_secs();
 
     let stdout_file = dir.path().join("rt-out-test");
     redtrail::core::tee::write_capture_file(
         &stdout_file,
         &redtrail::core::tee::TempFileHeader {
-            ts_start: 1000,
-            ts_end: 2000,
+            ts_start: now,
+            ts_end: now + 1,
             truncated: false,
         },
         "hello from stdout\n",
@@ -64,13 +76,14 @@ fn capture_reads_stdout_from_file() {
 fn capture_reads_stderr_from_file() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let now = now_secs();
 
     let stderr_file = dir.path().join("rt-err-test");
     redtrail::core::tee::write_capture_file(
         &stderr_file,
         &redtrail::core::tee::TempFileHeader {
-            ts_start: 1000,
-            ts_end: 2000,
+            ts_start: now,
+            ts_end: now + 1,
             truncated: true,
         },
         "error output\n",
@@ -110,13 +123,14 @@ fn capture_reads_stderr_from_file() {
 fn capture_uses_timestamps_from_temp_file_header() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let now = now_secs();
 
     let stdout_file = dir.path().join("rt-out-ts");
     redtrail::core::tee::write_capture_file(
         &stdout_file,
         &redtrail::core::tee::TempFileHeader {
-            ts_start: 5000,
-            ts_end: 7000,
+            ts_start: now,
+            ts_end: now + 2000,
             truncated: false,
         },
         "output",
@@ -145,14 +159,15 @@ fn capture_uses_timestamps_from_temp_file_header() {
     )
     .unwrap();
 
-    assert_eq!(cmds[0].timestamp_start, 5000);
-    assert_eq!(cmds[0].timestamp_end, Some(7000));
+    assert_eq!(cmds[0].timestamp_start, now);
+    assert_eq!(cmds[0].timestamp_end, Some(now + 2000));
 }
 
 #[test]
 fn capture_without_files_still_works() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     let output = redtrail_bin()
         .args([
@@ -160,7 +175,7 @@ fn capture_without_files_still_works() {
             "--session-id", "s1",
             "--command", "ls",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -180,20 +195,22 @@ fn capture_without_files_still_works() {
     assert_eq!(cmds.len(), 1);
     assert!(cmds[0].stdout.is_none());
     assert!(cmds[0].stderr.is_none());
-    assert_eq!(cmds[0].timestamp_start, 1000);
+    let expected_ts: i64 = ts.parse().unwrap();
+    assert_eq!(cmds[0].timestamp_start, expected_ts);
 }
 
 #[test]
 fn capture_redacts_secrets_in_stdout_file() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let now = now_secs();
 
     let stdout_file = dir.path().join("rt-out-secret");
     redtrail::core::tee::write_capture_file(
         &stdout_file,
         &redtrail::core::tee::TempFileHeader {
-            ts_start: 1000,
-            ts_end: 2000,
+            ts_start: now,
+            ts_end: now + 1,
             truncated: false,
         },
         "aws_access_key_id=AKIAIOSFODNN7EXAMPLE\n",

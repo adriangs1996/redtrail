@@ -4,6 +4,14 @@ fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
 }
 
+fn now_ts() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string()
+}
+
 fn setup_db() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -15,6 +23,7 @@ fn setup_db() -> tempfile::TempDir {
 fn capture_detects_claude_code_from_env() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     redtrail_bin()
         .args([
@@ -22,7 +31,7 @@ fn capture_detects_claude_code_from_env() {
             "--session-id", "s1",
             "--command", "git status",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])
@@ -41,6 +50,7 @@ fn capture_detects_claude_code_from_env() {
 fn capture_defaults_to_human_without_agent_env() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
+    let ts = now_ts();
 
     redtrail_bin()
         .args([
@@ -48,7 +58,7 @@ fn capture_defaults_to_human_without_agent_env() {
             "--session-id", "s1",
             "--command", "ls -la",
             "--exit-code", "0",
-            "--ts-start", "1000",
+            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
         ])

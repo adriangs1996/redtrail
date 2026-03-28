@@ -145,10 +145,9 @@ CREATE TABLE IF NOT EXISTS redaction_log (
 );
 CREATE INDEX IF NOT EXISTS idx_redaction_log_cmd ON redaction_log(command_id);
 
--- Full-text search
+-- Full-text search (external content — we manage inserts/deletes manually)
 CREATE VIRTUAL TABLE IF NOT EXISTS commands_fts USING fts5(
-    command_raw, stdout, stderr,
-    content='commands', content_rowid='rowid'
+    command_raw, stdout, stderr
 );
 ";
 
@@ -473,11 +472,20 @@ pub fn insert_command_compressed(
         ],
     ).map_err(|e| Error::Db(e.to_string()))?;
 
-    // Sync FTS index — use text for search (or decompressed for compressed)
-    let fts_stdout = stdout_text.map(|s| s.to_string())
-        .or_else(|| cmd.stdout.map(|s| s.to_string()));
-    let fts_stderr = stderr_text.map(|s| s.to_string())
-        .or_else(|| cmd.stderr.map(|s| s.to_string()));
+    // FTS index: use the text column directly when under limit. When compressed,
+    // index only a truncated preview — the full content lives in the blob.
+    // This prevents FTS from duplicating the data that compression was meant to shrink.
+    const FTS_PREVIEW_BYTES: usize = 1024;
+    let fts_stdout: Option<String> = if stdout_over {
+        cmd.stdout.map(|s| s[..s.len().min(FTS_PREVIEW_BYTES)].to_string())
+    } else {
+        stdout_text.map(|s| s.to_string())
+    };
+    let fts_stderr: Option<String> = if stderr_over {
+        cmd.stderr.map(|s| s[..s.len().min(FTS_PREVIEW_BYTES)].to_string())
+    } else {
+        stderr_text.map(|s| s.to_string())
+    };
 
     let rowid: i64 = conn
         .query_row("SELECT rowid FROM commands WHERE id = ?1", [&id], |r| r.get(0))
@@ -848,7 +856,7 @@ pub fn list_sessions(conn: &Connection, limit: usize) -> Result<Vec<SessionRow>,
 
 pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<Vec<CommandRow>, Error> {
     let mut stmt = conn.prepare(
-        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.stderr_truncated, c.redacted
+        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.stderr_truncated, c.redacted, c.stdout_compressed, c.stderr_compressed
          FROM commands_fts fts
          JOIN commands c ON c.rowid = fts.rowid
          WHERE commands_fts MATCH ?1
@@ -857,6 +865,14 @@ pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<V
     ).map_err(|e| Error::Db(e.to_string()))?;
 
     let rows = stmt.query_map(rusqlite::params![query, limit as i64], |row| {
+        let stdout_text: Option<String> = row.get(11)?;
+        let stderr_text: Option<String> = row.get(12)?;
+        let stdout_compressed: Option<Vec<u8>> = row.get(16)?;
+        let stderr_compressed: Option<Vec<u8>> = row.get(17)?;
+
+        let stdout = stdout_text.or_else(|| stdout_compressed.as_deref().and_then(decompress_blob));
+        let stderr = stderr_text.or_else(|| stderr_compressed.as_deref().and_then(decompress_blob));
+
         Ok(CommandRow {
             id: row.get(0)?,
             session_id: row.get(1)?,
@@ -869,8 +885,8 @@ pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<V
             source: row.get(8)?,
             timestamp_start: row.get(9)?,
             timestamp_end: row.get(10)?,
-            stdout: row.get(11)?,
-            stderr: row.get(12)?,
+            stdout,
+            stderr,
             stdout_truncated: row.get(13)?,
             stderr_truncated: row.get(14)?,
             redacted: row.get(15)?,
@@ -888,8 +904,7 @@ pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<V
 
 pub fn forget_command(conn: &Connection, id: &str) -> Result<(), Error> {
     conn.execute(
-        "INSERT INTO commands_fts(commands_fts, rowid, command_raw, stdout, stderr)
-         SELECT 'delete', rowid, command_raw, stdout, stderr FROM commands WHERE id = ?1",
+        "DELETE FROM commands_fts WHERE rowid IN (SELECT rowid FROM commands WHERE id = ?1)",
         [id],
     ).map_err(|e| Error::Db(e.to_string()))?;
 
@@ -900,8 +915,7 @@ pub fn forget_command(conn: &Connection, id: &str) -> Result<(), Error> {
 
 pub fn forget_session(conn: &Connection, session_id: &str) -> Result<(), Error> {
     conn.execute(
-        "INSERT INTO commands_fts(commands_fts, rowid, command_raw, stdout, stderr)
-         SELECT 'delete', rowid, command_raw, stdout, stderr FROM commands WHERE session_id = ?1",
+        "DELETE FROM commands_fts WHERE rowid IN (SELECT rowid FROM commands WHERE session_id = ?1)",
         [session_id],
     ).map_err(|e| Error::Db(e.to_string()))?;
 
@@ -914,8 +928,7 @@ pub fn forget_session(conn: &Connection, session_id: &str) -> Result<(), Error> 
 
 pub fn forget_since(conn: &Connection, since_ts: i64) -> Result<(), Error> {
     conn.execute(
-        "INSERT INTO commands_fts(commands_fts, rowid, command_raw, stdout, stderr)
-         SELECT 'delete', rowid, command_raw, stdout, stderr FROM commands WHERE timestamp_start >= ?1",
+        "DELETE FROM commands_fts WHERE rowid IN (SELECT rowid FROM commands WHERE timestamp_start >= ?1)",
         [since_ts],
     ).map_err(|e| Error::Db(e.to_string()))?;
 

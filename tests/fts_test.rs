@@ -77,6 +77,41 @@ fn search_no_match_returns_empty() {
 }
 
 #[test]
+fn search_returns_decompressed_stdout_for_compressed_commands() {
+    let conn = setup();
+    use redtrail::core::capture;
+
+    let big_stdout = "SEARCHABLE_MARKER ".to_string() + &"z".repeat(60_000);
+    db::insert_command_compressed(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "cat bigfile.txt",
+            command_binary: Some("cat"),
+            stdout: Some(&big_stdout),
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+        capture::MAX_STDOUT_BYTES,
+    )
+    .unwrap();
+
+    let results = db::search_commands(&conn, "SEARCHABLE_MARKER", 50).unwrap();
+    assert_eq!(results.len(), 1, "FTS should find the command");
+    let stdout = results[0].stdout.as_ref().expect("stdout should be decompressed");
+    assert!(
+        stdout.starts_with("SEARCHABLE_MARKER"),
+        "decompressed stdout should start with the marker"
+    );
+    assert_eq!(
+        stdout.len(),
+        big_stdout.len(),
+        "decompressed stdout should be the full original length"
+    );
+}
+
+#[test]
 fn search_respects_limit() {
     let conn = setup();
     // Insert many matching commands

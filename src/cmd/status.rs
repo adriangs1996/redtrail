@@ -34,9 +34,21 @@ pub fn run(conn: &Connection, db_path: Option<&str>) -> Result<(), Error> {
         "in-memory".to_string()
     };
 
+    let agent_count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM commands WHERE tool_name IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let human_count = cmd_count - agent_count;
+
     println!("Database:   {}", db_path.unwrap_or("in-memory"));
     println!("DB size:    {db_size}");
     println!("Commands:   {cmd_count}");
+    println!("  Human:    {human_count}");
+    println!("  Agent:    {agent_count}");
     println!("Sessions:   {session_count}");
     println!("Failures:   {failed_count}");
 

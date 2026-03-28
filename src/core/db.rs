@@ -30,7 +30,10 @@ CREATE TABLE IF NOT EXISTS commands (
     is_automated BOOLEAN DEFAULT 0,
     redacted BOOLEAN DEFAULT 0,
     extracted BOOLEAN DEFAULT 0,
-    created_at INTEGER DEFAULT (unixepoch())
+    created_at INTEGER DEFAULT (unixepoch()),
+    tool_name TEXT,
+    tool_input TEXT,
+    tool_response TEXT
 );
 
 -- Terminal sessions
@@ -127,6 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_entities_last_seen ON entities(last_seen);
 CREATE INDEX IF NOT EXISTS idx_relationships_source ON relationships(source_entity_id);
 CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_entity_id);
 CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(type, active);
+CREATE INDEX IF NOT EXISTS idx_commands_tool ON commands(tool_name) WHERE tool_name IS NOT NULL;
 
 -- Full-text search
 CREATE VIRTUAL TABLE IF NOT EXISTS commands_fts USING fts5(
@@ -140,8 +144,32 @@ fn init(conn: &Connection) -> Result<(), Error> {
         .map_err(|e| Error::Db(e.to_string()))?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")
         .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA busy_timeout=3000;")
+        .map_err(|e| Error::Db(e.to_string()))?;
     conn.execute_batch(SCHEMA)
         .map_err(|e| Error::Db(e.to_string()))?;
+    migrate_agent_columns(conn)?;
+    Ok(())
+}
+
+/// Add tool_name, tool_input, tool_response columns if missing (for existing databases).
+fn migrate_agent_columns(conn: &Connection) -> Result<(), Error> {
+    let has_tool_name: bool = conn
+        .prepare("PRAGMA table_info(commands)")
+        .map_err(|e| Error::Db(e.to_string()))?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .any(|col| col.as_deref() == Ok("tool_name"));
+
+    if !has_tool_name {
+        conn.execute_batch(
+            "ALTER TABLE commands ADD COLUMN tool_name TEXT;
+             ALTER TABLE commands ADD COLUMN tool_input TEXT;
+             ALTER TABLE commands ADD COLUMN tool_response TEXT;
+             CREATE INDEX IF NOT EXISTS idx_commands_tool ON commands(tool_name) WHERE tool_name IS NOT NULL;"
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -228,6 +256,8 @@ pub struct CommandFilter<'a> {
     pub session_id: Option<&'a str>,
     pub since: Option<i64>,
     pub limit: Option<usize>,
+    pub source: Option<&'a str>,
+    pub tool_name: Option<&'a str>,
 }
 
 pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
@@ -301,6 +331,16 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
     if let Some(since) = filter.since {
         sql.push_str(&format!(" AND timestamp_start >= ?{idx}"));
         params.push(Box::new(since));
+        idx += 1;
+    }
+    if let Some(source) = filter.source {
+        sql.push_str(&format!(" AND source = ?{idx}"));
+        params.push(Box::new(source.to_string()));
+        idx += 1;
+    }
+    if let Some(tool) = filter.tool_name {
+        sql.push_str(&format!(" AND tool_name = ?{idx}"));
+        params.push(Box::new(tool.to_string()));
         #[allow(unused_assignments)]
         { idx += 1; }
     }
@@ -361,6 +401,118 @@ pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<St
     };
 
     insert_command(conn, &redacted_cmd)
+}
+
+// --- Agent event insert ---
+
+pub struct AgentEvent {
+    pub session_id: String,
+    pub command_raw: String,
+    pub command_binary: Option<String>,
+    pub command_subcommand: Option<String>,
+    pub command_args: Option<String>,
+    pub command_flags: Option<String>,
+    pub cwd: Option<String>,
+    pub git_repo: Option<String>,
+    pub git_branch: Option<String>,
+    pub exit_code: Option<i32>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+    pub source: String,
+    pub agent_session_id: Option<String>,
+    pub is_automated: bool,
+    pub redacted: bool,
+    pub tool_name: String,
+    pub tool_input: Option<String>,
+    pub tool_response: Option<String>,
+}
+
+pub fn insert_agent_event(conn: &Connection, evt: &AgentEvent) -> Result<String, Error> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT INTO commands (id, session_id, timestamp_start, timestamp_end, command_raw, command_binary, command_subcommand, command_args, command_flags, cwd, git_repo, git_branch, exit_code, stdout, stderr, stdout_truncated, stderr_truncated, source, agent_session_id, is_automated, redacted, tool_name, tool_input, tool_response)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+        rusqlite::params![
+            id, evt.session_id, now, now,
+            evt.command_raw, evt.command_binary, evt.command_subcommand,
+            evt.command_args, evt.command_flags,
+            evt.cwd, evt.git_repo, evt.git_branch, evt.exit_code,
+            evt.stdout, evt.stderr, evt.stdout_truncated, evt.stderr_truncated,
+            evt.source, evt.agent_session_id, evt.is_automated, evt.redacted,
+            evt.tool_name, evt.tool_input, evt.tool_response,
+        ],
+    ).map_err(|e| Error::Db(e.to_string()))?;
+
+    // Sync FTS index
+    let rowid: i64 = conn
+        .query_row("SELECT rowid FROM commands WHERE id = ?1", [&id], |r| r.get(0))
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute(
+        "INSERT INTO commands_fts(rowid, command_raw, stdout, stderr) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![rowid, evt.command_raw, evt.stdout, evt.stderr],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Update session counters
+    conn.execute(
+        "UPDATE sessions SET command_count = command_count + 1, agent_command_count = agent_command_count + 1 WHERE id = ?1",
+        [&evt.session_id],
+    )
+    .ok();
+
+    if evt.exit_code.is_some_and(|c| c != 0) {
+        conn.execute(
+            "UPDATE sessions SET error_count = error_count + 1 WHERE id = ?1",
+            [&evt.session_id],
+        )
+        .ok();
+    }
+
+    Ok(id)
+}
+
+/// Find or create a RedTrail session for a given agent session ID.
+pub fn find_or_create_agent_session(
+    conn: &Connection,
+    agent_session_id: &str,
+    cwd: Option<&str>,
+    source: &str,
+) -> Result<String, Error> {
+    // Try to find existing session by agent_session_id
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM sessions WHERE agent_session_id = ?1 AND source = ?2",
+            rusqlite::params![agent_session_id, source],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    // Create new session
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT INTO sessions (id, started_at, cwd_initial, source, agent_session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![id, now, cwd, source, agent_session_id],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    Ok(id)
 }
 
 // --- Session API ---

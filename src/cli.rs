@@ -33,6 +33,12 @@ enum Commands {
         /// Full-text search across commands and output
         #[arg(long)]
         search: Option<String>,
+        /// Filter by source (e.g., human, claude_code)
+        #[arg(long)]
+        source: Option<String>,
+        /// Filter by tool type (e.g., Bash, Edit, Write, Read)
+        #[arg(long)]
+        tool: Option<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -105,6 +111,11 @@ enum Commands {
         #[arg(long)]
         max_bytes: Option<usize>,
     },
+    /// Ingest agent tool events from stdin (called by Claude Code hooks)
+    #[command(hide = true)]
+    Ingest,
+    /// Install Claude Code hooks for agent capture
+    SetupHooks,
     /// Export captured data as JSON
     Export {
         /// Export commands from the last duration (e.g., 7d, 24h)
@@ -153,7 +164,7 @@ pub fn run() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Init { shell } => cmd::init::run(&shell),
-        Commands::History { failed, cmd, cwd, today, search, json } => {
+        Commands::History { failed, cmd, cwd, today, search, source, tool, json } => {
             let conn = open_db()?;
             cmd::history::run(&conn, &cmd::history::HistoryArgs {
                 failed,
@@ -161,6 +172,8 @@ pub fn run() -> Result<(), Error> {
                 cwd: cwd.as_deref(),
                 today,
                 search: search.as_deref(),
+                source: source.as_deref(),
+                tool: tool.as_deref(),
                 json,
             })
         }
@@ -227,6 +240,13 @@ pub fn run() -> Result<(), Error> {
                 stdout_file: stdout_file.as_deref(),
                 stderr_file: stderr_file.as_deref(),
             })
+        }
+        Commands::Ingest => {
+            let conn = open_db()?;
+            cmd::ingest::run(&conn)
+        }
+        Commands::SetupHooks => {
+            cmd::setup_hooks::run()
         }
         Commands::Tee { session, shell_pid, ctl_fifo, max_bytes } => {
             cmd::tee::run(&cmd::tee::TeeArgs {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live test: source zsh hooks, run a command, verify it appears in history
+# Live test: source bash hooks, run a command, verify it appears in history
 set -euo pipefail
 
 RT="/usr/local/bin/redtrail"
@@ -9,11 +9,9 @@ trap 'rm -rf "$TMPDIR"' EXIT
 export HOME="$TMPDIR"
 export REDTRAIL_DB="$TMPDIR/test.db"
 
-# .zshrc that sources our hooks
-cat >"$TMPDIR/.zshrc" <<'EOF'
-eval "$(/usr/local/bin/redtrail init zsh)"
-setopt NO_HUP
-setopt NO_CHECK_JOBS
+# .bashrc that sources our hooks
+cat >"$TMPDIR/.bashrc" <<'EOF'
+eval "$(/usr/local/bin/redtrail init bash)"
 EOF
 
 # Commands to feed to the interactive shell
@@ -22,8 +20,11 @@ echo "hello from live test"
 exit
 EOF
 
-# `script` creates a real PTY so preexec/precmd fire properly
-HOME="$TMPDIR" script -q -c "zsh -i" /dev/null <"$TMPDIR/commands.txt" >/dev/null 2>&1 || true
+# `script` creates a real PTY so the DEBUG trap / PROMPT_COMMAND fire properly
+HOME="$TMPDIR" script -q -c "bash -i" /dev/null <"$TMPDIR/commands.txt" >/dev/null 2>&1 || true
+
+# Give background capture a moment
+sleep 1
 
 # Verify: the command should appear in history
 HISTORY=$("$RT" history --json 2>/dev/null)

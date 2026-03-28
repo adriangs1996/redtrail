@@ -8,6 +8,8 @@ pub struct HistoryArgs<'a> {
     pub cwd: Option<&'a str>,
     pub today: bool,
     pub search: Option<&'a str>,
+    pub source: Option<&'a str>,
+    pub tool: Option<&'a str>,
     pub json: bool,
 }
 
@@ -29,6 +31,8 @@ pub fn run(conn: &Connection, args: &HistoryArgs) -> Result<(), Error> {
             command_binary: args.cmd,
             cwd: args.cwd,
             since,
+            source: args.source,
+            tool_name: args.tool,
             ..Default::default()
         };
         db::get_commands(conn, &filter)?
@@ -72,7 +76,7 @@ fn print_table(commands: &[CommandRow]) {
         let exit = c
             .exit_code
             .map(|e| e.to_string())
-            .unwrap_or_else(|| "?".into());
+            .unwrap_or_else(|| "-".into());
         let cwd = c.cwd.as_deref().unwrap_or("-");
         println!("{}\t{}\t{}\t{}", exit, cwd, c.command_raw, c.source);
     }

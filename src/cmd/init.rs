@@ -10,6 +10,8 @@ export REDTRAIL_SESSION_ID="$(command redtrail session-id 2>/dev/null || echo "r
 __RT_BLACKLIST=":vim:nvim:nano:vi:ssh:scp:top:htop:btop:less:more:man:tmux:screen:"
 
 __redtrail_preexec() {
+    setopt local_options no_monitor
+
     __REDTRAIL_CMD="$1"
     __REDTRAIL_CWD="$PWD"
     __REDTRAIL_TS_START="$(date +%s)"
@@ -39,6 +41,7 @@ __redtrail_preexec() {
         --ctl-fifo "$ctl_fifo" \
         2>/dev/null &
     __RT_TEE_PID=$!
+    disown
 
     local pty_out pty_err
     if ! read -t 1 pty_out pty_err < "$ctl_fifo"; then
@@ -56,15 +59,16 @@ __redtrail_preexec() {
 
 __redtrail_precmd() {
     local exit_code=$?
+    setopt local_options no_monitor
 
     # Restore fds — always, even if capture setup partially failed
     if [[ -n "$__RT_CAPTURE_ACTIVE" ]]; then
         exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR}
         exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&-
 
-        # Signal tee to flush and exit, then wait for it
+        # Signal tee to flush and exit, then wait for it (poll — disowned jobs can't use wait)
         kill -USR1 "$__RT_TEE_PID" 2>/dev/null
-        wait "$__RT_TEE_PID" 2>/dev/null
+        while kill -0 "$__RT_TEE_PID" 2>/dev/null; do :; done
     fi
 
     [[ -z "$__REDTRAIL_CMD" ]] && return
@@ -90,15 +94,6 @@ __redtrail_precmd() {
 
     unset __REDTRAIL_CMD __REDTRAIL_CWD __REDTRAIL_TS_START
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE
-}
-
-# Crash recovery: if tee dies, restore fds immediately
-TRAPCHLD() {
-    if [[ -n "$__RT_CAPTURE_ACTIVE" ]] && ! kill -0 "$__RT_TEE_PID" 2>/dev/null; then
-        exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR} 2>/dev/null
-        exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&- 2>/dev/null
-        __RT_CAPTURE_ACTIVE=""
-    fi
 }
 
 autoload -Uz add-zsh-hook
@@ -150,6 +145,7 @@ __redtrail_preexec() {
         --ctl-fifo "$ctl_fifo" \
         2>/dev/null &
     __RT_TEE_PID=$!
+    disown
 
     local pty_out pty_err
     if ! read -t 1 pty_out pty_err < "$ctl_fifo"; then
@@ -172,9 +168,9 @@ __redtrail_precmd() {
         exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR}
         exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&-
 
-        # Signal tee to flush and exit, then wait for it
+        # Signal tee to flush and exit, then wait for it (poll — disowned jobs can't use wait)
         kill -USR1 "$__RT_TEE_PID" 2>/dev/null
-        wait "$__RT_TEE_PID" 2>/dev/null
+        while kill -0 "$__RT_TEE_PID" 2>/dev/null; do :; done
     fi
 
     if [ -z "$__REDTRAIL_CMD" ]; then

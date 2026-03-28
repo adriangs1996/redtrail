@@ -11,12 +11,13 @@ export REDTRAIL_DB="$TMPDIR/test.db"
 
 # Insert commands directly via the capture CLI (no hooks needed for this test)
 SESSION_ID=$("$RT" session-id 2>/dev/null)
+NOW=$(date +%s)
 
 "$RT" capture \
     --session-id "$SESSION_ID" \
     --command "echo first" \
     --exit-code 0 \
-    --ts-start 1000 \
+    --ts-start "$NOW" \
     --shell zsh \
     --hostname testbox \
     2>/dev/null
@@ -25,7 +26,7 @@ SESSION_ID=$("$RT" session-id 2>/dev/null)
     --session-id "$SESSION_ID" \
     --command "echo second" \
     --exit-code 0 \
-    --ts-start 2000 \
+    --ts-start "$((NOW + 1))" \
     --shell zsh \
     --hostname testbox \
     2>/dev/null

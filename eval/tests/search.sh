@@ -10,12 +10,13 @@ export HOME="$TMPDIR"
 export REDTRAIL_DB="$TMPDIR/test.db"
 
 SESSION_ID=$("$RT" session-id 2>/dev/null)
+NOW=$(date +%s)
 
 # Write a stdout temp file with known content
 STDOUT_FILE="$TMPDIR/rt-out-search"
-cat > "$STDOUT_FILE" <<'EOF'
-ts_start:1000
-ts_end:1001
+cat > "$STDOUT_FILE" <<EOF
+ts_start:$NOW
+ts_end:$((NOW + 1))
 truncated:false
 
 MIGRATION_STATUS: all migrations applied successfully
@@ -37,7 +38,7 @@ EOF
     --session-id "$SESSION_ID" \
     --command "git status" \
     --exit-code 0 \
-    --ts-start 2000 \
+    --ts-start "$((NOW + 2))" \
     --shell zsh \
     --hostname testbox \
     2>/dev/null

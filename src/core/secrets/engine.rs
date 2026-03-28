@@ -58,15 +58,21 @@ fn scan_secrets(input: &str) -> Vec<SecretMatch> {
 }
 
 pub fn redact_secrets(input_or_output: &str) -> String {
+    redact_secrets_with_labels(input_or_output).0
+}
+
+/// Redact secrets and return (redacted_string, list of pattern labels found).
+pub fn redact_secrets_with_labels(input_or_output: &str) -> (String, Vec<String>) {
     let secrets = scan_secrets(input_or_output);
     if secrets.is_empty() {
-        return input_or_output.to_string();
+        return (input_or_output.to_string(), Vec::new());
     }
+    let labels: Vec<String> = secrets.iter().map(|s| s.label.clone()).collect();
     let mut result = input_or_output.to_string();
     for s in &secrets {
         result.replace_range(s.start..s.end, &format!("[REDACTED:{}]", s.label));
     }
-    result
+    (result, labels)
 }
 
 #[cfg(test)]

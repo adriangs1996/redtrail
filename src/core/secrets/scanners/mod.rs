@@ -1,6 +1,10 @@
 mod aws_key;
+mod cli_password_flag;
+mod connection_string;
+mod generic_api_key;
 mod github_token;
 mod jwt;
+mod pem_key;
 mod sensitive_assignment;
 mod sensitive_json_field;
 

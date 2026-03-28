@@ -132,6 +132,17 @@ CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_enti
 CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(type, active);
 CREATE INDEX IF NOT EXISTS idx_commands_tool ON commands(tool_name) WHERE tool_name IS NOT NULL;
 
+-- Redaction audit log
+CREATE TABLE IF NOT EXISTS redaction_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    command_id TEXT,
+    field TEXT NOT NULL,
+    pattern_label TEXT NOT NULL,
+    redacted_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (command_id) REFERENCES commands(id)
+);
+CREATE INDEX IF NOT EXISTS idx_redaction_log_cmd ON redaction_log(command_id);
+
 -- Full-text search
 CREATE VIRTUAL TABLE IF NOT EXISTS commands_fts USING fts5(
     command_raw, stdout, stderr,
@@ -382,15 +393,23 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
 
 /// Insert a command with automatic secret redaction on command_raw, stdout, and stderr.
 pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
-    use crate::core::secrets::engine::redact_secrets;
+    use crate::core::secrets::engine::redact_secrets_with_labels;
 
-    let redacted_raw = redact_secrets(cmd.command_raw);
-    let redacted_stdout = cmd.stdout.map(redact_secrets);
-    let redacted_stderr = cmd.stderr.map(redact_secrets);
+    let (redacted_raw, raw_labels) = redact_secrets_with_labels(cmd.command_raw);
+    let (redacted_stdout, stdout_labels) = cmd
+        .stdout
+        .map(redact_secrets_with_labels)
+        .map(|(s, l)| (Some(s), l))
+        .unwrap_or((None, Vec::new()));
+    let (redacted_stderr, stderr_labels) = cmd
+        .stderr
+        .map(redact_secrets_with_labels)
+        .map(|(s, l)| (Some(s), l))
+        .unwrap_or((None, Vec::new()));
 
-    let was_redacted = redacted_raw != cmd.command_raw
-        || cmd.stdout.is_some_and(|s| redacted_stdout.as_deref() != Some(s))
-        || cmd.stderr.is_some_and(|s| redacted_stderr.as_deref() != Some(s));
+    let was_redacted = !raw_labels.is_empty()
+        || !stdout_labels.is_empty()
+        || !stderr_labels.is_empty();
 
     let redacted_cmd = NewCommand {
         command_raw: &redacted_raw,
@@ -400,7 +419,52 @@ pub fn insert_command_redacted(conn: &Connection, cmd: &NewCommand) -> Result<St
         ..*cmd
     };
 
-    insert_command(conn, &redacted_cmd)
+    let cmd_id = insert_command(conn, &redacted_cmd)?;
+
+    // Audit log
+    for label in &raw_labels {
+        log_redaction(conn, &cmd_id, "command_raw", label)?;
+    }
+    for label in &stdout_labels {
+        log_redaction(conn, &cmd_id, "stdout", label)?;
+    }
+    for label in &stderr_labels {
+        log_redaction(conn, &cmd_id, "stderr", label)?;
+    }
+
+    Ok(cmd_id)
+}
+
+fn log_redaction(conn: &Connection, command_id: &str, field: &str, pattern_label: &str) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO redaction_log (command_id, field, pattern_label) VALUES (?1, ?2, ?3)",
+        rusqlite::params![command_id, field, pattern_label],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+pub struct RedactionLogEntry {
+    pub field: String,
+    pub pattern_label: String,
+    pub redacted_at: i64,
+}
+
+pub fn get_redaction_logs(conn: &Connection, command_id: &str) -> Result<Vec<RedactionLogEntry>, Error> {
+    let mut stmt = conn
+        .prepare("SELECT field, pattern_label, redacted_at FROM redaction_log WHERE command_id = ?1")
+        .map_err(|e| Error::Db(e.to_string()))?;
+    let rows = stmt
+        .query_map([command_id], |row| {
+            Ok(RedactionLogEntry {
+                field: row.get(0)?,
+                pattern_label: row.get(1)?,
+                redacted_at: row.get(2)?,
+            })
+        })
+        .map_err(|e| Error::Db(e.to_string()))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| Error::Db(e.to_string()))
 }
 
 // --- Agent event insert ---

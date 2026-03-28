@@ -21,10 +21,50 @@ pub struct CaptureConfig {
     pub retention_days: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnDetect {
+    Redact,
+    Warn,
+    Block,
+}
+
+impl Default for OnDetect {
+    fn default() -> Self {
+        OnDetect::Redact
+    }
+}
+
+impl std::fmt::Display for OnDetect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OnDetect::Redact => write!(f, "redact"),
+            OnDetect::Warn => write!(f, "warn"),
+            OnDetect::Block => write!(f, "block"),
+        }
+    }
+}
+
+impl std::str::FromStr for OnDetect {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "redact" => Ok(OnDetect::Redact),
+            "warn" => Ok(OnDetect::Warn),
+            "block" => Ok(OnDetect::Block),
+            other => Err(format!("invalid on_detect value: {other} (expected redact, warn, or block)")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretsConfig {
     #[serde(default = "default_true")]
     pub redact: bool,
+    #[serde(default)]
+    pub on_detect: OnDetect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patterns_file: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -59,7 +99,11 @@ impl Default for CaptureConfig {
 
 impl Default for SecretsConfig {
     fn default() -> Self {
-        Self { redact: true }
+        Self {
+            redact: true,
+            on_detect: OnDetect::default(),
+            patterns_file: None,
+        }
     }
 }
 
@@ -103,6 +147,14 @@ impl Config {
                 self.secrets.redact = value
                     .parse()
                     .map_err(|_| Error::Config("expected bool".into()))?
+            }
+            "secrets.on_detect" => {
+                self.secrets.on_detect = value
+                    .parse::<OnDetect>()
+                    .map_err(|e| Error::Config(e))?
+            }
+            "secrets.patterns_file" => {
+                self.secrets.patterns_file = Some(value.to_string());
             }
             _ => return Err(Error::Config(format!("unknown config key: {key}"))),
         }

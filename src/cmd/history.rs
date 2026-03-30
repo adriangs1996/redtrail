@@ -1,4 +1,5 @@
 use crate::core::db::{self, CommandFilter, CommandRow};
+use crate::core::fmt::ascii;
 use crate::error::Error;
 use rusqlite::Connection;
 
@@ -73,72 +74,14 @@ fn print_json(commands: &[CommandRow]) -> Result<(), Error> {
     Ok(())
 }
 
-fn format_duration(start: i64, end: Option<i64>) -> String {
-    let Some(end) = end else { return "-".into() };
-    let secs = (end - start).max(0);
-    if secs < 1 {
-        "<1s".into()
-    } else if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m{}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
-    }
-}
-
-fn format_relative_time(ts: i64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    let ago = (now - ts).max(0);
-    if ago < 60 {
-        "just now".into()
-    } else if ago < 3600 {
-        format!("{}m ago", ago / 60)
-    } else if ago < 86400 {
-        format!("{}h ago", ago / 3600)
-    } else {
-        format!("{}d ago", ago / 86400)
-    }
-}
-
-// ANSI color helpers
-const GREEN: &str = "\x1b[32m";
-const RED: &str = "\x1b[31m";
-const CYAN: &str = "\x1b[36m";
-const YELLOW: &str = "\x1b[33m";
-const DIM: &str = "\x1b[2m";
-const BOLD: &str = "\x1b[1m";
-const RESET: &str = "\x1b[0m";
-
-fn truncate_command(cmd: &str, max_width: usize) -> String {
-    // Strip leading/trailing whitespace, collapse to single line
-    let cmd = cmd.trim().replace('\n', " ");
-    if cmd.len() <= max_width {
-        cmd
-    } else {
-        format!("{}...", &cmd[..max_width.saturating_sub(3)])
-    }
-}
-
-fn source_label(source: &str) -> String {
-    match source {
-        "claude_code" => format!("{CYAN}agent{RESET}"),
-        "human" => format!("{DIM}human{RESET}"),
-        other => format!("{DIM}{other}{RESET}"),
-    }
-}
-
 fn print_table(commands: &[CommandRow], verbose: bool) {
     if commands.is_empty() {
-        println!("{DIM}No commands found.{RESET}");
+        println!("{}No commands found.{}", ascii::DIM, ascii::RESET);
         return;
     }
 
     // Determine terminal width for command column, fallback to 100
-    let term_width = terminal_width().unwrap_or(100);
+    let term_width = ascii::terminal_width();
     // Fixed columns: "| EXIT | DURATION |   WHEN   | SOURCE |  COMMAND  |"
     // Widths:          6      10         10         8        rest
     // Borders + padding: 6 pipes + spaces ≈ 18
@@ -160,15 +103,15 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
         .iter()
         .map(|c| {
             let (exit_str, exit_plain) = match c.exit_code {
-                Some(0) => (format!("{GREEN}0{RESET}"), "0".to_string()),
-                Some(code) => (format!("{RED}{code}{RESET}"), format!("{code}")),
+                Some(0) => (format!("{}0{}", ascii::GREEN, ascii::RESET), "0".to_string()),
+                Some(code) => (format!("{}{}{}", ascii::RED, code, ascii::RESET), format!("{code}")),
                 None => ("-".into(), "-".into()),
             };
-            let duration = format_duration(c.timestamp_start, c.timestamp_end);
-            let time = format_relative_time(c.timestamp_start);
-            let source_str = source_label(&c.source);
+            let duration = ascii::format_duration(c.timestamp_start, c.timestamp_end);
+            let time = ascii::format_relative_time(c.timestamp_start);
+            let source_str = ascii::source_label(&c.source);
             let source_plain = if c.source == "claude_code" { "agent" } else { &c.source };
-            let command = truncate_command(&c.command_raw, cmd_width);
+            let command = ascii::truncate_command(&c.command_raw, cmd_width);
             Row {
                 exit_str,
                 exit_plain: exit_plain.to_string(),
@@ -196,6 +139,8 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
         "-".repeat(w_time),
         "-".repeat(w_src),
         "-".repeat(w_cmd),
+        DIM = ascii::DIM,
+        RESET = ascii::RESET,
     );
 
     // Header
@@ -203,6 +148,9 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
     println!(
         "{DIM}|{RESET} {BOLD}{:>w_exit$}{RESET} {DIM}|{RESET} {BOLD}{:<w_dur$}{RESET} {DIM}|{RESET} {BOLD}{:>w_time$}{RESET} {DIM}|{RESET} {BOLD}{:<w_src$}{RESET} {DIM}|{RESET} {BOLD}{:<w_cmd$}{RESET} {DIM}|{RESET}",
         "EXIT", "DURATION", "WHEN", "SOURCE", "COMMAND",
+        DIM = ascii::DIM,
+        RESET = ascii::RESET,
+        BOLD = ascii::BOLD,
     );
     println!("{border}");
 
@@ -221,6 +169,9 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
             row.source_str,
             " ".repeat(src_pad),
             row.command,
+            DIM = ascii::DIM,
+            RESET = ascii::RESET,
+            YELLOW = ascii::YELLOW,
         );
 
         if verbose {
@@ -228,14 +179,16 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
                 if !stdout.is_empty() {
                     let prefix = format!(
                         "{DIM}|{RESET} {:>w_exit$} {DIM}|{RESET}",
-                        ""
+                        "",
+                        DIM = ascii::DIM,
+                        RESET = ascii::RESET,
                     );
                     for line in stdout.lines().take(10) {
-                        println!("{prefix} {DIM}{line}{RESET}");
+                        println!("{prefix} {DIM}{line}{RESET}", DIM = ascii::DIM, RESET = ascii::RESET);
                     }
                     let count = stdout.lines().count();
                     if count > 10 {
-                        println!("{prefix} {DIM}... ({} more lines){RESET}", count - 10);
+                        println!("{prefix} {DIM}... ({} more lines){RESET}", count - 10, DIM = ascii::DIM, RESET = ascii::RESET);
                     }
                 }
             }
@@ -243,14 +196,16 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
                 if !stderr.is_empty() {
                     let prefix = format!(
                         "{DIM}|{RESET} {:>w_exit$} {DIM}|{RESET}",
-                        ""
+                        "",
+                        DIM = ascii::DIM,
+                        RESET = ascii::RESET,
                     );
                     for line in stderr.lines().take(5) {
-                        println!("{prefix} {RED}{DIM}{line}{RESET}");
+                        println!("{prefix} {RED}{DIM}{line}{RESET}", RED = ascii::RED, DIM = ascii::DIM, RESET = ascii::RESET);
                     }
                     let count = stderr.lines().count();
                     if count > 5 {
-                        println!("{prefix} {RED}{DIM}... ({} more lines){RESET}", count - 5);
+                        println!("{prefix} {RED}{DIM}... ({} more lines){RESET}", count - 5, RED = ascii::RED, DIM = ascii::DIM, RESET = ascii::RESET);
                     }
                 }
             }
@@ -269,60 +224,13 @@ fn print_table(commands: &[CommandRow], verbose: bool) {
     let total = commands.len();
     let failed = commands.iter().filter(|c| matches!(c.exit_code, Some(code) if code != 0)).count();
     if failed > 0 {
-        println!("{DIM}{total} commands ({RED}{failed} failed{RESET}{DIM}){RESET}");
+        println!(
+            "{DIM}{total} commands ({RED}{failed} failed{RESET}{DIM}){RESET}",
+            DIM = ascii::DIM,
+            RED = ascii::RED,
+            RESET = ascii::RESET,
+        );
     } else {
-        println!("{DIM}{total} commands{RESET}");
-    }
-}
-
-fn terminal_width() -> Option<usize> {
-    if let Ok(val) = std::env::var("COLUMNS") {
-        if let Ok(w) = val.parse::<usize>() {
-            if w > 40 {
-                return Some(w);
-            }
-        }
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::io::AsRawFd;
-        let fd = std::io::stdout().as_raw_fd();
-        // Use nix's libc re-export for winsize ioctl
-        let mut ws: nix::libc::winsize = unsafe { std::mem::zeroed() };
-        let ret = unsafe { nix::libc::ioctl(fd, nix::libc::TIOCGWINSZ, &mut ws) };
-        if ret == 0 && ws.ws_col > 40 {
-            return Some(ws.ws_col as usize);
-        }
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn format_duration_sub_second() {
-        assert_eq!(format_duration(100, Some(100)), "<1s");
-    }
-
-    #[test]
-    fn format_duration_seconds() {
-        assert_eq!(format_duration(100, Some(145)), "45s");
-    }
-
-    #[test]
-    fn format_duration_minutes() {
-        assert_eq!(format_duration(0, Some(125)), "2m5s");
-    }
-
-    #[test]
-    fn format_duration_hours() {
-        assert_eq!(format_duration(0, Some(3725)), "1h2m");
-    }
-
-    #[test]
-    fn format_duration_no_end() {
-        assert_eq!(format_duration(100, None), "-");
+        println!("{DIM}{total} commands{RESET}", DIM = ascii::DIM, RESET = ascii::RESET);
     }
 }

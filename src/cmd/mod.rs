@@ -1,3 +1,4 @@
+pub mod agent_report;
 pub mod capture;
 pub mod config;
 pub mod export;

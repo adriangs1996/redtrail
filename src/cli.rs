@@ -130,6 +130,25 @@ enum Commands {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+    /// Generate a report of AI agent activity
+    #[command(name = "agent-report")]
+    AgentReport {
+        /// Report on a specific agent session ID
+        #[arg(long)]
+        session: Option<String>,
+        /// Report on the last N hours/minutes (e.g., "2h", "30m")
+        #[arg(long)]
+        last: Option<String>,
+        /// Report on agent activity in a specific directory (use "." for current)
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Output as Markdown
+        #[arg(long)]
+        markdown: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -293,6 +312,16 @@ pub fn run() -> Result<(), Error> {
                 None => cmd::config::view(&config_path),
                 Some(ConfigAction::Set { key, value }) => cmd::config::set(&config_path, &key, &value),
             }
+        }
+        Commands::AgentReport { session, last, cwd, json, markdown } => {
+            let conn = open_db()?;
+            cmd::agent_report::run(&conn, &cmd::agent_report::AgentReportArgs {
+                session: session.as_deref(),
+                last: last.as_deref(),
+                cwd: cwd.as_deref(),
+                json,
+                markdown,
+            })
         }
     }
 }

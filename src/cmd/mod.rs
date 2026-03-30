@@ -1,3 +1,4 @@
+pub mod agent_context;
 pub mod agent_report;
 pub mod capture;
 pub mod config;

@@ -151,6 +151,19 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Generate context document for a new AI agent session
+    #[command(name = "agent-context")]
+    AgentContext {
+        /// Output format: markdown (default) or json
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        /// How far back to look (e.g., "7d", "24h"). Default: 3 most recent sessions
+        #[arg(long)]
+        since: Option<String>,
+        /// Approximate token limit for output
+        #[arg(long)]
+        max_tokens: Option<usize>,
+    },
     /// Generate a report of AI agent activity
     #[command(name = "agent-report")]
     AgentReport {
@@ -343,6 +356,14 @@ pub fn run() -> Result<(), Error> {
                 cmd: binary_filter.as_deref(),
                 global,
                 json,
+            })
+        }
+        Commands::AgentContext { format, since, max_tokens } => {
+            let conn = open_db()?;
+            cmd::agent_context::run(&conn, &cmd::agent_context::AgentContextArgs {
+                format: &format,
+                since: since.as_deref(),
+                max_tokens,
             })
         }
         Commands::AgentReport { session, last, cwd, json, markdown } => {

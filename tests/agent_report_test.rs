@@ -99,7 +99,7 @@ fn agent_report_generates_analysis() {
     let analysis = analyze_session(&commands);
 
     assert_eq!(analysis.total_commands, 3);
-    assert_eq!(analysis.agent_commands, 0); // source is "claude_code", not "agent"
+    assert_eq!(analysis.agent_commands, 3); // all commands have source "claude_code", which is non-human
     assert!(analysis.total_errors >= 1);
     assert!(analysis.test_runs >= 1);
     assert!(analysis.tests_failed >= 1);

@@ -367,19 +367,23 @@ fn print_json(a: &AnalysisResult) {
         "duration_seconds": a.duration_seconds,
         "directory": a.directory,
         "branch": a.branch,
-        "total_commands": a.total_commands,
-        "agent_commands": a.agent_commands,
-        "human_commands": a.human_commands,
-        "files_created": a.files_created,
-        "files_modified": a.files_modified,
-        "files_read_only": a.files_read_only,
-        "binary_stats": binary_stats,
-        "error_sequences": error_sequences,
-        "test_runs": a.test_runs,
-        "tests_passed": a.tests_passed,
-        "tests_failed": a.tests_failed,
-        "total_errors": a.total_errors,
-        "errors_resolved": a.errors_resolved,
+        "files": {
+            "created": a.files_created,
+            "modified": a.files_modified,
+            "read_only": a.files_read_only,
+        },
+        "commands": {
+            "total": a.total_commands,
+            "agent": a.agent_commands,
+            "human": a.human_commands,
+            "by_binary": binary_stats,
+        },
+        "errors": error_sequences,
+        "tests": {
+            "total_runs": a.test_runs,
+            "passed": a.tests_passed,
+            "failed": a.tests_failed,
+        },
     });
 
     println!("{}", serde_json::to_string_pretty(&val).unwrap_or_default());

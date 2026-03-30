@@ -137,8 +137,8 @@ pub fn analyze_session(commands: &[CommandRow]) -> AnalysisResult {
     sorted.sort_by_key(|c| c.timestamp_start);
 
     let total_commands = sorted.len();
-    let agent_commands = sorted.iter().filter(|c| c.source == "agent").count();
     let human_commands = sorted.iter().filter(|c| c.source == "human").count();
+    let agent_commands = total_commands - human_commands;
 
     let first_ts = sorted.first().map(|c| c.timestamp_start).unwrap_or(0);
     let last_ts = sorted.last().map(|c| c.timestamp_start).unwrap_or(0);

@@ -103,7 +103,10 @@ run_single_test() {
     name="$(basename "$script")"
 
     # Run the test script inside Docker with a TTY (-t) for PTY support
-    timeout "$timeout_secs" docker run --rm -t "$IMAGE_NAME" "/tests/$name" 2>&1
+    local env_file="$REPO_ROOT/.env.development"
+    local env_flag=()
+    [[ -f "$env_file" ]] && env_flag=(--env-file "$env_file")
+    timeout "$timeout_secs" docker run --rm -t "${env_flag[@]}" "$IMAGE_NAME" "/tests/$name" 2>&1
     return $?
 }
 
@@ -151,7 +154,10 @@ run_test_mode() {
             local failname
             failname="$(basename "$test_script")"
             echo -e "    ${YELLOW}Output:${NC}"
-            timeout 180 docker run --rm -t "$IMAGE_NAME" "/tests/$failname" 2>&1 | sed 's/^/    /' || true
+            local env_file2="$REPO_ROOT/.env.development"
+            local env_flag2=()
+            [[ -f "$env_file2" ]] && env_flag2=(--env-file "$env_file2")
+            timeout 180 docker run --rm -t "${env_flag2[@]}" "$IMAGE_NAME" "/tests/$failname" 2>&1 | sed 's/^/    /' || true
             echo ""
         fi
     done

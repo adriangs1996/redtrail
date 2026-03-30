@@ -267,6 +267,7 @@ pub struct NewCommand<'a> {
     pub redacted: bool,
 }
 
+#[derive(Clone, Default)]
 pub struct CommandRow {
     pub id: String,
     pub session_id: String,
@@ -284,6 +285,11 @@ pub struct CommandRow {
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
     pub redacted: bool,
+    pub tool_name: Option<String>,
+    pub command_subcommand: Option<String>,
+    pub git_repo: Option<String>,
+    pub git_branch: Option<String>,
+    pub agent_session_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -296,6 +302,8 @@ pub struct CommandFilter<'a> {
     pub limit: Option<usize>,
     pub source: Option<&'a str>,
     pub tool_name: Option<&'a str>,
+    pub agent_session_id: Option<&'a str>,
+    pub git_repo: Option<&'a str>,
 }
 
 pub fn insert_command(conn: &Connection, cmd: &NewCommand) -> Result<String, Error> {
@@ -352,7 +360,7 @@ fn decompress_blob(blob: &[u8]) -> Option<String> {
 
 pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<CommandRow>, Error> {
     let mut sql = String::from(
-        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, stderr_truncated, redacted, stdout_compressed, stderr_compressed FROM commands WHERE 1=1"
+        "SELECT id, session_id, command_raw, command_binary, cwd, exit_code, hostname, shell, source, timestamp_start, timestamp_end, stdout, stderr, stdout_truncated, stderr_truncated, redacted, stdout_compressed, stderr_compressed, tool_name, command_subcommand, git_repo, git_branch, agent_session_id FROM commands WHERE 1=1"
     );
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut idx = 1;
@@ -388,8 +396,19 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
     if let Some(tool) = filter.tool_name {
         sql.push_str(&format!(" AND tool_name = ?{idx}"));
         params.push(Box::new(tool.to_string()));
+        idx += 1;
+    }
+    if let Some(agent_sid) = filter.agent_session_id {
+        sql.push_str(&format!(" AND agent_session_id = ?{idx}"));
+        params.push(Box::new(agent_sid.to_string()));
+        idx += 1;
+    }
+    if let Some(repo) = filter.git_repo {
+        sql.push_str(&format!(" AND (git_repo = ?{idx} OR cwd LIKE ?{} || '%')", idx + 1));
+        params.push(Box::new(repo.to_string()));
+        params.push(Box::new(repo.to_string()));
         #[allow(unused_assignments)]
-        { idx += 1; }
+        { idx += 2; }
     }
 
     sql.push_str(" ORDER BY timestamp_start DESC");
@@ -425,6 +444,11 @@ pub fn get_commands(conn: &Connection, filter: &CommandFilter) -> Result<Vec<Com
             stdout_truncated: row.get(13)?,
             stderr_truncated: row.get(14)?,
             redacted: row.get(15)?,
+            tool_name: row.get(18)?,
+            command_subcommand: row.get(19)?,
+            git_repo: row.get(20)?,
+            git_branch: row.get(21)?,
+            agent_session_id: row.get(22)?,
         })
     }).map_err(|e| Error::Db(e.to_string()))?;
 
@@ -860,7 +884,7 @@ pub fn list_sessions(conn: &Connection, limit: usize) -> Result<Vec<SessionRow>,
 
 pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<Vec<CommandRow>, Error> {
     let mut stmt = conn.prepare(
-        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.stderr_truncated, c.redacted, c.stdout_compressed, c.stderr_compressed
+        "SELECT c.id, c.session_id, c.command_raw, c.command_binary, c.cwd, c.exit_code, c.hostname, c.shell, c.source, c.timestamp_start, c.timestamp_end, c.stdout, c.stderr, c.stdout_truncated, c.stderr_truncated, c.redacted, c.stdout_compressed, c.stderr_compressed, c.tool_name, c.command_subcommand, c.git_repo, c.git_branch, c.agent_session_id
          FROM commands_fts fts
          JOIN commands c ON c.rowid = fts.rowid
          WHERE commands_fts MATCH ?1
@@ -894,6 +918,11 @@ pub fn search_commands(conn: &Connection, query: &str, limit: usize) -> Result<V
             stdout_truncated: row.get(13)?,
             stderr_truncated: row.get(14)?,
             redacted: row.get(15)?,
+            tool_name: row.get(18)?,
+            command_subcommand: row.get(19)?,
+            git_repo: row.get(20)?,
+            git_branch: row.get(21)?,
+            agent_session_id: row.get(22)?,
         })
     }).map_err(|e| Error::Db(e.to_string()))?;
 

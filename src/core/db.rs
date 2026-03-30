@@ -134,6 +134,9 @@ CREATE INDEX IF NOT EXISTS idx_relationships_target ON relationships(target_enti
 CREATE INDEX IF NOT EXISTS idx_patterns_type ON patterns(type, active);
 CREATE INDEX IF NOT EXISTS idx_commands_tool ON commands(tool_name) WHERE tool_name IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_commands_ts ON commands(timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_commands_source ON commands(source, timestamp_start);
+CREATE INDEX IF NOT EXISTS idx_commands_agent_session ON commands(agent_session_id, timestamp_start) WHERE agent_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_commands_git_repo ON commands(git_repo, timestamp_start) WHERE git_repo IS NOT NULL;
 
 -- Redaction audit log
 CREATE TABLE IF NOT EXISTS redaction_log (

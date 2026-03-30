@@ -1,5 +1,4 @@
 /// Session analysis: aggregate statistics from a slice of CommandRows.
-
 use std::collections::{HashMap, HashSet};
 
 use crate::core::classify::{classify_command, CommandCategory};
@@ -15,7 +14,7 @@ pub struct BinaryStats {
 }
 
 /// Aggregated analysis of a session (or any slice of commands).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnalysisResult {
     pub total_commands: usize,
     pub agent_commands: usize,
@@ -51,30 +50,6 @@ pub struct AnalysisResult {
     pub errors_resolved: usize,
 }
 
-impl Default for AnalysisResult {
-    fn default() -> Self {
-        Self {
-            total_commands: 0,
-            agent_commands: 0,
-            human_commands: 0,
-            duration_seconds: 0,
-            directory: None,
-            branch: None,
-            source: None,
-            category_counts: HashMap::new(),
-            binary_stats: HashMap::new(),
-            files_created: Vec::new(),
-            files_modified: Vec::new(),
-            files_read_only: Vec::new(),
-            error_sequences: Vec::new(),
-            test_runs: 0,
-            tests_passed: 0,
-            tests_failed: 0,
-            total_errors: 0,
-            errors_resolved: 0,
-        }
-    }
-}
 
 /// Binaries that read files (shell tools).
 const FILE_READ_BINARIES: &[&str] = &["cat", "head", "tail", "less", "more", "bat", "wc"];
@@ -105,25 +80,21 @@ fn extract_file_path(command_raw: &str) -> Option<String> {
 
 /// Returns true if this command is a file-read operation.
 fn is_file_read_command(row: &CommandRow) -> bool {
-    if let Some(tool) = &row.tool_name {
-        if FILE_READ_TOOLS.contains(&tool.as_str()) {
-            return true;
-        }
+    if let Some(tool) = &row.tool_name
+        && FILE_READ_TOOLS.contains(&tool.as_str())
+    {
+        return true;
     }
-    if let Some(binary) = &row.command_binary {
-        return FILE_READ_BINARIES.contains(&binary.as_str());
-    }
-    false
+    row.command_binary
+        .as_deref()
+        .is_some_and(|b| FILE_READ_BINARIES.contains(&b))
 }
 
 /// Returns true if this command is a file-write operation.
 fn is_file_write_command(row: &CommandRow) -> bool {
-    if let Some(tool) = &row.tool_name {
-        if FILE_WRITE_TOOLS.contains(&tool.as_str()) {
-            return true;
-        }
-    }
-    false
+    row.tool_name
+        .as_deref()
+        .is_some_and(|t| FILE_WRITE_TOOLS.contains(&t))
 }
 
 /// Analyze a slice of commands and produce aggregated statistics.
@@ -201,17 +172,17 @@ pub fn analyze_session(commands: &[CommandRow]) -> AnalysisResult {
         }
 
         // File reads
-        if is_file_read_command(cmd) {
-            if let Some(path) = extract_file_path(&cmd.command_raw) {
-                files_read.insert(path);
-            }
+        if is_file_read_command(cmd)
+            && let Some(path) = extract_file_path(&cmd.command_raw)
+        {
+            files_read.insert(path);
         }
 
         // File writes
-        if is_file_write_command(cmd) {
-            if let Some(path) = extract_file_path(&cmd.command_raw) {
-                files_written.insert(path);
-            }
+        if is_file_write_command(cmd)
+            && let Some(path) = extract_file_path(&cmd.command_raw)
+        {
+            files_written.insert(path);
         }
     }
 

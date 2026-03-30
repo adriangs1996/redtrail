@@ -119,7 +119,7 @@ fn get_error_input(args: &ResolveArgs) -> Result<String, Error> {
         let mut buf = String::new();
         std::io::stdin()
             .read_to_string(&mut buf)
-            .map_err(|e| Error::Io(e))?;
+            .map_err(Error::Io)?;
         let extracted = extract_error_lines(&buf);
         Ok(extracted)
     } else if let Some(err) = args.error {

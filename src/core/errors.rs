@@ -104,8 +104,7 @@ pub fn detect_error_fix_sequences(commands: &[CommandRow]) -> Vec<ErrorFixSequen
             let mut resolution = None;
             let mut resolved = false;
 
-            for j in (i + 1)..sorted.len() {
-                let next = sorted[j];
+            for next in &sorted[(i + 1)..] {
                 if next.session_id != cmd.session_id {
                     break;
                 }

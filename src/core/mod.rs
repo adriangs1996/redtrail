@@ -1,6 +1,8 @@
+pub mod analysis;
 pub mod capture;
 pub mod classify;
 pub mod db;
+pub mod enrich;
 pub mod errors;
 pub mod fmt;
 pub mod secrets;

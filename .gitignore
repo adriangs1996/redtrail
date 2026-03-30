@@ -17,3 +17,5 @@ tasks/prd*.json
 tasks/prd*.md
 docs/prd-*.md
 docs/superpowers/
+.worktrees/
+.env*

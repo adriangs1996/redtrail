@@ -20,12 +20,11 @@ pub fn colors_enabled() -> bool {
 
 /// Returns the effective terminal width, defaulting to 100.
 pub fn terminal_width() -> usize {
-    if let Ok(cols) = std::env::var("COLUMNS") {
-        if let Ok(w) = cols.parse::<usize>() {
-            if w > 40 {
-                return w;
-            }
-        }
+    if let Ok(cols) = std::env::var("COLUMNS")
+        && let Ok(w) = cols.parse::<usize>()
+        && w > 40
+    {
+        return w;
     }
     #[cfg(unix)]
     {

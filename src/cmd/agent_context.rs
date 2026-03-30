@@ -148,10 +148,10 @@ fn render_markdown(
         out.push_str(&format!("- **Directory:** `{}`\n", markdown::escape(repo)));
     }
     // Branch from most recent analysis
-    if let Some((_, _, a)) = analyses.first() {
-        if let Some(branch) = &a.branch {
-            out.push_str(&format!("- **Branch:** `{}`\n", markdown::escape(branch)));
-        }
+    if let Some((_, _, a)) = analyses.first()
+        && let Some(branch) = &a.branch
+    {
+        out.push_str(&format!("- **Branch:** `{}`\n", markdown::escape(branch)));
     }
     // Last activity from most recent command across all data
     if let Some(latest_ts) = all_commands.iter().map(|c| c.timestamp_start).max() {

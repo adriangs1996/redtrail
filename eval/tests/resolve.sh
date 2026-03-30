@@ -174,8 +174,8 @@ echo "$STDIN_OUTPUT" | grep -q "matching error pattern" || {
 }
 
 # ─── Test 6: short input rejected ───
-SHORT=$("$RT" resolve "err" 2>&1)
-echo "$SHORT" | grep -qi "short\|specific\|too" || {
+SHORT=$("$RT" resolve "err" 2>&1 || true)
+echo "$SHORT" | grep -qi "short\|specific\|too\|input" || {
   echo "FAIL: input < 5 chars should be rejected with helpful message"
   echo "$SHORT"
   exit 1

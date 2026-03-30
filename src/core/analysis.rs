@@ -80,10 +80,10 @@ fn extract_file_path(command_raw: &str) -> Option<String> {
 
 /// Returns true if this command is a file-read operation.
 fn is_file_read_command(row: &CommandRow) -> bool {
-    if let Some(tool) = &row.tool_name
-        && FILE_READ_TOOLS.contains(&tool.as_str())
-    {
-        return true;
+    if let Some(tool) = &row.tool_name {
+        if FILE_READ_TOOLS.contains(&tool.as_str()) {
+            return true;
+        }
     }
     row.command_binary
         .as_deref()

@@ -130,6 +130,27 @@ enum Commands {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+    /// Look up an error and find known resolutions from history
+    #[command(name = "resolve")]
+    Resolve {
+        /// The error message to look up
+        error: Option<String>,
+        /// Read error from stdin
+        #[arg(long)]
+        stdin: bool,
+        /// Scope to current directory (use "." for current)
+        #[arg(long)]
+        cwd: Option<String>,
+        /// Scope to a specific command/binary
+        #[arg(long, name = "cmd")]
+        binary_filter: Option<String>,
+        /// Search across all projects
+        #[arg(long)]
+        global: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate a report of AI agent activity
     #[command(name = "agent-report")]
     AgentReport {
@@ -312,6 +333,17 @@ pub fn run() -> Result<(), Error> {
                 None => cmd::config::view(&config_path),
                 Some(ConfigAction::Set { key, value }) => cmd::config::set(&config_path, &key, &value),
             }
+        }
+        Commands::Resolve { error, stdin, cwd, binary_filter, global, json } => {
+            let conn = open_db()?;
+            cmd::resolve::run(&conn, &cmd::resolve::ResolveArgs {
+                error: error.as_deref(),
+                stdin,
+                cwd: cwd.as_deref(),
+                cmd: binary_filter.as_deref(),
+                global,
+                json,
+            })
         }
         Commands::AgentReport { session, last, cwd, json, markdown } => {
             let conn = open_db()?;

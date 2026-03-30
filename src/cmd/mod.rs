@@ -7,6 +7,7 @@ pub mod history;
 pub mod ingest;
 pub mod init;
 pub mod query;
+pub mod resolve;
 pub mod sessions;
 pub mod setup_hooks;
 pub mod status;

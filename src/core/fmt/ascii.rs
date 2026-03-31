@@ -106,9 +106,11 @@ pub fn parse_duration_ago(input: &str) -> Result<i64, crate::error::Error> {
         (&input[..input.len() - 1], 60i64)
     } else if input.ends_with('d') {
         (&input[..input.len() - 1], 86400i64)
+    } else if input.ends_with('s') {
+        (&input[..input.len() - 1], 1i64)
     } else {
         return Err(crate::error::Error::Db(
-            format!("invalid duration: {input}. Use format like '2h', '30m', '7d'")
+            format!("invalid duration: {input}. Use format like '30s', '2h', '30m', '7d'")
         ));
     };
 

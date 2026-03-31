@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rusqlite::Connection;
 
 use crate::core::analysis::{analyze_session, AnalysisResult};
+use crate::core::classify::{classify_command, CommandCategory};
 use crate::core::db::{self, CommandFilter, CommandRow};
 use crate::core::fmt::ascii::{format_relative_time, parse_duration_ago};
 use crate::core::fmt::markdown;
@@ -190,9 +191,25 @@ fn render_markdown(
                 out.push_str(&format!("Modified: {}\n", markdown::escape(&file_list)));
             }
 
-            // Outcome
-            let outcome = if a.tests_failed > 0 {
-                format!("{} test(s) failing.", a.tests_failed)
+            // Outcome — use final test state, not session-wide totals.
+            // Count test failures that were resolved (same binary succeeded later).
+            let resolved_test_errors: usize = a
+                .error_sequences
+                .iter()
+                .filter(|s| s.resolved)
+                .filter(|s| {
+                    let parts: Vec<&str> = s.failing_command.split_whitespace().collect();
+                    let binary = parts.first().copied().unwrap_or("");
+                    let sub = parts.get(1).copied();
+                    classify_command(binary, sub, None) == CommandCategory::TestRun
+                })
+                .count();
+
+            let outcome = if a.tests_failed > resolved_test_errors {
+                format!(
+                    "{} test(s) failing.",
+                    a.tests_failed - resolved_test_errors
+                )
             } else if a.test_runs > 0 {
                 "All tests passing.".to_string()
             } else if a.total_errors == 0 {
@@ -316,12 +333,6 @@ fn render_json(
         .iter()
         .map(|(session_id, cmds, a)| {
             let earliest = cmds.iter().map(|c| c.timestamp_start).min().unwrap_or(0);
-            let files: Vec<&str> = a
-                .files_modified
-                .iter()
-                .chain(a.files_created.iter())
-                .map(|s| s.as_str())
-                .collect();
             let resolved: Vec<serde_json::Value> = a
                 .error_sequences
                 .iter()
@@ -338,7 +349,8 @@ fn render_json(
                 "started": earliest,
                 "duration_seconds": a.duration_seconds,
                 "total_commands": a.total_commands,
-                "files_modified": files,
+                "files_modified": &a.files_modified,
+                "files_created": &a.files_created,
                 "errors_total": a.total_errors,
                 "errors_resolved": a.errors_resolved,
                 "test_runs": a.test_runs,

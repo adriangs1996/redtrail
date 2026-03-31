@@ -223,7 +223,10 @@ fn derive_exit_code(
         return Some(1);
     }
     if tool_name == "Bash" {
-        tool_response.and_then(|r| r["exitCode"].as_i64().map(|c| c as i32))
+        // Try to read exitCode from the response object. If the response exists
+        // but doesn't contain exitCode (e.g. PostToolUse sends stdout as a string),
+        // default to 0 — the hook only fires on success.
+        tool_response.map(|r| r["exitCode"].as_i64().map(|c| c as i32).unwrap_or(0))
     } else {
         None
     }

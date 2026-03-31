@@ -142,7 +142,7 @@ enum Commands {
         #[arg(long)]
         cwd: Option<String>,
         /// Scope to a specific command/binary
-        #[arg(long, name = "cmd")]
+        #[arg(long = "cmd")]
         binary_filter: Option<String>,
         /// Search across all projects
         #[arg(long)]

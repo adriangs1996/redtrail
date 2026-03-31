@@ -43,19 +43,18 @@ ingest_event() {
 
 # Phase 1: Investigation (reads)
 ingest_event "Read" '{"file_path": "src/auth.rs"}'
+sleep 1
 ingest_event "Read" '{"file_path": "src/config.rs"}'
-
 sleep 1
 
 # Phase 2: First edit + new file
 ingest_event "Edit" '{"file_path": "src/auth.rs", "old_string": "old", "new_string": "new"}'
+sleep 1
 ingest_event "Write" '{"file_path": "src/middleware.rs", "content": "pub fn auth() {}"}'
-
 sleep 1
 
 # Phase 3: Test FAILS
 ingest_event "Bash" '{"command": "cargo test"}' 'null' '"error: test auth::tests::test_login failed"'
-
 sleep 1
 
 # Phase 4: Fix + test PASSES
@@ -64,11 +63,11 @@ ingest_event "Edit" '{"file_path": "src/auth.rs", "old_string": "bug", "new_stri
 sleep 1
 
 ingest_event "Bash" '{"command": "cargo test"}' '{"stdout": "test result: ok. 5 passed; 0 failed", "exitCode": 0}'
-
 sleep 1
 
 # Phase 5: Git operations
 ingest_event "Bash" '{"command": "git add -A"}' '{"stdout": "", "exitCode": 0}'
+sleep 1
 ingest_event "Bash" '{"command": "git commit -m \"fix auth\""}' '{"stdout": "1 file changed", "exitCode": 0}'
 
 # Total: 9 events
@@ -83,7 +82,7 @@ ingest_event "Bash" '{"command": "git commit -m \"fix auth\""}' '{"stdout": "1 f
 JSON=$("$RT" agent-report --json 2>&1)
 
 # Validate JSON is parseable
-echo "$JSON" | python3 -m json.tool > /dev/null 2>&1 || {
+echo "$JSON" | python3 -m json.tool >/dev/null 2>&1 || {
   echo "FAIL: --json output is not valid JSON"
   echo "$JSON"
   exit 1
@@ -155,37 +154,88 @@ check_json "d['commands']['by_binary']['git']['failed']" "0"
 ASCII=$("$RT" agent-report 2>&1)
 
 # Header with source and command count
-echo "$ASCII" | grep -q "claude_code" || { echo "FAIL: ASCII missing source 'claude_code'"; echo "$ASCII"; exit 1; }
+echo "$ASCII" | grep -q "claude_code" || {
+  echo "FAIL: ASCII missing source 'claude_code'"
+  echo "$ASCII"
+  exit 1
+}
 
 # Files section with correct prefixes
-echo "$ASCII" | grep -q "+ src/middleware.rs" || { echo "FAIL: ASCII missing '+ src/middleware.rs' (created)"; echo "$ASCII"; exit 1; }
-echo "$ASCII" | grep -q "~ src/auth.rs" || { echo "FAIL: ASCII missing '~ src/auth.rs' (modified)"; echo "$ASCII"; exit 1; }
-echo "$ASCII" | grep -q "src/config.rs" || { echo "FAIL: ASCII missing 'src/config.rs' (read only)"; echo "$ASCII"; exit 1; }
+echo "$ASCII" | grep -q "+ src/middleware.rs" || {
+  echo "FAIL: ASCII missing '+ src/middleware.rs' (created)"
+  echo "$ASCII"
+  exit 1
+}
+echo "$ASCII" | grep -q "~ src/auth.rs" || {
+  echo "FAIL: ASCII missing '~ src/auth.rs' (modified)"
+  echo "$ASCII"
+  exit 1
+}
+echo "$ASCII" | grep -q "src/config.rs" || {
+  echo "FAIL: ASCII missing 'src/config.rs' (read only)"
+  echo "$ASCII"
+  exit 1
+}
 
 # Error sequences section with resolved status
-echo "$ASCII" | grep -q "Error Sequences" || { echo "FAIL: ASCII missing 'Error Sequences' section"; echo "$ASCII"; exit 1; }
-echo "$ASCII" | grep -q "resolved" || { echo "FAIL: ASCII missing 'resolved' status"; echo "$ASCII"; exit 1; }
+echo "$ASCII" | grep -q "Error Sequences" || {
+  echo "FAIL: ASCII missing 'Error Sequences' section"
+  echo "$ASCII"
+  exit 1
+}
+echo "$ASCII" | grep -q "resolved" || {
+  echo "FAIL: ASCII missing 'resolved' status"
+  echo "$ASCII"
+  exit 1
+}
 
 # Tests section
-echo "$ASCII" | grep -q "Tests" || { echo "FAIL: ASCII missing 'Tests' section"; echo "$ASCII"; exit 1; }
+echo "$ASCII" | grep -q "Tests" || {
+  echo "FAIL: ASCII missing 'Tests' section"
+  echo "$ASCII"
+  exit 1
+}
 
 # Summary section
-echo "$ASCII" | grep -q "Summary" || { echo "FAIL: ASCII missing 'Summary' section"; echo "$ASCII"; exit 1; }
+echo "$ASCII" | grep -q "Summary" || {
+  echo "FAIL: ASCII missing 'Summary' section"
+  echo "$ASCII"
+  exit 1
+}
 
 # ─── Test 3: Markdown output has correct structure ───
 MD=$("$RT" agent-report --markdown 2>&1)
 
-echo "$MD" | grep -q "^# Agent Report" || { echo "FAIL: Markdown missing '# Agent Report' heading"; echo "$MD"; exit 1; }
-echo "$MD" | grep -q "src/middleware.rs" || { echo "FAIL: Markdown missing src/middleware.rs"; echo "$MD"; exit 1; }
-echo "$MD" | grep -q "src/auth.rs" || { echo "FAIL: Markdown missing src/auth.rs"; echo "$MD"; exit 1; }
+echo "$MD" | grep -q "^# Agent Report" || {
+  echo "FAIL: Markdown missing '# Agent Report' heading"
+  echo "$MD"
+  exit 1
+}
+echo "$MD" | grep -q "src/middleware.rs" || {
+  echo "FAIL: Markdown missing src/middleware.rs"
+  echo "$MD"
+  exit 1
+}
+echo "$MD" | grep -q "src/auth.rs" || {
+  echo "FAIL: Markdown missing src/auth.rs"
+  echo "$MD"
+  exit 1
+}
 
 # ─── Test 4: --session filter returns correct data ───
 SESSION_JSON=$("$RT" agent-report --session "test-agent-session-1" --json 2>&1)
 SESSION_COUNT=$(echo "$SESSION_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['commands']['total'])")
-[ "$SESSION_COUNT" -eq 9 ] || { echo "FAIL: --session should return all 9 commands, got $SESSION_COUNT"; exit 1; }
+[ "$SESSION_COUNT" -eq 9 ] || {
+  echo "FAIL: --session should return all 9 commands, got $SESSION_COUNT"
+  exit 1
+}
 
 # ─── Test 5: nonexistent session shows empty message ───
 EMPTY=$("$RT" agent-report --session "nonexistent-session-id" 2>&1)
-echo "$EMPTY" | grep -qi "no agent activity" || { echo "FAIL: nonexistent session should say 'no agent activity'"; echo "$EMPTY"; exit 1; }
+echo "$EMPTY" | grep -qi "no agent activity" || {
+  echo "FAIL: nonexistent session should say 'no agent activity'"
+  echo "$EMPTY"
+  exit 1
+}
 
 echo "PASS"

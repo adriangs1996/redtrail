@@ -36,7 +36,14 @@ while [[ $# -gt 0 ]]; do
             exit 1
             ;;
         *)
-            TEST_FILTER="$1"
+            # If it's a path to an existing file, use it directly
+            if [[ -f "$1" ]]; then
+                TEST_FILTER="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+            elif [[ -f "$TESTS_DIR/$1" ]]; then
+                TEST_FILTER="$TESTS_DIR/$1"
+            else
+                TEST_FILTER="$1"
+            fi
             shift
             ;;
     esac
@@ -56,6 +63,12 @@ echo ""
 # Discover tests
 # ---------------------------------------------------------------------------
 discover_tests() {
+    # If the filter is an absolute path to an existing file, return it directly
+    if [[ -n "$TEST_FILTER" && -f "$TEST_FILTER" ]]; then
+        printf '%s\n' "$TEST_FILTER"
+        return
+    fi
+
     local tests=()
     for test_script in "$TESTS_DIR"/*.sh; do
         [[ -f "$test_script" ]] || continue
@@ -116,9 +129,15 @@ run_test() {
     name="$(basename "$script")"
 
     if [[ "$name" == *.llm.sh ]]; then
+        # Run 3 attempts in parallel — each in its own Docker container
+        local pids=() exits=()
+        for i in 1 2 3; do
+            run_single_test "$script" 300 > /dev/null 2>&1 &
+            pids+=($!)
+        done
         local pass_count=0
-        for _ in 1 2 3; do
-            if run_single_test "$script" 300 > /dev/null 2>&1; then
+        for pid in "${pids[@]}"; do
+            if wait "$pid"; then
                 (( pass_count++ )) || true
             fi
         done

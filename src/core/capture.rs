@@ -1,6 +1,6 @@
 const DEFAULT_BLACKLIST: &[&str] = &[
     "vim", "nvim", "nano", "vi", "ssh", "scp", "top", "htop", "btop", "less", "more", "man",
-    "tmux", "screen",
+    "tmux", "screen", "claude", "codex", "cursor", "aider", "cline", "opencode",
 ];
 
 pub fn default_blacklist() -> Vec<String> {

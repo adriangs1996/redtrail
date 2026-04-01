@@ -10,9 +10,7 @@ pub fn run() -> Result<(), Error> {
     std::fs::create_dir_all(hook_dir)?;
 
     // Write the hook script
-    let script = format!(
-        "#!/bin/bash\nexec {binary_path} ingest\n"
-    );
+    let script = format!("#!/bin/bash\nexec {binary_path} ingest\n");
     std::fs::write(&hook_script, &script)?;
 
     // Make executable
@@ -98,10 +96,10 @@ fn add_hook_entry(
 
 fn find_binary_path() -> Result<String, Error> {
     // Try current exe first
-    if let Ok(exe) = std::env::current_exe() {
-        if exe.exists() {
-            return Ok(exe.to_string_lossy().to_string());
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && exe.exists()
+    {
+        return Ok(exe.to_string_lossy().to_string());
     }
 
     // Fall back to which

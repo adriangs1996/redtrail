@@ -12,6 +12,11 @@ __RT_BLACKLIST=":vim:nvim:nano:vi:ssh:scp:top:htop:btop:less:more:man:tmux:scree
 __redtrail_preexec() {
     setopt local_options no_monitor
 
+    # Escape hatch: REDTRAIL_SKIP=1 cmd skips capture entirely
+    if [[ "$1" == REDTRAIL_SKIP=1\ * || "$1" == *\ REDTRAIL_SKIP=1\ * ]]; then
+        return
+    fi
+
     __REDTRAIL_CMD="$1"
     __REDTRAIL_CWD="$PWD"
     __REDTRAIL_TS_START="$(date +%s)"
@@ -29,6 +34,15 @@ __redtrail_preexec() {
 
     if [[ "$__RT_BLACKLIST" == *":$binary:"* ]]; then
         return
+    fi
+
+    # Resolve aliases so e.g. alias v=nvim is caught by the blacklist
+    if (( ${+aliases[$binary]} )); then
+        local resolved="${aliases[$binary]%% *}"
+        resolved="${resolved##*/}"
+        if [[ "$__RT_BLACKLIST" == *":$resolved:"* ]]; then
+            return
+        fi
     fi
 
     # Set up capture via redtrail tee
@@ -121,6 +135,12 @@ __redtrail_preexec() {
     __REDTRAIL_CWD="$PWD"
     __REDTRAIL_TS_START="$(date +%s)"
 
+    # Escape hatch: REDTRAIL_SKIP=1 cmd skips capture entirely
+    if [[ "$__REDTRAIL_CMD" == REDTRAIL_SKIP=1\ * || "$__REDTRAIL_CMD" == *\ REDTRAIL_SKIP=1\ * ]]; then
+        unset __REDTRAIL_CMD
+        return
+    fi
+
     # Blacklist check
     local cmd_str="$__REDTRAIL_CMD"
     while :; do
@@ -133,6 +153,19 @@ __redtrail_preexec() {
 
     if [[ ":$__RT_BLACKLIST:" == *":$binary:"* ]]; then
         return
+    fi
+
+    # Resolve aliases so e.g. alias v=nvim is caught by the blacklist
+    local alias_val
+    if alias_val="$(alias "$binary" 2>/dev/null)"; then
+        alias_val="${alias_val#*=}"
+        alias_val="${alias_val#[\'\"]}"
+        alias_val="${alias_val%[\'\"]}"
+        local resolved="${alias_val%% *}"
+        resolved="${resolved##*/}"
+        if [[ ":$__RT_BLACKLIST:" == *":$resolved:"* ]]; then
+            return
+        fi
     fi
 
     # Set up capture

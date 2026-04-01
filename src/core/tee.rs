@@ -214,8 +214,13 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     let mut stderr_eof = false;
     let mut read_buf = [0u8; 4096];
 
-    let inactivity_timeout = std::time::Duration::from_secs(300);
-    let mut last_activity = std::time::Instant::now();
+    // Instead of an inactivity timeout (which kills the relay for legitimate
+    // long-running commands like webservers or interactive tools), we check
+    // whether the parent shell is still alive. This catches orphaned tee
+    // processes without breaking silent-but-running commands.
+    let shell_pid: i32 = config.shell_pid.parse().unwrap_or(0);
+    let orphan_check_interval = std::time::Duration::from_secs(5);
+    let mut last_orphan_check = std::time::Instant::now();
 
     while !stdout_eof || !stderr_eof {
         let mut pollfds = Vec::new();
@@ -238,8 +243,16 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 if FLUSH_REQUESTED.load(Ordering::Relaxed) {
                     break;
                 }
-                if last_activity.elapsed() > inactivity_timeout {
-                    break;
+                // Check if the parent shell exited (orphan detection)
+                if last_orphan_check.elapsed() > orphan_check_interval {
+                    last_orphan_check = std::time::Instant::now();
+                    if shell_pid > 0 {
+                        // kill(pid, 0) checks existence without sending a signal
+                        let alive = unsafe { nix::libc::kill(shell_pid, 0) };
+                        if alive != 0 {
+                            break; // Parent shell is gone, we're orphaned
+                        }
+                    }
                 }
                 continue;
             }
@@ -261,7 +274,6 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 match nix::unistd::read(stdout_fd, &mut read_buf) {
                     Ok(0) => stdout_eof = true,
                     Ok(n) => {
-                        last_activity = std::time::Instant::now();
                         let _ = tty.write_all(&read_buf[..n]);
                         if stdout_buf.len() < config.max_bytes {
                             let remaining = config.max_bytes - stdout_buf.len();
@@ -288,7 +300,6 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 match nix::unistd::read(stderr_fd, &mut read_buf) {
                     Ok(0) => stderr_eof = true,
                     Ok(n) => {
-                        last_activity = std::time::Instant::now();
                         let _ = tty.write_all(&read_buf[..n]);
                         if stderr_buf.len() < config.max_bytes {
                             let remaining = config.max_bytes - stderr_buf.len();

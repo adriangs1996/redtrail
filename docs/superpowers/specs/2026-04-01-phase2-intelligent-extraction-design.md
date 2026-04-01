@@ -9,6 +9,18 @@
 
 Turn raw command captures into structured entities and relationships. The extractor pipeline is the core technical differentiator — it transforms a stream of terminal commands into a queryable knowledge graph.
 
+## Prerequisites
+
+### Streaming Capture for Long-Running Commands (separate task)
+
+The current capture layer only writes to the DB when a command finishes (`precmd`). Long-running commands like web servers (`rails s`, `npm run dev`) produce valuable output (port bindings, errors, logs) that sits invisible until the process is killed.
+
+**Required change:** Split capture into `--start` (at preexec, inserts a `status='running'` record) and `--finish` (at precmd, finalizes with exit code). The tee process periodically flushes stdout to the DB row while the command runs. This enables real-time extraction from server output — e.g., detecting port 3000 seconds after `rails s` starts, not hours later when it's killed.
+
+This is a Phase 1 capture layer change planned as its own task. Phase 2 extraction works without it (processes finished commands only) but gains significant value from it (live entity extraction from running commands).
+
+---
+
 ## Design Decisions
 
 ### 1. Language: All Rust

@@ -88,7 +88,7 @@ enum Commands {
     #[command(hide = true)]
     Tee {
         #[arg(long)]
-        session: String,
+        command_id: String,
         #[arg(long)]
         shell_pid: String,
         #[arg(long)]
@@ -333,9 +333,9 @@ pub fn run() -> Result<(), Error> {
         Commands::SetupHooks => {
             cmd::setup_hooks::run()
         }
-        Commands::Tee { session, shell_pid, ctl_fifo, max_bytes } => {
+        Commands::Tee { command_id, shell_pid, ctl_fifo, max_bytes } => {
             cmd::tee::run(&cmd::tee::TeeArgs {
-                session: &session,
+                command_id: &command_id,
                 shell_pid: &shell_pid,
                 ctl_fifo: &ctl_fifo,
                 max_bytes,

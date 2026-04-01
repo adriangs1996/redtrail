@@ -1,88 +1,8 @@
+use crate::config::OnDetect;
+use crate::core::db;
+use crate::core::secrets::engine::{load_custom_patterns, redact_with_custom_patterns, CustomPattern};
 use crate::error::Error;
 use std::os::fd::AsRawFd;
-use std::path::Path;
-
-/// Header metadata written to stdout/stderr capture temp files.
-pub struct TempFileHeader {
-    pub ts_start: i64,
-    pub ts_end: i64,
-    pub truncated: bool,
-}
-
-/// Write a capture temp file with header and content. File is created with mode 0600.
-pub fn write_capture_file(
-    path: &Path,
-    header: &TempFileHeader,
-    content: &str,
-) -> Result<(), Error> {
-    use std::io::Write;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        write!(
-            f,
-            "ts_start:{}\nts_end:{}\ntruncated:{}\n\n{}",
-            header.ts_start, header.ts_end, header.truncated, content
-        )?;
-    }
-
-    #[cfg(not(unix))]
-    {
-        let mut f = std::fs::File::create(path)?;
-        write!(
-            f,
-            "ts_start:{}\nts_end:{}\ntruncated:{}\n\n{}",
-            header.ts_start, header.ts_end, header.truncated, content
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Read a capture temp file. Returns None if the file doesn't exist.
-/// Returns (header, content) on success.
-pub fn read_capture_file(path: &Path) -> Option<(TempFileHeader, String)> {
-    let data = std::fs::read_to_string(path).ok()?;
-
-    let mut ts_start: i64 = 0;
-    let mut ts_end: i64 = 0;
-    let mut truncated = false;
-
-    let content_start = data.find("\n\n").map(|i| i + 2).unwrap_or(data.len());
-    let header_section = &data[..content_start.saturating_sub(2).min(data.len())];
-
-    for line in header_section.lines() {
-        if let Some(val) = line.strip_prefix("ts_start:") {
-            ts_start = val.parse().unwrap_or(0);
-        } else if let Some(val) = line.strip_prefix("ts_end:") {
-            ts_end = val.parse().unwrap_or(0);
-        } else if let Some(val) = line.strip_prefix("truncated:") {
-            truncated = val == "true";
-        }
-    }
-
-    let content = if content_start < data.len() {
-        data[content_start..].to_string()
-    } else {
-        String::new()
-    };
-
-    Some((
-        TempFileHeader {
-            ts_start,
-            ts_end,
-            truncated,
-        },
-        content,
-    ))
-}
 
 /// Strip ANSI escape sequences from terminal output.
 pub fn strip_ansi(input: &[u8]) -> String {
@@ -105,13 +25,11 @@ pub struct PtyPair {
 ///
 /// If a controlling terminal exists (`/dev/tty`), the PTY inherits its window size.
 pub fn allocate_pty_pair() -> Result<PtyPair, Error> {
-    // Try to get current terminal window size for the new PTY
     let winsize = get_tty_winsize();
 
     let result = nix::pty::openpty(winsize.as_ref(), None::<&nix::sys::termios::Termios>)
         .map_err(|e| Error::Pty(format!("openpty: {e}")))?;
 
-    // Get the slave path from the slave fd via ttyname
     let slave_path = nix::unistd::ttyname(&result.slave)
         .map_err(|e| Error::Pty(format!("ttyname: {e}")))?
         .to_string_lossy()
@@ -148,7 +66,7 @@ fn get_tty_winsize() -> Option<nix::pty::Winsize> {
 
 /// Configuration for the tee relay loop.
 pub struct TeeConfig {
-    pub session_id: String,
+    pub command_id: String,
     pub shell_pid: String,
     pub ctl_fifo: String,
     pub max_bytes: usize,
@@ -162,18 +80,127 @@ extern "C" fn handle_sigusr1(_: nix::libc::c_int) {
     FLUSH_REQUESTED.store(true, Ordering::Relaxed);
 }
 
-/// Run the tee relay: allocate PTYs, write paths to FIFO, relay output, write temp files on EOF.
+/// Resolve DB path the same way cli.rs does.
+fn resolve_db_path() -> Option<String> {
+    std::env::var("REDTRAIL_DB").ok().or_else(|| {
+        db::global_db_path()
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+    })
+}
+
+/// Resolve config path the same way cli.rs does.
+fn resolve_config_path() -> String {
+    std::env::var("REDTRAIL_CONFIG").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{home}/.config/redtrail/config.yaml")
+    })
+}
+
+/// Flush buffered output to the DB, applying secret redaction per on_detect mode.
+/// Returns true if db_blocked was triggered (OnDetect::Block found secrets).
+fn flush_to_db(
+    db_conn: &rusqlite::Connection,
+    command_id: &str,
+    stdout_buf: &[u8],
+    stderr_buf: &[u8],
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    on_detect: OnDetect,
+    custom_patterns: &[CustomPattern],
+    warn_logged: &mut bool,
+) -> bool {
+    let stdout_clean = strip_ansi(stdout_buf);
+    let stderr_clean = strip_ansi(stderr_buf);
+
+    let stdout_opt = if stdout_clean.is_empty() {
+        None
+    } else {
+        Some(stdout_clean.as_str())
+    };
+    let stderr_opt = if stderr_clean.is_empty() {
+        None
+    } else {
+        Some(stderr_clean.as_str())
+    };
+
+    match on_detect {
+        OnDetect::Redact => {
+            let (stdout_redacted, _) =
+                redact_with_custom_patterns(&stdout_clean, custom_patterns);
+            let (stderr_redacted, _) =
+                redact_with_custom_patterns(&stderr_clean, custom_patterns);
+            let so = if stdout_redacted.is_empty() {
+                None
+            } else {
+                Some(stdout_redacted.as_str())
+            };
+            let se = if stderr_redacted.is_empty() {
+                None
+            } else {
+                Some(stderr_redacted.as_str())
+            };
+            let _ = db::update_command_output(
+                db_conn,
+                command_id,
+                so,
+                se,
+                stdout_truncated,
+                stderr_truncated,
+            );
+            false
+        }
+        OnDetect::Warn => {
+            if !*warn_logged {
+                let (_, stdout_labels) =
+                    redact_with_custom_patterns(&stdout_clean, custom_patterns);
+                let (_, stderr_labels) =
+                    redact_with_custom_patterns(&stderr_clean, custom_patterns);
+                if !stdout_labels.is_empty() || !stderr_labels.is_empty() {
+                    eprintln!("[redtrail] WARN: secrets detected in output");
+                    *warn_logged = true;
+                }
+            }
+            let _ = db::update_command_output(
+                db_conn,
+                command_id,
+                stdout_opt,
+                stderr_opt,
+                stdout_truncated,
+                stderr_truncated,
+            );
+            false
+        }
+        OnDetect::Block => {
+            let (_, stdout_labels) =
+                redact_with_custom_patterns(&stdout_clean, custom_patterns);
+            let (_, stderr_labels) =
+                redact_with_custom_patterns(&stderr_clean, custom_patterns);
+            if !stdout_labels.is_empty() || !stderr_labels.is_empty() {
+                let _ = db::delete_command(db_conn, command_id);
+                true
+            } else {
+                let _ = db::update_command_output(
+                    db_conn,
+                    command_id,
+                    stdout_opt,
+                    stderr_opt,
+                    stdout_truncated,
+                    stderr_truncated,
+                );
+                false
+            }
+        }
+    }
+}
+
+/// Run the tee relay: allocate PTYs, write paths to FIFO, relay output, stream to DB.
 pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
     use std::io::Write;
 
     let stdout_pty = allocate_pty_pair()?;
     let stderr_pty = allocate_pty_pair()?;
-
-    let ts_start = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
 
     // Write slave paths to FIFO — unblocks the shell's `read -t 1`
     {
@@ -195,13 +222,40 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
         nix::sys::signal::signal(
             nix::sys::signal::Signal::SIGUSR1,
             nix::sys::signal::SigHandler::Handler(handle_sigusr1),
-        ).ok();
+        )
+        .ok();
     }
 
     // Open /dev/tty for relay output
     let mut tty = std::fs::OpenOptions::new()
         .write(true)
         .open("/dev/tty")?;
+
+    // Open DB connection — if this fails, tee still relays output to /dev/tty
+    let db_conn_result = resolve_db_path().ok_or_else(|| {
+        Error::Db("no DB path available".into())
+    }).and_then(|path| db::open(&path));
+
+    let db_available = db_conn_result.is_ok();
+    let db_conn = db_conn_result.ok();
+
+    // Load config for secret detection
+    let app_config = crate::config::Config::load(&resolve_config_path()).unwrap_or_default();
+    let on_detect = app_config.secrets.on_detect;
+    let custom_patterns: Vec<CustomPattern> = app_config
+        .secrets
+        .patterns_file
+        .as_deref()
+        .map(load_custom_patterns)
+        .unwrap_or_default();
+
+    // Flush state
+    let flush_interval = std::time::Duration::from_secs(1);
+    let mut last_flush = std::time::Instant::now();
+    let mut last_flush_stdout_len: usize = 0;
+    let mut last_flush_stderr_len: usize = 0;
+    let mut warn_logged = false;
+    let mut db_blocked = false;
 
     let mut stdout_buf: Vec<u8> = Vec::new();
     let mut stderr_buf: Vec<u8> = Vec::new();
@@ -239,22 +293,18 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
 
         match poll(&mut pollfds, PollTimeout::from(250u16)) {
             Ok(0) => {
-                // Check if precmd signaled us to flush
                 if FLUSH_REQUESTED.load(Ordering::Relaxed) {
                     break;
                 }
-                // Check if the parent shell exited (orphan detection)
                 if last_orphan_check.elapsed() > orphan_check_interval {
                     last_orphan_check = std::time::Instant::now();
                     if shell_pid > 0 {
-                        // kill(pid, 0) checks existence without sending a signal
                         let alive = unsafe { nix::libc::kill(shell_pid, 0) };
                         if alive != 0 {
-                            break; // Parent shell is gone, we're orphaned
+                            break;
                         }
                     }
                 }
-                continue;
             }
             Ok(_) => {}
             Err(nix::errno::Errno::EINTR) => {
@@ -318,34 +368,53 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 stderr_eof = true;
             }
         }
+
+        // Periodic flush to DB
+        if db_available && !db_blocked && last_flush.elapsed() >= flush_interval {
+            let stdout_has_new = stdout_buf.len() > last_flush_stdout_len;
+            let stderr_has_new = stderr_buf.len() > last_flush_stderr_len;
+
+            if stdout_has_new || stderr_has_new {
+                if let Some(ref conn) = db_conn {
+                    db_blocked = flush_to_db(
+                        conn,
+                        &config.command_id,
+                        &stdout_buf,
+                        &stderr_buf,
+                        stdout_truncated,
+                        stderr_truncated,
+                        on_detect,
+                        &custom_patterns,
+                        &mut warn_logged,
+                    );
+                }
+                last_flush_stdout_len = stdout_buf.len();
+                last_flush_stderr_len = stderr_buf.len();
+            }
+            last_flush = std::time::Instant::now();
+        }
     }
 
-    let ts_end = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+    // Final flush (unconditional, not gated by interval)
+    if db_available && !db_blocked {
+        let stdout_has_new = stdout_buf.len() > last_flush_stdout_len;
+        let stderr_has_new = stderr_buf.len() > last_flush_stderr_len;
 
-    // Strip ANSI only — secret redaction handled by redtrail capture
-    let stdout_clean = strip_ansi(&stdout_buf);
-    let stderr_clean = strip_ansi(&stderr_buf);
-
-    let out_path = format!("/tmp/rt-out-{}", config.shell_pid);
-    let err_path = format!("/tmp/rt-err-{}", config.shell_pid);
-
-    if !stdout_clean.is_empty() {
-        write_capture_file(
-            Path::new(&out_path),
-            &TempFileHeader { ts_start, ts_end, truncated: stdout_truncated },
-            &stdout_clean,
-        )?;
-    }
-
-    if !stderr_clean.is_empty() {
-        write_capture_file(
-            Path::new(&err_path),
-            &TempFileHeader { ts_start, ts_end, truncated: stderr_truncated },
-            &stderr_clean,
-        )?;
+        if stdout_has_new || stderr_has_new {
+            if let Some(ref conn) = db_conn {
+                flush_to_db(
+                    conn,
+                    &config.command_id,
+                    &stdout_buf,
+                    &stderr_buf,
+                    stdout_truncated,
+                    stderr_truncated,
+                    on_detect,
+                    &custom_patterns,
+                    &mut warn_logged,
+                );
+            }
+        }
     }
 
     Ok(())

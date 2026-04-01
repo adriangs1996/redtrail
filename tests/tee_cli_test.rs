@@ -5,31 +5,50 @@ fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
 }
 
-/// This test exercises the `redtrail tee` subcommand:
-/// 1. Creates a FIFO
-/// 2. Starts `redtrail tee` in background
-/// 3. Reads PTY slave paths from the FIFO
-/// 4. Writes to the stdout PTY slave
-/// 5. Closes both slaves (triggers EOF)
-/// 6. Verifies temp files were created with correct content
+/// Test that tee captures output and streams it to the DB.
 ///
-/// Note: This test requires /dev/tty (a real terminal). It will fail in
-/// environments without a controlling terminal (e.g., some CI setups).
+/// 1. Creates a temp DB and a session + running command via `capture start`
+/// 2. Creates a FIFO
+/// 3. Starts `redtrail tee` with `--command-id`
+/// 4. Reads PTY slave paths from the FIFO
+/// 5. Writes to the stdout PTY slave
+/// 6. Signals SIGUSR1 to flush
+/// 7. Verifies the DB row has the captured output
+///
+/// Note: This test requires /dev/tty (a real terminal).
 #[test]
-fn tee_creates_pty_and_captures_output() {
-    // Skip if no controlling terminal
+fn tee_streams_output_to_db() {
     if std::fs::OpenOptions::new()
         .write(true)
         .open("/dev/tty")
         .is_err()
     {
-        eprintln!("skipping tee_creates_pty_and_captures_output: no /dev/tty");
+        eprintln!("skipping tee_streams_output_to_db: no /dev/tty");
         return;
     }
 
     let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
     let fifo_path = dir.path().join("ctl-fifo");
     let shell_pid = format!("tee-test-{}", std::process::id());
+
+    // Create DB and a running command via capture start
+    let start_output = redtrail_bin()
+        .args([
+            "capture", "start",
+            "--session-id", "test-sess",
+            "--command", "echo hello",
+        ])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("capture start");
+    assert!(
+        start_output.status.success(),
+        "capture start failed: {}",
+        String::from_utf8_lossy(&start_output.stderr)
+    );
+    let command_id = String::from_utf8_lossy(&start_output.stdout).trim().to_string();
+    assert!(!command_id.is_empty(), "capture start should print command_id");
 
     nix::unistd::mkfifo(
         &fifo_path,
@@ -41,13 +60,11 @@ fn tee_creates_pty_and_captures_output() {
     let mut child = redtrail_bin()
         .args([
             "tee",
-            "--session",
-            "test-sess",
-            "--shell-pid",
-            &shell_pid,
-            "--ctl-fifo",
-            fifo_path.to_str().unwrap(),
+            "--command-id", &command_id,
+            "--shell-pid", &shell_pid,
+            "--ctl-fifo", fifo_path.to_str().unwrap(),
         ])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .spawn()
         .expect("failed to start tee");
 
@@ -74,56 +91,63 @@ fn tee_creates_pty_and_captures_output() {
         let _ = std::fs::OpenOptions::new().write(true).open(paths[1]);
     }
 
-    // Signal tee to flush and exit (mirrors what the shell hook's precmd does)
+    // Signal tee to flush and exit
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(child.id() as i32),
         nix::sys::signal::Signal::SIGUSR1,
-    ).ok();
+    )
+    .ok();
 
-    // Wait for tee to exit
     let status = child.wait().expect("wait failed");
     assert!(status.success(), "tee should exit cleanly");
 
-    // Check temp files
-    let out_file = format!("/tmp/rt-out-{shell_pid}");
-    assert!(
-        std::path::Path::new(&out_file).exists(),
-        "stdout temp file should exist at {out_file}"
-    );
+    // Verify DB has the captured output
+    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let cmds = redtrail::core::db::get_commands(
+        &conn,
+        &redtrail::core::db::CommandFilter::default(),
+    )
+    .unwrap();
 
-    let (header, content) =
-        redtrail::core::tee::read_capture_file(std::path::Path::new(&out_file)).unwrap();
+    assert_eq!(cmds.len(), 1, "should have one command");
+    let stdout = cmds[0].stdout.as_ref().expect("stdout should be captured");
     assert!(
-        content.contains("captured output"),
-        "content should contain our output: {content}"
+        stdout.contains("captured output"),
+        "stdout should contain our output: {stdout}"
     );
-    assert!(!header.truncated);
-    assert!(header.ts_start > 0);
-    assert!(header.ts_end >= header.ts_start);
-
-    // Cleanup
-    let _ = std::fs::remove_file(&out_file);
-    let _ = std::fs::remove_file(format!("/tmp/rt-err-{shell_pid}"));
 }
 
+/// End-to-end: capture start -> tee -> capture finish -> verify DB
 #[test]
-fn end_to_end_tee_then_capture() {
-    // Skip if no controlling terminal
+fn end_to_end_tee_then_capture_finish() {
     if std::fs::OpenOptions::new()
         .write(true)
         .open("/dev/tty")
         .is_err()
     {
-        eprintln!("skipping end_to_end_tee_then_capture: no /dev/tty");
+        eprintln!("skipping end_to_end_tee_then_capture_finish: no /dev/tty");
         return;
     }
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
-    let _conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-
     let fifo_path = dir.path().join("ctl-fifo");
     let shell_pid = format!("e2e-{}", std::process::id());
+
+    // Step 1: capture start
+    let start_output = redtrail_bin()
+        .args([
+            "capture", "start",
+            "--session-id", "e2e-sess",
+            "--command", "make build",
+            "--shell", "zsh",
+            "--hostname", "devbox",
+        ])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .output()
+        .expect("capture start");
+    assert!(start_output.status.success(), "capture start failed: {}", String::from_utf8_lossy(&start_output.stderr));
+    let command_id = String::from_utf8_lossy(&start_output.stdout).trim().to_string();
 
     nix::unistd::mkfifo(
         &fifo_path,
@@ -131,14 +155,15 @@ fn end_to_end_tee_then_capture() {
     )
     .expect("mkfifo");
 
-    // Start tee
+    // Step 2: start tee
     let mut tee_child = redtrail_bin()
         .args([
             "tee",
-            "--session", "e2e-sess",
+            "--command-id", &command_id,
             "--shell-pid", &shell_pid,
             "--ctl-fifo", fifo_path.to_str().unwrap(),
         ])
+        .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .spawn()
         .expect("start tee");
 
@@ -159,32 +184,26 @@ fn end_to_end_tee_then_capture() {
         let _ = std::fs::OpenOptions::new().write(true).open(paths[1]);
     }
 
-    // Signal tee to flush and exit (mirrors what the shell hook's precmd does)
+    // Signal tee to flush and exit
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(tee_child.id() as i32),
         nix::sys::signal::Signal::SIGUSR1,
-    ).ok();
+    )
+    .ok();
 
-    // Wait for tee to finish
     tee_child.wait().expect("tee wait");
 
-    // Now run capture with the temp files
-    let out_file = format!("/tmp/rt-out-{}", shell_pid);
-    let output = redtrail_bin()
+    // Step 3: capture finish
+    let finish_output = redtrail_bin()
         .args([
-            "capture",
-            "--session-id", "e2e-sess",
-            "--command", "make build",
+            "capture", "finish",
+            "--command-id", &command_id,
             "--exit-code", "0",
-            "--shell", "zsh",
-            "--hostname", "devbox",
-            "--stdout-file", &out_file,
         ])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .output()
-        .expect("capture");
-
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+        .expect("capture finish");
+    assert!(finish_output.status.success(), "capture finish failed: {}", String::from_utf8_lossy(&finish_output.stderr));
 
     // Verify DB
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
@@ -199,12 +218,7 @@ fn end_to_end_tee_then_capture() {
     let stdout = cmds[0].stdout.as_ref().expect("stdout should be captured");
     assert!(stdout.contains("build output line 1"), "stdout: {stdout}");
     assert!(stdout.contains("build output line 2"), "stdout: {stdout}");
-    assert!(cmds[0].timestamp_start > 0, "timestamp should come from tee");
-    assert!(cmds[0].timestamp_end.is_some(), "ts_end should come from tee");
-
-    // Temp files should be cleaned up by capture
-    assert!(!std::path::Path::new(&out_file).exists());
-
-    // Clean up any remaining
-    let _ = std::fs::remove_file(format!("/tmp/rt-err-{}", shell_pid));
+    assert_eq!(cmds[0].exit_code, Some(0));
+    assert!(cmds[0].timestamp_start > 0);
+    assert!(cmds[0].timestamp_end.is_some(), "ts_end should be set by finish");
 }

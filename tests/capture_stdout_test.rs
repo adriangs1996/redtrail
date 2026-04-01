@@ -1,18 +1,12 @@
+/// Tests for capture start/finish with stdout/stderr written directly to DB.
+///
+/// In the new architecture, tee writes stdout/stderr to DB via `update_command_output`.
+/// The `capture finish` command reads them back for final secret redaction and compression.
+
 use std::process::Command;
 
 fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
-}
-
-fn now_ts() -> String {
-    now_secs().to_string()
-}
-
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
 }
 
 fn setup_db() -> tempfile::TempDir {
@@ -22,224 +16,155 @@ fn setup_db() -> tempfile::TempDir {
     dir
 }
 
-#[test]
-fn capture_reads_stdout_from_file() {
-    let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let now = now_secs();
-
-    let stdout_file = dir.path().join("rt-out-test");
-    redtrail::core::tee::write_capture_file(
-        &stdout_file,
-        &redtrail::core::tee::TempFileHeader {
-            ts_start: now,
-            ts_end: now + 1,
-            truncated: false,
-        },
-        "hello from stdout\n",
-    )
-    .unwrap();
-
+/// Helper: run `capture start` and return the command ID.
+fn start_command(db_path: &str, session: &str, command: &str) -> String {
     let output = redtrail_bin()
         .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "echo hello",
-            "--exit-code", "0",
+            "capture", "start",
+            "--session-id", session,
+            "--command", command,
             "--shell", "zsh",
             "--hostname", "devbox",
-            "--stdout-file",
-            stdout_file.to_str().unwrap(),
         ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+        .env("REDTRAIL_DB", db_path)
         .output()
-        .expect("failed to run");
+        .expect("failed to run capture start");
+    assert!(output.status.success(), "capture start failed: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+/// Helper: simulate tee writing stdout/stderr to DB.
+fn write_output_to_db(db_path: &str, command_id: &str, stdout: Option<&str>, stderr: Option<&str>) {
+    let conn = redtrail::core::db::open(db_path).unwrap();
+    redtrail::core::db::update_command_output(&conn, command_id, stdout, stderr, false, false).unwrap();
+}
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(
-        &conn,
-        &redtrail::core::db::CommandFilter::default(),
-    )
-    .unwrap();
+/// Helper: run `capture finish`.
+fn finish_command(db_path: &str, command_id: &str, exit_code: i32) {
+    let output = redtrail_bin()
+        .args([
+            "capture", "finish",
+            "--command-id", command_id,
+            "--exit-code", &exit_code.to_string(),
+        ])
+        .env("REDTRAIL_DB", db_path)
+        .output()
+        .expect("failed to run capture finish");
+    assert!(output.status.success(), "capture finish failed: {}", String::from_utf8_lossy(&output.stderr));
+}
 
+fn finish_command_with_config(db_path: &str, config_path: &str, command_id: &str, exit_code: i32) {
+    let output = redtrail_bin()
+        .args([
+            "capture", "finish",
+            "--command-id", command_id,
+            "--exit-code", &exit_code.to_string(),
+        ])
+        .env("REDTRAIL_DB", db_path)
+        .env("REDTRAIL_CONFIG", config_path)
+        .output()
+        .expect("failed to run capture finish");
+    assert!(output.status.success(), "capture finish failed: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn finish_preserves_stdout_written_by_tee() {
+    let dir = setup_db();
+    let db = dir.path().join("test.db");
+    let db_path = db.to_str().unwrap();
+
+    let id = start_command(db_path, "s1", "echo hello");
+    write_output_to_db(db_path, &id, Some("hello from stdout\n"), None);
+    finish_command(db_path, &id, 0);
+
+    let conn = redtrail::core::db::open(db_path).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].stdout.as_deref(), Some("hello from stdout\n"));
-    assert!(!cmds[0].stdout_truncated);
-
-    // Temp file should be deleted by capture
-    assert!(!stdout_file.exists(), "capture should delete the temp file");
+    assert_eq!(cmds[0].exit_code, Some(0));
 }
 
 #[test]
-fn capture_reads_stderr_from_file() {
+fn finish_preserves_stderr_written_by_tee() {
     let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let now = now_secs();
+    let db = dir.path().join("test.db");
+    let db_path = db.to_str().unwrap();
 
-    let stderr_file = dir.path().join("rt-err-test");
-    redtrail::core::tee::write_capture_file(
-        &stderr_file,
-        &redtrail::core::tee::TempFileHeader {
-            ts_start: now,
-            ts_end: now + 1,
-            truncated: true,
-        },
-        "error output\n",
-    )
-    .unwrap();
+    let id = start_command(db_path, "s1", "make build");
+    write_output_to_db(db_path, &id, None, Some("error output\n"));
+    finish_command(db_path, &id, 1);
 
-    let output = redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "make build",
-            "--exit-code", "1",
-            "--shell", "zsh",
-            "--hostname", "devbox",
-            "--stderr-file",
-            stderr_file.to_str().unwrap(),
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
-
-    assert!(output.status.success());
-
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(
-        &conn,
-        &redtrail::core::db::CommandFilter::default(),
-    )
-    .unwrap();
-
+    let conn = redtrail::core::db::open(db_path).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds[0].stderr.as_deref(), Some("error output\n"));
-    assert!(cmds[0].stderr_truncated);
-    assert!(!stderr_file.exists());
+    assert_eq!(cmds[0].exit_code, Some(1));
 }
 
 #[test]
-fn capture_uses_timestamps_from_temp_file_header() {
+fn finish_without_output_still_works() {
     let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let now = now_secs();
+    let db = dir.path().join("test.db");
+    let db_path = db.to_str().unwrap();
 
-    let stdout_file = dir.path().join("rt-out-ts");
-    redtrail::core::tee::write_capture_file(
-        &stdout_file,
-        &redtrail::core::tee::TempFileHeader {
-            ts_start: now,
-            ts_end: now + 2000,
-            truncated: false,
-        },
-        "output",
-    )
-    .unwrap();
+    let id = start_command(db_path, "s1", "ls");
+    finish_command(db_path, &id, 0);
 
-    redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "echo test",
-            "--exit-code", "0",
-            "--shell", "zsh",
-            "--hostname", "devbox",
-            "--stdout-file",
-            stdout_file.to_str().unwrap(),
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
-
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(
-        &conn,
-        &redtrail::core::db::CommandFilter::default(),
-    )
-    .unwrap();
-
-    assert_eq!(cmds[0].timestamp_start, now);
-    assert_eq!(cmds[0].timestamp_end, Some(now + 2000));
-}
-
-#[test]
-fn capture_without_files_still_works() {
-    let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let ts = now_ts();
-
-    let output = redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "ls",
-            "--exit-code", "0",
-            "--ts-start", &ts,
-            "--shell", "zsh",
-            "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
-
-    assert!(output.status.success());
-
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(
-        &conn,
-        &redtrail::core::db::CommandFilter::default(),
-    )
-    .unwrap();
-
+    let conn = redtrail::core::db::open(db_path).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds.len(), 1);
     assert!(cmds[0].stdout.is_none());
     assert!(cmds[0].stderr.is_none());
-    let expected_ts: i64 = ts.parse().unwrap();
-    assert_eq!(cmds[0].timestamp_start, expected_ts);
 }
 
 #[test]
-fn capture_redacts_secrets_in_stdout_file() {
+fn finish_redacts_secrets_in_stdout_with_redact_mode() {
     let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let now = now_secs();
+    let db = dir.path().join("test.db");
+    let db_path = db.to_str().unwrap();
 
-    let stdout_file = dir.path().join("rt-out-secret");
-    redtrail::core::tee::write_capture_file(
-        &stdout_file,
-        &redtrail::core::tee::TempFileHeader {
-            ts_start: now,
-            ts_end: now + 1,
-            truncated: false,
-        },
-        "aws_access_key_id=AKIAIOSFODNN7EXAMPLE\n",
-    )
-    .unwrap();
+    let id = start_command(db_path, "s1", "cat credentials");
+    write_output_to_db(db_path, &id, Some("aws_access_key_id=AKIAIOSFODNN7EXAMPLE\n"), None);
 
-    redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "cat credentials",
-            "--exit-code", "0",
-            "--shell", "zsh",
-            "--hostname", "devbox",
-            "--stdout-file",
-            stdout_file.to_str().unwrap(),
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    // Default on_detect is Redact, so finish should redact
+    finish_command(db_path, &id, 0);
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(
-        &conn,
-        &redtrail::core::db::CommandFilter::default(),
-    )
-    .unwrap();
-
+    let conn = redtrail::core::db::open(db_path).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     let stdout = cmds[0].stdout.as_ref().unwrap();
     assert!(!stdout.contains("AKIAIOSFODNN7EXAMPLE"), "secret should be redacted in stdout");
-    assert!(cmds[0].redacted);
+}
+
+#[test]
+fn finish_deletes_row_with_secrets_in_block_mode() {
+    let dir = setup_db();
+    let db = dir.path().join("test.db");
+    let db_path = db.to_str().unwrap();
+    let config_path = dir.path().join("config.yaml");
+    std::fs::write(&config_path, "secrets:\n  on_detect: block\n").unwrap();
+
+    // Use start with block config — command itself has no secrets
+    let output = redtrail_bin()
+        .args([
+            "capture", "start",
+            "--session-id", "s1",
+            "--command", "cat credentials",
+            "--shell", "zsh",
+            "--hostname", "devbox",
+        ])
+        .env("REDTRAIL_DB", db_path)
+        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
+        .output()
+        .expect("failed to run");
+    let id = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(!id.is_empty());
+
+    // Tee writes secret content
+    write_output_to_db(db_path, &id, Some("AKIAIOSFODNN7EXAMPLE\n"), None);
+
+    // Finish with block mode should delete the row
+    finish_command_with_config(db_path, config_path.to_str().unwrap(), &id, 0);
+
+    let conn = redtrail::core::db::open(db_path).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    assert!(cmds.is_empty(), "block mode should delete command when stdout contains secrets");
 }

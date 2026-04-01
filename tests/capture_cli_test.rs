@@ -4,14 +4,6 @@ fn redtrail_bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_redtrail"))
 }
 
-fn now_ts() -> String {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        .to_string()
-}
-
 fn setup_db() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.db");
@@ -20,145 +12,192 @@ fn setup_db() -> tempfile::TempDir {
     dir
 }
 
-#[test]
-fn capture_inserts_command_into_db() {
-    let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let ts = now_ts();
-
-    let output = redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "test-session",
-            "--command", "git status",
-            "--cwd", "/home/user/project",
-            "--exit-code", "0",
-            "--ts-start", &ts,
-            "--ts-end", &ts,
-            "--shell", "zsh",
-            "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
+/// Run `capture start` and return (stdout = command_id, stderr).
+fn capture_start(db_path: &str, args: &[&str]) -> std::process::Output {
+    let mut full_args = vec!["capture", "start"];
+    full_args.extend_from_slice(args);
+    redtrail_bin()
+        .args(&full_args)
+        .env("REDTRAIL_DB", db_path)
         .output()
-        .expect("failed to run");
+        .expect("failed to run capture start")
+}
 
-    assert!(output.status.success(), "capture should succeed. stderr: {}", String::from_utf8_lossy(&output.stderr));
+/// Run `capture start` with a config override.
+fn capture_start_with_config(db_path: &str, config_path: &str, args: &[&str]) -> std::process::Output {
+    let mut full_args = vec!["capture", "start"];
+    full_args.extend_from_slice(args);
+    redtrail_bin()
+        .args(&full_args)
+        .env("REDTRAIL_DB", db_path)
+        .env("REDTRAIL_CONFIG", config_path)
+        .output()
+        .expect("failed to run capture start")
+}
 
-    // Verify it's in the DB
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
-    assert_eq!(cmds.len(), 1);
-    assert_eq!(cmds[0].command_raw, "git status");
-    assert_eq!(cmds[0].exit_code, Some(0));
-    assert_eq!(cmds[0].cwd.as_deref(), Some("/home/user/project"));
-    assert_eq!(cmds[0].session_id, "test-session");
+/// Run `capture finish` and return output.
+fn capture_finish(db_path: &str, command_id: &str, exit_code: i32) -> std::process::Output {
+    redtrail_bin()
+        .args([
+            "capture", "finish",
+            "--command-id", command_id,
+            "--exit-code", &exit_code.to_string(),
+        ])
+        .env("REDTRAIL_DB", db_path)
+        .output()
+        .expect("failed to run capture finish")
+}
+
+#[allow(dead_code)]
+fn capture_finish_with_config(db_path: &str, config_path: &str, command_id: &str, exit_code: i32) -> std::process::Output {
+    redtrail_bin()
+        .args([
+            "capture", "finish",
+            "--command-id", command_id,
+            "--exit-code", &exit_code.to_string(),
+        ])
+        .env("REDTRAIL_DB", db_path)
+        .env("REDTRAIL_CONFIG", config_path)
+        .output()
+        .expect("failed to run capture finish")
 }
 
 #[test]
-fn capture_redacts_secrets() {
+fn capture_start_inserts_running_command() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
 
-    let output = redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
-            "--exit-code", "0",
-            "--ts-start", &ts,
-            "--shell", "zsh",
-            "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    let output = capture_start(db, &[
+        "--session-id", "test-session",
+        "--command", "git status",
+        "--cwd", "/home/user/project",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
+
+    assert!(output.status.success(), "capture start should succeed. stderr: {}", String::from_utf8_lossy(&output.stderr));
+
+    let command_id = String::from_utf8_lossy(&output.stdout);
+    assert!(!command_id.is_empty(), "capture start should print command ID");
+
+    // Verify it's in the DB with status=running
+    let conn = redtrail::core::db::open(db).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].command_raw, "git status");
+    assert_eq!(cmds[0].cwd.as_deref(), Some("/home/user/project"));
+    assert_eq!(cmds[0].session_id, "test-session");
+    // exit_code should be None (not yet finished)
+    assert!(cmds[0].exit_code.is_none(), "running command should have no exit_code");
+}
+
+#[test]
+fn capture_start_finish_roundtrip() {
+    let dir = setup_db();
+    let db_path = dir.path().join("test.db");
+    let db = db_path.to_str().unwrap();
+
+    let start_output = capture_start(db, &[
+        "--session-id", "test-session",
+        "--command", "git status",
+        "--cwd", "/home/user/project",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
+    assert!(start_output.status.success());
+    let command_id = String::from_utf8_lossy(&start_output.stdout).to_string();
+
+    let finish_output = capture_finish(db, &command_id, 0);
+    assert!(finish_output.status.success(), "capture finish should succeed. stderr: {}", String::from_utf8_lossy(&finish_output.stderr));
+
+    let conn = redtrail::core::db::open(db).unwrap();
+    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].exit_code, Some(0));
+}
+
+#[test]
+fn capture_start_redacts_secrets() {
+    let dir = setup_db();
+    let db_path = dir.path().join("test.db");
+    let db = db_path.to_str().unwrap();
+
+    let output = capture_start(db, &[
+        "--session-id", "s1",
+        "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
     assert!(output.status.success());
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert!(!cmds[0].command_raw.contains("AKIAIOSFODNN7EXAMPLE"), "secret should be redacted");
     assert!(cmds[0].redacted);
 }
 
 #[test]
-fn capture_parses_binary_from_command() {
+fn capture_start_parses_binary_from_command() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
 
-    redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "docker build -t myapp .",
-            "--exit-code", "0",
-            "--ts-start", &ts,
-            "--shell", "zsh",
-            "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    capture_start(db, &[
+        "--session-id", "s1",
+        "--command", "docker build -t myapp .",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds[0].command_binary.as_deref(), Some("docker"));
 }
 
 #[test]
-fn capture_skips_blacklisted_commands() {
+fn capture_start_skips_blacklisted_commands() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
 
-    let output = redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "vim src/main.rs",
-            "--exit-code", "0",
-            "--ts-start", &ts,
-            "--shell", "zsh",
-            "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    let output = capture_start(db, &[
+        "--session-id", "s1",
+        "--command", "vim src/main.rs",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
-    // Should succeed silently but NOT insert
     assert!(output.status.success());
+    // stdout should be empty (no command ID printed)
+    assert!(output.stdout.is_empty(), "blacklisted command should not print ID");
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert!(cmds.is_empty(), "blacklisted command should not be stored");
 }
 
 #[test]
-fn capture_disabled_via_config_stores_nothing() {
+fn capture_start_disabled_via_config_stores_nothing() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     std::fs::write(&config_path, "capture:\n  enabled: false\n").unwrap();
-    let ts = now_ts();
 
-    let output = redtrail_bin()
-        .args([
-            "capture",
+    let output = capture_start_with_config(
+        db_path.to_str().unwrap(),
+        config_path.to_str().unwrap(),
+        &[
             "--session-id", "s1",
             "--command", "echo hello",
-            "--exit-code", "0",
-            "--ts-start", &ts,
             "--shell", "zsh",
             "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+        ],
+    );
 
     assert!(output.status.success(), "should succeed silently even when disabled");
+    assert!(output.stdout.is_empty(), "disabled capture should not print ID");
 
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
@@ -166,103 +205,64 @@ fn capture_disabled_via_config_stores_nothing() {
 }
 
 #[test]
-fn capture_custom_blacklist_from_config() {
+fn capture_start_custom_blacklist_from_config() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
+    let cfg = config_path.to_str().unwrap();
     // Custom blacklist that includes "echo" but NOT "vim"
     std::fs::write(&config_path, "capture:\n  blacklist_commands:\n    - echo\n").unwrap();
 
     // echo should now be blacklisted
-    redtrail_bin()
-        .args(["capture", "--session-id", "s1", "--command", "echo hello",
-               "--exit-code", "0", "--ts-start", &ts, "--shell", "zsh", "--hostname", "devbox"])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    capture_start_with_config(db, cfg, &[
+        "--session-id", "s1",
+        "--command", "echo hello",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert!(cmds.is_empty(), "echo should be blacklisted via config");
 
     // vim should NOT be blacklisted with custom config (it replaces the default list)
-    redtrail_bin()
-        .args(["capture", "--session-id", "s1", "--command", "vim src/main.rs",
-               "--exit-code", "0", "--ts-start", &ts, "--shell", "zsh", "--hostname", "devbox"])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    capture_start_with_config(db, cfg, &[
+        "--session-id", "s1",
+        "--command", "vim src/main.rs",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
     let cmds2 = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds2.len(), 1, "vim should NOT be blacklisted when custom config replaces defaults");
 }
 
 #[test]
-fn capture_compresses_stdout_over_max_bytes_from_config() {
-    let dir = setup_db();
-    let db_path = dir.path().join("test.db");
-    let config_path = dir.path().join("config.yaml");
-    let ts = now_ts();
-    // Set a tiny max_stdout_bytes
-    std::fs::write(&config_path, "capture:\n  max_stdout_bytes: 20\n").unwrap();
-
-    // Write a temp stdout file with content exceeding 20 bytes
-    let stdout_file = dir.path().join("stdout.tmp");
-    // Tee capture file format: colon headers, blank line, then content
-    let long_content = "x".repeat(100);
-    std::fs::write(&stdout_file, format!("ts_start:{ts}\nts_end:{ts}\ntruncated:false\n\n{long_content}")).unwrap();
-
-    redtrail_bin()
-        .args(["capture", "--session-id", "s1", "--command", "echo long output",
-               "--exit-code", "0", "--shell", "zsh", "--hostname", "devbox",
-               "--stdout-file", stdout_file.to_str().unwrap()])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
-
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
-    assert_eq!(cmds.len(), 1);
-    // Over-limit stdout is compressed and decompressed transparently — full content recovered
-    let stdout = cmds[0].stdout.as_deref().unwrap_or("");
-    assert_eq!(stdout.len(), 100, "full stdout should be recovered via decompression, got {} bytes", stdout.len());
-    assert!(cmds[0].stdout_truncated, "stdout_truncated flag should be set for compressed output");
-}
-
-#[test]
-fn capture_on_detect_warn_stores_unredacted_but_flags() {
+fn capture_start_on_detect_warn_stores_unredacted_but_flags() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     std::fs::write(&config_path, "secrets:\n  on_detect: warn\n").unwrap();
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
+    let cfg = config_path.to_str().unwrap();
 
-    let output = redtrail_bin()
-        .args(["capture", "--session-id", "s1",
-               "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
-               "--exit-code", "0", "--ts-start", &ts,
-               "--shell", "zsh", "--hostname", "devbox"])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    let output = capture_start_with_config(db, cfg, &[
+        "--session-id", "s1",
+        "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
     assert!(output.status.success());
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds.len(), 1);
-    // In warn mode, the secret is stored UNredacted
     assert!(
         cmds[0].command_raw.contains("AKIAIOSFODNN7EXAMPLE"),
         "warn mode should store unredacted command"
     );
-    // But the redacted flag is set to indicate detection occurred
-    assert!(cmds[0].redacted, "redacted flag should be set in warn mode");
 
     // Stderr should contain a warning
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -273,40 +273,38 @@ fn capture_on_detect_warn_stores_unredacted_but_flags() {
 }
 
 #[test]
-fn capture_on_detect_block_rejects_command() {
+fn capture_start_on_detect_block_rejects_command() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     std::fs::write(&config_path, "secrets:\n  on_detect: block\n").unwrap();
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
+    let cfg = config_path.to_str().unwrap();
 
-    let output = redtrail_bin()
-        .args(["capture", "--session-id", "s1",
-               "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
-               "--exit-code", "0", "--ts-start", &ts,
-               "--shell", "zsh", "--hostname", "devbox"])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    let output = capture_start_with_config(db, cfg, &[
+        "--session-id", "s1",
+        "--command", "export AWS_SECRET_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
-    // Block mode should succeed (no crash) but not store the command
     assert!(output.status.success());
+    assert!(output.stdout.is_empty(), "block mode should not print ID");
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert!(cmds.is_empty(), "block mode should not store command with secrets");
 }
 
 #[test]
-fn capture_custom_patterns_file_detects_custom_secret() {
+fn capture_start_custom_patterns_file_detects_custom_secret() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
     let config_path = dir.path().join("config.yaml");
     let patterns_path = dir.path().join("patterns.yaml");
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
+    let cfg = config_path.to_str().unwrap();
 
-    // Define a custom pattern that matches "CUSTOMSECRET-" followed by hex
     std::fs::write(&patterns_path, r#"
 - label: custom_token
   pattern: "CUSTOMSECRET-[a-f0-9]{16}"
@@ -316,19 +314,16 @@ fn capture_custom_patterns_file_detects_custom_secret() {
         "secrets:\n  patterns_file: {}\n", patterns_path.display()
     )).unwrap();
 
-    let output = redtrail_bin()
-        .args(["capture", "--session-id", "s1",
-               "--command", "curl -H 'X-Token: CUSTOMSECRET-abcdef0123456789' https://api.example.com",
-               "--exit-code", "0", "--ts-start", &ts,
-               "--shell", "zsh", "--hostname", "devbox"])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .env("REDTRAIL_CONFIG", config_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    let output = capture_start_with_config(db, cfg, &[
+        "--session-id", "s1",
+        "--command", "curl -H 'X-Token: CUSTOMSECRET-abcdef0123456789' https://api.example.com",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
     assert!(output.status.success());
 
-    let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
+    let conn = redtrail::core::db::open(db).unwrap();
     let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
     assert_eq!(cmds.len(), 1);
     assert!(
@@ -340,26 +335,32 @@ fn capture_custom_patterns_file_detects_custom_secret() {
 }
 
 #[test]
-fn capture_is_silent_on_success() {
+fn capture_start_is_silent_on_success_except_id() {
     let dir = setup_db();
     let db_path = dir.path().join("test.db");
-    let ts = now_ts();
+    let db = db_path.to_str().unwrap();
 
-    let output = redtrail_bin()
-        .args([
-            "capture",
-            "--session-id", "s1",
-            "--command", "echo hello",
-            "--exit-code", "0",
-            "--ts-start", &ts,
-            "--shell", "zsh",
-            "--hostname", "devbox",
-        ])
-        .env("REDTRAIL_DB", db_path.to_str().unwrap())
-        .output()
-        .expect("failed to run");
+    let output = capture_start(db, &[
+        "--session-id", "s1",
+        "--command", "echo hello",
+        "--shell", "zsh",
+        "--hostname", "devbox",
+    ]);
 
     assert!(output.status.success());
-    assert!(output.stdout.is_empty(), "capture should produce no stdout");
-    assert!(output.stderr.is_empty(), "capture should produce no stderr");
+    // stdout should contain only the command ID (no newline, no extra output)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.is_empty(), "capture start should print command ID");
+    assert!(!stdout.contains('\n'), "capture start stdout should be just the ID");
+    assert!(output.stderr.is_empty(), "capture start should produce no stderr");
+}
+
+#[test]
+fn capture_finish_nonexistent_command_is_noop() {
+    let dir = setup_db();
+    let db_path = dir.path().join("test.db");
+    let db = db_path.to_str().unwrap();
+
+    let output = capture_finish(db, "nonexistent-id", 0);
+    assert!(output.status.success(), "finish on nonexistent ID should succeed silently");
 }

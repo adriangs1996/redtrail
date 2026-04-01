@@ -78,29 +78,11 @@ enum Commands {
     /// Generate a new session ID (called by shell hooks)
     #[command(hide = true)]
     SessionId,
-    /// Record a command execution (called by shell hooks)
+    /// Record command execution (called by shell hooks)
     #[command(hide = true)]
     Capture {
-        #[arg(long)]
-        session_id: String,
-        #[arg(long)]
-        command: String,
-        #[arg(long)]
-        cwd: Option<String>,
-        #[arg(long)]
-        exit_code: Option<i32>,
-        #[arg(long)]
-        ts_start: Option<i64>,
-        #[arg(long)]
-        ts_end: Option<i64>,
-        #[arg(long)]
-        shell: Option<String>,
-        #[arg(long)]
-        hostname: Option<String>,
-        #[arg(long)]
-        stdout_file: Option<String>,
-        #[arg(long)]
-        stderr_file: Option<String>,
+        #[command(subcommand)]
+        action: CaptureAction,
     },
     /// PTY-aware output capture (called by shell hooks)
     #[command(hide = true)]
@@ -191,6 +173,32 @@ enum ConfigAction {
     Set {
         key: String,
         value: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CaptureAction {
+    /// Create a running command record (preexec)
+    Start {
+        #[arg(long)]
+        session_id: String,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        shell: Option<String>,
+        #[arg(long)]
+        hostname: Option<String>,
+    },
+    /// Finalize a command record (precmd)
+    Finish {
+        #[arg(long)]
+        command_id: String,
+        #[arg(long)]
+        exit_code: Option<i32>,
+        #[arg(long)]
+        cwd: Option<String>,
     },
 }
 
@@ -294,22 +302,29 @@ pub fn run() -> Result<(), Error> {
             print!("{id}");
             Ok(())
         }
-        Commands::Capture { session_id, command, cwd, exit_code, ts_start, ts_end, shell, hostname, stdout_file, stderr_file } => {
+        Commands::Capture { action } => {
             let config = redtrail::config::Config::load(&config_path()).unwrap_or_default();
             let conn = open_db()?;
-            cmd::capture::run(&conn, &cmd::capture::CaptureArgs {
-                session_id: &session_id,
-                command: &command,
-                cwd: cwd.as_deref(),
-                exit_code,
-                ts_start,
-                ts_end,
-                shell: shell.as_deref(),
-                hostname: hostname.as_deref(),
-                stdout_file: stdout_file.as_deref(),
-                stderr_file: stderr_file.as_deref(),
-                config: Some(&config),
-            })
+            match action {
+                CaptureAction::Start { session_id, command, cwd, shell, hostname } => {
+                    cmd::capture::start(&conn, &cmd::capture::StartArgs {
+                        session_id: &session_id,
+                        command: &command,
+                        cwd: cwd.as_deref(),
+                        shell: shell.as_deref(),
+                        hostname: hostname.as_deref(),
+                        config: &config,
+                    })
+                }
+                CaptureAction::Finish { command_id, exit_code, cwd } => {
+                    cmd::capture::finish(&conn, &cmd::capture::FinishArgs {
+                        command_id: &command_id,
+                        exit_code,
+                        cwd: cwd.as_deref(),
+                        config: &config,
+                    })
+                }
+            }
         }
         Commands::Ingest => {
             let conn = open_db()?;

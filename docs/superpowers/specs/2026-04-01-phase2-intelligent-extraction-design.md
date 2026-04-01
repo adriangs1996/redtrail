@@ -384,7 +384,14 @@ Runs on every command as fallback. Uses regex patterns:
 | `user@`, `User:`, SSH-style `user@host` | username | — |
 | Common error patterns (with exit_code != 0) | error_signature (in properties) | — |
 
-**Process-port correlation:** When the generic extractor finds port and process information in the same output (e.g., `lsof -i :3000` shows `node 12345`), it creates both entities and links them via `listens_on` / `bound_by` relationships. The process entity uses canonical key `{binary}:{pid}` (short-lived, but the `entity_observations` table tracks when it was active). This enables answering "what runs on port X" and "what ports does this project use" by querying port entities scoped to a cwd.
+**Process-port correlation:** Port-process links come from two sources:
+
+1. **Diagnostic tools:** `lsof -i :3000`, `ss -tlnp`, `netstat -tlnp` — output explicitly shows PID + binary + port together.
+2. **Server stdout:** Any command whose output announces a listening port. `rails s` prints `Listening on http://127.0.0.1:3000`, `npm run dev` prints `Local: http://localhost:5173`, `python manage.py runserver` prints `Starting development server at http://127.0.0.1:8000/`. The generic extractor matches patterns like "listening on", "serving on/at", "started at/on", "http://...:\d+" in stdout and creates a port entity linked to the command's binary as the process.
+
+In both cases, the extractor creates both entities and links them via `listens_on` / `bound_by` relationships. The process entity uses canonical key `{binary}:{pid}` when PID is available, or `{binary}:{cwd}` for server commands where PID isn't in stdout (the cwd scopes it to the project). The `entity_observations` table tracks when each was active, enabling temporal queries.
+
+This means RedTrail passively learns the development port map for every project: which ports are used, by which tools, in which directory — without the developer ever running a diagnostic command.
 
 **Truncated output handling:** When `stdout_truncated` or `stderr_truncated` flags are set on a command, the extractor still runs on whatever output is available. If the domain parser hits an incomplete parse (e.g., truncated mid-line), it returns what it could extract and the command is marked `extraction_method = 'partial'` rather than `'heuristic'`.
 

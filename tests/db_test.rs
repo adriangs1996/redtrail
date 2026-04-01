@@ -151,3 +151,200 @@ fn pragma_optimize_does_not_error() {
     let result = conn.execute_batch("PRAGMA optimize;");
     assert!(result.is_ok(), "PRAGMA optimize should succeed: {:?}", result.err());
 }
+
+// --- Streaming capture tests ---
+
+#[test]
+fn commands_table_has_status_column() {
+    let conn = setup();
+    let has_status: bool = conn
+        .prepare("PRAGMA table_info(commands)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .any(|col| col.as_deref() == Ok("status"));
+    assert!(has_status, "commands table should have a 'status' column");
+}
+
+#[test]
+fn new_command_defaults_to_finished() {
+    use redtrail::core::db::{insert_command, NewCommand};
+    let conn = setup();
+    let cmd = NewCommand {
+        session_id: "sess-1",
+        command_raw: "echo hello",
+        source: "human",
+        timestamp_start: 1000,
+        ..Default::default()
+    };
+    let id = insert_command(&conn, &cmd).unwrap();
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM commands WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "finished", "insert_command should default status to 'finished'");
+}
+
+#[test]
+fn insert_command_start_creates_running_row() {
+    use redtrail::core::db::{insert_command_start, NewCommandStart};
+    let conn = setup();
+    let id = insert_command_start(
+        &conn,
+        &NewCommandStart {
+            session_id: "sess-1",
+            command_raw: "cargo build",
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let (status, stdout, exit_code): (String, Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT status, stdout, exit_code FROM commands WHERE id = ?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "running", "insert_command_start should set status = 'running'");
+    assert!(stdout.is_none(), "stdout should be NULL on start");
+    assert!(exit_code.is_none(), "exit_code should be NULL on start");
+}
+
+#[test]
+fn update_command_output_writes_stdout() {
+    use redtrail::core::db::{insert_command_start, update_command_output, NewCommandStart};
+    let conn = setup();
+    let id = insert_command_start(
+        &conn,
+        &NewCommandStart {
+            session_id: "sess-1",
+            command_raw: "npm run watch",
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    update_command_output(&conn, &id, Some("line1\nline2"), None, false, false).unwrap();
+    let stdout: Option<String> = conn
+        .query_row(
+            "SELECT stdout FROM commands WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stdout.as_deref(), Some("line1\nline2"));
+}
+
+#[test]
+fn finish_command_sets_status_and_exit_code() {
+    use redtrail::core::db::{insert_command_start, finish_command, NewCommandStart, FinishCommand};
+    let conn = setup();
+    // Create a session so error_count gets incremented
+    conn.execute(
+        "INSERT INTO sessions (id, started_at, source) VALUES ('sess-1', 1000, 'human')",
+        [],
+    )
+    .unwrap();
+    let id = insert_command_start(
+        &conn,
+        &NewCommandStart {
+            session_id: "sess-1",
+            command_raw: "make build",
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    finish_command(
+        &conn,
+        &FinishCommand {
+            command_id: &id,
+            exit_code: Some(0),
+            git_repo: Some("/repo"),
+            git_branch: Some("main"),
+            env_snapshot: None,
+            stdout: Some("Build OK"),
+            stderr: None,
+        },
+    )
+    .unwrap();
+    let (status, exit_code, git_repo, stdout): (String, Option<i32>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT status, exit_code, git_repo, stdout FROM commands WHERE id = ?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "finished");
+    assert_eq!(exit_code, Some(0));
+    assert_eq!(git_repo.as_deref(), Some("/repo"));
+    assert_eq!(stdout.as_deref(), Some("Build OK"));
+}
+
+#[test]
+fn delete_command_removes_row() {
+    use redtrail::core::db::{insert_command, delete_command, NewCommand};
+    let conn = setup();
+    let cmd = NewCommand {
+        session_id: "sess-1",
+        command_raw: "ls",
+        source: "human",
+        timestamp_start: 1000,
+        ..Default::default()
+    };
+    let id = insert_command(&conn, &cmd).unwrap();
+    delete_command(&conn, &id).unwrap();
+    let count: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM commands WHERE id = ?1",
+            [&id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0, "delete_command should remove the row");
+}
+
+#[test]
+fn cleanup_orphaned_commands_marks_stale_running() {
+    use redtrail::core::db::{cleanup_orphaned_commands, insert_command_start, NewCommandStart};
+    let conn = setup();
+    // Insert a command with timestamp_start far in the past (> 24h ago)
+    let stale_start = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64)
+        - 90_000; // 25 hours ago
+    conn.execute(
+        "INSERT INTO commands (id, session_id, timestamp_start, command_raw, source, status)
+         VALUES ('stale-1', 'sess-1', ?1, 'tail -f log', 'human', 'running')",
+        [stale_start],
+    )
+    .unwrap();
+    // Also insert a recent running command — should NOT be touched
+    let _recent_id = insert_command_start(
+        &conn,
+        &NewCommandStart {
+            session_id: "sess-1",
+            command_raw: "npm start",
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let affected = cleanup_orphaned_commands(&conn, "sess-1").unwrap();
+    assert_eq!(affected, 1, "only the stale running command should be orphaned");
+
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM commands WHERE id = 'stale-1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(status, "orphaned");
+}

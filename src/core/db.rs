@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS commands (
     redacted BOOLEAN DEFAULT 0,
     extracted BOOLEAN DEFAULT 0,
     created_at INTEGER DEFAULT (unixepoch()),
+    status TEXT NOT NULL DEFAULT 'finished',
     tool_name TEXT,
     tool_input TEXT,
     tool_response TEXT
@@ -137,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_commands_ts ON commands(timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_commands_source ON commands(source, timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_commands_agent_session ON commands(agent_session_id, timestamp_start) WHERE agent_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_commands_git_repo ON commands(git_repo, timestamp_start) WHERE git_repo IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status) WHERE status = 'running';
 
 -- Redaction audit log
 CREATE TABLE IF NOT EXISTS redaction_log (
@@ -166,6 +168,7 @@ fn init(conn: &Connection) -> Result<(), Error> {
         .map_err(|e| Error::Db(e.to_string()))?;
     migrate_agent_columns(conn)?;
     migrate_compressed_columns(conn)?;
+    migrate_status_column(conn)?;
     conn.execute_batch("PRAGMA optimize;")
         .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
@@ -205,6 +208,25 @@ fn migrate_compressed_columns(conn: &Connection) -> Result<(), Error> {
         conn.execute_batch(
             "ALTER TABLE commands ADD COLUMN stdout_compressed BLOB;
              ALTER TABLE commands ADD COLUMN stderr_compressed BLOB;"
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// Add status column (for existing databases that predate streaming capture).
+fn migrate_status_column(conn: &Connection) -> Result<(), Error> {
+    let has_col: bool = conn
+        .prepare("PRAGMA table_info(commands)")
+        .map_err(|e| Error::Db(e.to_string()))?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .any(|col| col.as_deref() == Ok("status"));
+
+    if !has_col {
+        conn.execute_batch(
+            "ALTER TABLE commands ADD COLUMN status TEXT NOT NULL DEFAULT 'finished';
+             CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status) WHERE status = 'running';"
         )
         .map_err(|e| Error::Db(e.to_string()))?;
     }
@@ -749,6 +771,231 @@ pub fn insert_agent_event(conn: &Connection, evt: &AgentEvent) -> Result<String,
     }
 
     Ok(id)
+}
+
+// --- Streaming capture API ---
+
+/// Minimal input needed to record that a command has started.
+#[derive(Default)]
+pub struct NewCommandStart<'a> {
+    pub session_id: &'a str,
+    pub command_raw: &'a str,
+    pub command_binary: Option<&'a str>,
+    pub command_subcommand: Option<&'a str>,
+    pub command_args: Option<&'a str>,
+    pub command_flags: Option<&'a str>,
+    pub cwd: Option<&'a str>,
+    pub shell: Option<&'a str>,
+    pub hostname: Option<&'a str>,
+    pub source: &'a str,
+    pub redacted: bool,
+}
+
+/// Insert a minimal row with `status = 'running'`. No stdout/stderr/exit_code yet.
+/// Returns the new command ID.
+pub fn insert_command_start(conn: &Connection, cmd: &NewCommandStart) -> Result<String, Error> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    conn.execute(
+        "INSERT INTO commands (id, session_id, timestamp_start, command_raw, command_binary, command_subcommand, command_args, command_flags, cwd, shell, hostname, source, redacted, status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'running')",
+        rusqlite::params![
+            id, cmd.session_id, now,
+            cmd.command_raw, cmd.command_binary, cmd.command_subcommand,
+            cmd.command_args, cmd.command_flags,
+            cmd.cwd, cmd.shell, cmd.hostname, cmd.source, cmd.redacted,
+        ],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Update session command count (best-effort)
+    conn.execute(
+        "UPDATE sessions SET command_count = command_count + 1 WHERE id = ?1",
+        [cmd.session_id],
+    )
+    .ok();
+
+    Ok(id)
+}
+
+/// Overwrite stdout/stderr on a running command (incremental streaming flush).
+/// Only updates rows that are still `status = 'running'` to avoid clobbering finished rows.
+pub fn update_command_output(
+    conn: &Connection,
+    command_id: &str,
+    stdout: Option<&str>,
+    stderr: Option<&str>,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+) -> Result<(), Error> {
+    conn.execute(
+        "UPDATE commands SET stdout = ?2, stderr = ?3, stdout_truncated = ?4, stderr_truncated = ?5
+         WHERE id = ?1 AND status = 'running'",
+        rusqlite::params![command_id, stdout, stderr, stdout_truncated, stderr_truncated],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+/// Fields needed to close out a running command.
+pub struct FinishCommand<'a> {
+    pub command_id: &'a str,
+    pub exit_code: Option<i32>,
+    pub git_repo: Option<&'a str>,
+    pub git_branch: Option<&'a str>,
+    pub env_snapshot: Option<&'a str>,
+    /// Final stdout — merged with any in-progress stdout via COALESCE so streaming
+    /// output written by `update_command_output` is preserved when this is None.
+    pub stdout: Option<&'a str>,
+    /// Final stderr — same COALESCE semantics as stdout.
+    pub stderr: Option<&'a str>,
+}
+
+/// Transition a running command to `status = 'finished'`, setting exit metadata and
+/// syncing the FTS index with the final content.
+pub fn finish_command(conn: &Connection, fc: &FinishCommand) -> Result<(), Error> {
+    conn.execute(
+        "UPDATE commands
+         SET exit_code      = ?2,
+             timestamp_end  = unixepoch(),
+             git_repo       = ?3,
+             git_branch     = ?4,
+             env_snapshot   = ?5,
+             stdout         = COALESCE(?6, stdout),
+             stderr         = COALESCE(?7, stderr),
+             status         = 'finished'
+         WHERE id = ?1",
+        rusqlite::params![
+            fc.command_id,
+            fc.exit_code,
+            fc.git_repo,
+            fc.git_branch,
+            fc.env_snapshot,
+            fc.stdout,
+            fc.stderr,
+        ],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Sync FTS index — read back the final command_raw/stdout/stderr
+    let (command_raw, stdout, stderr, rowid): (String, Option<String>, Option<String>, i64) = conn
+        .query_row(
+            "SELECT command_raw, stdout, stderr, rowid FROM commands WHERE id = ?1",
+            [fc.command_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    conn.execute(
+        "INSERT INTO commands_fts(rowid, command_raw, stdout, stderr) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![rowid, command_raw, stdout, stderr],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    // Update session error count if exit_code != 0
+    if fc.exit_code.is_some_and(|c| c != 0) {
+        // Retrieve session_id first
+        let session_id: String = conn
+            .query_row(
+                "SELECT session_id FROM commands WHERE id = ?1",
+                [fc.command_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| Error::Db(e.to_string()))?;
+        conn.execute(
+            "UPDATE sessions SET error_count = error_count + 1 WHERE id = ?1",
+            [&session_id],
+        )
+        .ok();
+    }
+
+    Ok(())
+}
+
+/// Delete a single command row (and its FTS entry).
+pub fn delete_command(conn: &Connection, id: &str) -> Result<(), Error> {
+    conn.execute(
+        "DELETE FROM commands_fts WHERE rowid IN (SELECT rowid FROM commands WHERE id = ?1)",
+        [id],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute("DELETE FROM commands WHERE id = ?1", [id])
+        .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+/// Mark as `orphaned` any `running` commands in `session_id` whose `timestamp_start`
+/// is more than 24 hours in the past. Returns the number of rows updated.
+pub fn cleanup_orphaned_commands(conn: &Connection, session_id: &str) -> Result<usize, Error> {
+    let affected = conn
+        .execute(
+            "UPDATE commands SET status = 'orphaned'
+             WHERE status = 'running'
+               AND session_id = ?1
+               AND timestamp_start < unixepoch() - 86400",
+            [session_id],
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(affected)
+}
+
+/// Read stdout/stderr for `command_id`. If either exceeds `max_bytes`, compress with
+/// zlib and update the row (stdout=NULL, stdout_compressed=blob, stdout_truncated=1).
+pub fn compress_command_output_if_needed(
+    conn: &Connection,
+    command_id: &str,
+    max_bytes: usize,
+) -> Result<(), Error> {
+    let (stdout, stderr): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT stdout, stderr FROM commands WHERE id = ?1",
+            [command_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+
+    let stdout_over = stdout.as_deref().is_some_and(|s| s.len() > max_bytes);
+    let stderr_over = stderr.as_deref().is_some_and(|s| s.len() > max_bytes);
+
+    if !stdout_over && !stderr_over {
+        return Ok(());
+    }
+
+    let stdout_compressed: Option<Vec<u8>> = if stdout_over {
+        stdout.as_deref().map(compress_zlib)
+    } else {
+        None
+    };
+    let stderr_compressed: Option<Vec<u8>> = if stderr_over {
+        stderr.as_deref().map(compress_zlib)
+    } else {
+        None
+    };
+
+    conn.execute(
+        "UPDATE commands
+         SET stdout            = CASE WHEN ?2 THEN NULL ELSE stdout END,
+             stdout_compressed = CASE WHEN ?2 THEN ?4 ELSE stdout_compressed END,
+             stdout_truncated  = CASE WHEN ?2 THEN 1 ELSE stdout_truncated END,
+             stderr            = CASE WHEN ?3 THEN NULL ELSE stderr END,
+             stderr_compressed = CASE WHEN ?3 THEN ?5 ELSE stderr_compressed END,
+             stderr_truncated  = CASE WHEN ?3 THEN 1 ELSE stderr_truncated END
+         WHERE id = ?1",
+        rusqlite::params![
+            command_id,
+            stdout_over,
+            stderr_over,
+            stdout_compressed,
+            stderr_compressed,
+        ],
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
+
+    Ok(())
 }
 
 /// Find or create a RedTrail session for a given agent session ID.

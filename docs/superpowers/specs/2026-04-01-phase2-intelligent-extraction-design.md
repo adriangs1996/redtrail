@@ -346,6 +346,7 @@ Canonical key definitions:
 | url | full URL |
 | ip_address | IP string |
 | port | `{number}:{protocol}` |
+| process | `{binary}:{pid}` |
 
 ### Git Extractor: Subcommand Handlers
 
@@ -373,14 +374,17 @@ The git extractor dispatches by subcommand:
 
 Runs on every command as fallback. Uses regex patterns:
 
-| Pattern | Entity Type |
-|---|---|
-| Absolute/relative file paths | file |
-| `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` | ip_address |
-| `https?://...` | url |
-| `:\d{2,5}` in context (listen, bind, port) | port |
-| `user@`, `User:`, SSH-style `user@host` | username |
-| Common error patterns (with exit_code != 0) | error_signature (stored in properties) |
+| Pattern | Entity Type | Relationships |
+|---|---|---|
+| Absolute/relative file paths | file | — |
+| `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}` | ip_address | — |
+| `https?://...` | url | — |
+| `:\d{2,5}` in context (listen, bind, port) | port | port `bound_by` process (if co-extracted) |
+| PID + binary from `lsof`, `ss -tlnp`, `ps`, `netstat` output | process | process `listens_on` port |
+| `user@`, `User:`, SSH-style `user@host` | username | — |
+| Common error patterns (with exit_code != 0) | error_signature (in properties) | — |
+
+**Process-port correlation:** When the generic extractor finds port and process information in the same output (e.g., `lsof -i :3000` shows `node 12345`), it creates both entities and links them via `listens_on` / `bound_by` relationships. The process entity uses canonical key `{binary}:{pid}` (short-lived, but the `entity_observations` table tracks when it was active). This enables answering "what runs on port X" and "what ports does this project use" by querying port entities scoped to a cwd.
 
 **Truncated output handling:** When `stdout_truncated` or `stderr_truncated` flags are set on a command, the extractor still runs on whatever output is available. If the domain parser hits an incomplete parse (e.g., truncated mid-line), it returns what it could extract and the command is marked `extraction_method = 'partial'` rather than `'heuristic'`.
 

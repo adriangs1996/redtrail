@@ -223,7 +223,7 @@ fn migrate_status_column(conn: &Connection) -> Result<(), Error> {
 
     if !has_col {
         conn.execute_batch(
-            "ALTER TABLE commands ADD COLUMN status TEXT NOT NULL DEFAULT 'finished';"
+            "ALTER TABLE commands ADD COLUMN status TEXT NOT NULL DEFAULT 'finished';",
         )
         .map_err(|e| Error::Db(e.to_string()))?;
     }

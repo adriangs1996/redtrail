@@ -96,7 +96,11 @@ enum Commands {
     },
     /// Ingest agent tool events from stdin (called by Claude Code hooks)
     #[command(hide = true)]
-    Ingest,
+    Ingest {
+        /// Hook event type (PostToolUse, SubagentStart, UserPromptSubmit, etc.)
+        #[arg(long, default_value = "PostToolUse")]
+        event: String,
+    },
     /// Install Claude Code hooks for agent capture
     SetupHooks,
     /// Export captured data as JSON
@@ -361,9 +365,9 @@ pub fn run() -> Result<(), Error> {
                 ),
             }
         }
-        Commands::Ingest => {
+        Commands::Ingest { event } => {
             let conn = open_db()?;
-            cmd::ingest::run(&conn)
+            cmd::ingest::run(&conn, &event)
         }
         Commands::SetupHooks => cmd::setup_hooks::run(),
         Commands::Tee {

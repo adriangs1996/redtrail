@@ -410,3 +410,292 @@ fn human_commands_have_null_tool_name() {
 
     assert!(tool_name.is_none());
 }
+
+// --- Lifecycle event ingestion via run_from_reader ---
+
+use redtrail::cmd::ingest::run_from_reader;
+use std::io::Cursor;
+
+fn ingest_lifecycle(conn: &rusqlite::Connection, event_type: &str, json: &str) {
+    run_from_reader(conn, event_type, Cursor::new(json.as_bytes().to_vec())).unwrap();
+}
+
+#[test]
+fn ingest_subagent_start_stores_correctly() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","agent_id":"a-123","agent_type":"Explore"}"#;
+    ingest_lifecycle(&conn, "SubagentStart", json);
+
+    let (tool_name, command_raw, command_binary): (String, String, Option<String>) = conn
+        .query_row(
+            "SELECT tool_name, command_raw, command_binary FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "SubagentStart");
+    assert_eq!(command_raw, "Agent Explore started");
+    assert_eq!(command_binary.as_deref(), Some("Agent"));
+}
+
+#[test]
+fn ingest_subagent_stop_stores_last_message_as_stdout() {
+    let conn = setup();
+    let json = r#"{
+        "session_id": "sess-1",
+        "agent_id": "a-123",
+        "agent_type": "Plan",
+        "agent_transcript_path": "/tmp/transcript.jsonl",
+        "last_assistant_message": "Here is my plan for the implementation."
+    }"#;
+    ingest_lifecycle(&conn, "SubagentStop", json);
+
+    let (tool_name, stdout): (String, Option<String>) = conn
+        .query_row(
+            "SELECT tool_name, stdout FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "SubagentStop");
+    assert_eq!(
+        stdout.as_deref(),
+        Some("Here is my plan for the implementation.")
+    );
+}
+
+#[test]
+fn ingest_user_prompt_stores_prompt_as_command_raw() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","prompt":"Fix the authentication bug in login.rs"}"#;
+    ingest_lifecycle(&conn, "UserPromptSubmit", json);
+
+    let command_raw: String = conn
+        .query_row(
+            "SELECT command_raw FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(command_raw, "Fix the authentication bug in login.rs");
+
+    // Verify FTS indexes the prompt
+    let results = db::search_commands(&conn, "authentication", 10).unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[test]
+fn ingest_user_prompt_redacts_secrets() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","prompt":"Use this key: AKIAIOSFODNN7EXAMPLE to deploy"}"#;
+    ingest_lifecycle(&conn, "UserPromptSubmit", json);
+
+    let (command_raw, redacted): (String, bool) = conn
+        .query_row(
+            "SELECT command_raw, redacted FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert!(redacted, "should be marked as redacted");
+    assert!(
+        !command_raw.contains("AKIAIOSFODNN7EXAMPLE"),
+        "secret should be redacted from command_raw"
+    );
+    assert!(
+        command_raw.contains("[REDACTED"),
+        "should contain redaction marker"
+    );
+}
+
+#[test]
+fn ingest_session_start_stores_source_and_model() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","source":"startup","model":"claude-sonnet-4-6"}"#;
+    ingest_lifecycle(&conn, "SessionStart", json);
+
+    let (tool_name, command_raw, tool_input): (String, String, Option<String>) = conn
+        .query_row(
+            "SELECT tool_name, command_raw, tool_input FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "SessionStart");
+    assert!(command_raw.contains("startup"));
+    assert!(command_raw.contains("claude-sonnet-4-6"));
+    let ti = tool_input.unwrap();
+    assert!(ti.contains("startup"));
+    assert!(ti.contains("claude-sonnet-4-6"));
+}
+
+#[test]
+fn ingest_session_end_stores_minimal_event() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1"}"#;
+    ingest_lifecycle(&conn, "SessionEnd", json);
+
+    let (tool_name, command_raw): (String, String) = conn
+        .query_row(
+            "SELECT tool_name, command_raw FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "SessionEnd");
+    assert_eq!(command_raw, "Session ended");
+}
+
+#[test]
+fn ingest_stop_stores_reason() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","stop_reason":"end_turn"}"#;
+    ingest_lifecycle(&conn, "Stop", json);
+
+    let command_raw: String = conn
+        .query_row(
+            "SELECT command_raw FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    assert!(command_raw.contains("end_turn"));
+}
+
+#[test]
+fn ingest_instructions_loaded_stores_path() {
+    let conn = setup();
+    let json = r#"{
+        "session_id": "sess-1",
+        "file_path": "/Users/dev/project/CLAUDE.md",
+        "memory_type": "Project",
+        "load_reason": "session_start"
+    }"#;
+    ingest_lifecycle(&conn, "InstructionsLoaded", json);
+
+    let (tool_name, command_raw): (String, String) = conn
+        .query_row(
+            "SELECT tool_name, command_raw FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "InstructionsLoaded");
+    assert!(command_raw.contains("CLAUDE.md"));
+    assert!(command_raw.contains("session_start"));
+}
+
+#[test]
+fn ingest_config_change_stores_event() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","config_source":"skills"}"#;
+    ingest_lifecycle(&conn, "ConfigChange", json);
+
+    let tool_name: String = conn
+        .query_row(
+            "SELECT tool_name FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "ConfigChange");
+}
+
+#[test]
+fn ingest_unknown_event_returns_error() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1"}"#;
+    let result = run_from_reader(&conn, "UnknownEvent", Cursor::new(json.as_bytes().to_vec()));
+    assert!(result.is_err());
+}
+
+#[test]
+fn ingest_backward_compat_default_post_tool_use() {
+    let conn = setup();
+    let json = r#"{
+        "session_id": "sess-1",
+        "tool_name": "Bash",
+        "tool_input": {"command": "echo hello"},
+        "tool_response": {"stdout": "hello", "stderr": "", "exitCode": 0},
+        "cwd": "/tmp"
+    }"#;
+    // Default event type is PostToolUse
+    run_from_reader(&conn, "PostToolUse", Cursor::new(json.as_bytes().to_vec())).unwrap();
+
+    let tool_name: String = conn
+        .query_row(
+            "SELECT tool_name FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(tool_name, "Bash");
+}
+
+#[test]
+fn ingest_skill_tool_derives_clean_command_raw() {
+    let conn = setup();
+    let json = r#"{
+        "session_id": "sess-1",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "commit", "args": "-m 'fix bug'"},
+        "tool_response": {"success": true},
+        "cwd": "/tmp"
+    }"#;
+    run_from_reader(&conn, "PostToolUse", Cursor::new(json.as_bytes().to_vec())).unwrap();
+
+    let command_raw: String = conn
+        .query_row(
+            "SELECT command_raw FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(command_raw, "Skill commit");
+}
+
+#[test]
+fn ingest_user_prompt_with_slash_skill() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","prompt":"/commit -m 'initial'"}"#;
+    ingest_lifecycle(&conn, "UserPromptSubmit", json);
+
+    let command_raw: String = conn
+        .query_row(
+            "SELECT command_raw FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    assert_eq!(command_raw, "/commit -m 'initial'");
+}
+
+#[test]
+fn lifecycle_events_are_automated_and_claude_code_source() {
+    let conn = setup();
+    let json = r#"{"session_id":"sess-1","prompt":"hello"}"#;
+    ingest_lifecycle(&conn, "UserPromptSubmit", json);
+
+    let (source, is_automated): (String, bool) = conn
+        .query_row(
+            "SELECT source, is_automated FROM commands ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    assert_eq!(source, "claude_code");
+    assert!(is_automated);
+}

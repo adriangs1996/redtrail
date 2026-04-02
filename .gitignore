@@ -16,6 +16,6 @@ plans/
 tasks/prd*.json
 tasks/prd*.md
 docs/prd-*.md
-docs/superpowers/
+docs/superpowers/**/*
 .worktrees/
 .env*

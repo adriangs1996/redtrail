@@ -1,5 +1,18 @@
 use crate::error::Error;
 
+const HOOK_EVENTS: &[&str] = &[
+    "PostToolUse",
+    "PostToolUseFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit",
+    "SessionStart",
+    "SessionEnd",
+    "Stop",
+    "InstructionsLoaded",
+    "ConfigChange",
+];
+
 /// Generate the hook script and install Claude Code hook configuration.
 pub fn run() -> Result<(), Error> {
     let binary_path = find_binary_path()?;
@@ -9,8 +22,9 @@ pub fn run() -> Result<(), Error> {
     // Create hook directory
     std::fs::create_dir_all(hook_dir)?;
 
-    // Write the hook script
-    let script = format!("#!/bin/bash\nexec {binary_path} ingest\n");
+    // Write the hook script — accepts event type as $1
+    let script =
+        format!("#!/bin/bash\nexec {binary_path} ingest --event \"${{1:-PostToolUse}}\"\n");
     std::fs::write(&hook_script, &script)?;
 
     // Make executable
@@ -28,18 +42,6 @@ pub fn run() -> Result<(), Error> {
         Err(_) => serde_json::json!({}),
     };
 
-    let hook_config = serde_json::json!({
-        "type": "command",
-        "command": format!("bash {hook_script}"),
-        "async": true,
-        "timeout": 5
-    });
-
-    let hook_entry = serde_json::json!({
-        "hooks": [hook_config]
-    });
-
-    // Set PostToolUse and PostToolUseFailure hooks
     let hooks = settings
         .as_object_mut()
         .ok_or_else(|| Error::Config("settings.json is not an object".into()))?
@@ -50,9 +52,21 @@ pub fn run() -> Result<(), Error> {
         .as_object_mut()
         .ok_or_else(|| Error::Config("hooks is not an object".into()))?;
 
-    // Add PostToolUse hook (append to existing array or create)
-    add_hook_entry(hooks_obj, "PostToolUse", hook_entry.clone());
-    add_hook_entry(hooks_obj, "PostToolUseFailure", hook_entry);
+    // Register a hook for each event type
+    for event in HOOK_EVENTS {
+        let hook_config = serde_json::json!({
+            "type": "command",
+            "command": format!("bash {hook_script} {event}"),
+            "async": true,
+            "timeout": 5
+        });
+
+        let hook_entry = serde_json::json!({
+            "hooks": [hook_config]
+        });
+
+        add_hook_entry(hooks_obj, event, hook_entry);
+    }
 
     // Write settings back
     let formatted = serde_json::to_string_pretty(&settings)
@@ -62,6 +76,7 @@ pub fn run() -> Result<(), Error> {
     eprintln!("Hook script: {hook_script}");
     eprintln!("Settings:    {settings_path}");
     eprintln!("Binary:      {binary_path}");
+    eprintln!("Events:      {}", HOOK_EVENTS.join(", "));
     eprintln!("Agent capture hooks installed.");
 
     Ok(())
@@ -76,9 +91,9 @@ fn add_hook_entry(
         .entry(event)
         .or_insert_with(|| serde_json::json!([]));
     if let Some(arr) = arr.as_array_mut() {
-        // Check if we already have a redtrail hook installed
-        let already_installed = arr.iter().any(|e| {
-            e.get("hooks")
+        // Replace any existing redtrail hooks (upgrade path)
+        arr.retain(|e| {
+            !e.get("hooks")
                 .and_then(|h| h.as_array())
                 .is_some_and(|hooks| {
                     hooks.iter().any(|h| {
@@ -88,9 +103,7 @@ fn add_hook_entry(
                     })
                 })
         });
-        if !already_installed {
-            arr.push(entry);
-        }
+        arr.push(entry);
     }
 }
 

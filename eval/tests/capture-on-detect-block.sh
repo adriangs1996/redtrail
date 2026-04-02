@@ -43,4 +43,11 @@ echo "$CLEAN_COUNT" | grep -q '"cnt": 1' || echo "$CLEAN_COUNT" | grep -q '"cnt"
   exit 1
 }
 
+# Verify clean command status is 'finished'
+STATUS_CHECK=$("$RT" query "SELECT status FROM commands WHERE command_raw LIKE '%clean command%' LIMIT 1" --json 2>/dev/null)
+echo "$STATUS_CHECK" | grep -q "finished" || {
+  echo "FAIL: clean command status not 'finished'. Got: $STATUS_CHECK"
+  exit 1
+}
+
 echo "PASS"

@@ -47,4 +47,11 @@ echo "$ECHO_COUNT" | grep -q '"cnt": 1' || echo "$ECHO_COUNT" | grep -q '"cnt":1
   exit 1
 }
 
+# Verify echo command status is 'finished'
+STATUS_CHECK=$("$RT" query "SELECT status FROM commands WHERE command_binary = 'echo' LIMIT 1" --json 2>/dev/null)
+echo "$STATUS_CHECK" | grep -q "finished" || {
+  echo "FAIL: command status not 'finished'. Got: $STATUS_CHECK"
+  exit 1
+}
+
 echo "PASS"

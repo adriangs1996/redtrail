@@ -53,4 +53,11 @@ echo "$AFTER_COUNT" | grep -q '"cnt": 1' || echo "$AFTER_COUNT" | grep -q '"cnt"
   exit 1
 }
 
+# Verify captured commands have status 'finished'
+STATUS_CHECK=$("$RT" query "SELECT status FROM commands WHERE command_raw LIKE '%captured-normal%' LIMIT 1" --json 2>/dev/null)
+echo "$STATUS_CHECK" | grep -q "finished" || {
+  echo "FAIL: command status not 'finished'. Got: $STATUS_CHECK"
+  exit 1
+}
+
 echo "PASS"

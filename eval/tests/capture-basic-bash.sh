@@ -40,4 +40,11 @@ echo "$SESSIONS" | grep -q "cmds:" || {
   exit 1
 }
 
+# Verify command status is 'finished'
+STATUS_CHECK=$("$RT" query "SELECT status FROM commands WHERE command_binary = 'echo' LIMIT 1" --json 2>/dev/null)
+echo "$STATUS_CHECK" | grep -q "finished" || {
+  echo "FAIL: command status not 'finished'. Got: $STATUS_CHECK"
+  exit 1
+}
+
 echo "PASS"

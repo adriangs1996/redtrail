@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS commands (
     is_automated BOOLEAN DEFAULT 0,
     redacted BOOLEAN DEFAULT 0,
     extracted BOOLEAN DEFAULT 0,
+    extraction_method TEXT,
     created_at INTEGER DEFAULT (unixepoch()),
     status TEXT NOT NULL DEFAULT 'finished',
     tool_name TEXT,
@@ -61,11 +62,13 @@ CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     name TEXT NOT NULL,
+    canonical_key TEXT NOT NULL DEFAULT '',
     properties TEXT,
     first_seen INTEGER,
     last_seen INTEGER,
     source_command_id TEXT,
-    FOREIGN KEY (source_command_id) REFERENCES commands(id)
+    FOREIGN KEY (source_command_id) REFERENCES commands(id),
+    UNIQUE(type, canonical_key)
 );
 
 -- Entity relationships
@@ -138,6 +141,127 @@ CREATE INDEX IF NOT EXISTS idx_commands_ts ON commands(timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_commands_source ON commands(source, timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_commands_agent_session ON commands(agent_session_id, timestamp_start) WHERE agent_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_commands_git_repo ON commands(git_repo, timestamp_start) WHERE git_repo IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_relationships_type ON relationships(type);
+
+-- Entity observations (Phase 2)
+CREATE TABLE IF NOT EXISTS entity_observations (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL REFERENCES entities(id),
+    command_id TEXT NOT NULL REFERENCES commands(id),
+    observed_at INTEGER NOT NULL,
+    context TEXT,
+    UNIQUE(entity_id, command_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_obs_entity ON entity_observations(entity_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_entity_obs_command ON entity_observations(command_id);
+
+-- Git typed tables (Phase 2)
+CREATE TABLE IF NOT EXISTS git_branches (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repo TEXT NOT NULL,
+    name TEXT NOT NULL,
+    is_remote BOOLEAN DEFAULT 0,
+    remote_name TEXT,
+    upstream TEXT,
+    ahead INTEGER,
+    behind INTEGER,
+    last_commit_hash TEXT,
+    UNIQUE(repo, name, is_remote)
+);
+
+CREATE TABLE IF NOT EXISTS git_commits (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repo TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    short_hash TEXT,
+    author_name TEXT,
+    author_email TEXT,
+    message TEXT,
+    committed_at INTEGER,
+    UNIQUE(repo, hash)
+);
+
+CREATE TABLE IF NOT EXISTS git_remotes (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repo TEXT NOT NULL,
+    name TEXT NOT NULL,
+    url TEXT,
+    UNIQUE(repo, name)
+);
+
+CREATE TABLE IF NOT EXISTS git_files (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repo TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status TEXT,
+    insertions INTEGER,
+    deletions INTEGER,
+    UNIQUE(repo, path)
+);
+
+CREATE TABLE IF NOT EXISTS git_tags (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repo TEXT NOT NULL,
+    name TEXT NOT NULL,
+    commit_hash TEXT,
+    UNIQUE(repo, name)
+);
+
+CREATE TABLE IF NOT EXISTS git_stashes (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repo TEXT NOT NULL,
+    index_num INTEGER,
+    message TEXT NOT NULL,
+    UNIQUE(repo, message)
+);
+
+-- Docker typed tables (Phase 2)
+CREATE TABLE IF NOT EXISTS docker_containers (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    container_id TEXT,
+    name TEXT NOT NULL,
+    image TEXT,
+    status TEXT,
+    ports TEXT,
+    created_at_container INTEGER,
+    UNIQUE(name)
+);
+
+CREATE TABLE IF NOT EXISTS docker_images (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    repository TEXT NOT NULL,
+    tag TEXT,
+    image_id TEXT,
+    size_bytes INTEGER,
+    created_at_image INTEGER,
+    UNIQUE(repository, tag)
+);
+
+CREATE TABLE IF NOT EXISTS docker_networks (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    name TEXT NOT NULL,
+    network_id TEXT,
+    driver TEXT,
+    UNIQUE(name)
+);
+
+CREATE TABLE IF NOT EXISTS docker_volumes (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    name TEXT NOT NULL,
+    driver TEXT,
+    mountpoint TEXT,
+    UNIQUE(name)
+);
+
+CREATE TABLE IF NOT EXISTS docker_services (
+    entity_id TEXT PRIMARY KEY REFERENCES entities(id),
+    name TEXT NOT NULL,
+    image TEXT,
+    compose_file TEXT,
+    ports TEXT,
+    UNIQUE(name, compose_file)
+);
+
 -- Redaction audit log
 CREATE TABLE IF NOT EXISTS redaction_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +291,7 @@ fn init(conn: &Connection) -> Result<(), Error> {
     migrate_agent_columns(conn)?;
     migrate_compressed_columns(conn)?;
     migrate_status_column(conn)?;
+    migrate_extraction_tables(conn)?;
     conn.execute_batch("PRAGMA optimize;")
         .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
@@ -231,6 +356,39 @@ fn migrate_status_column(conn: &Connection) -> Result<(), Error> {
         "CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status) WHERE status = 'running';"
     )
     .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(())
+}
+
+/// Add extraction_method on commands and canonical_key on entities (for existing databases).
+fn migrate_extraction_tables(conn: &Connection) -> Result<(), Error> {
+    let has_extraction_method: bool = conn
+        .prepare("PRAGMA table_info(commands)")
+        .map_err(|e| Error::Db(e.to_string()))?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .any(|col| col.as_deref() == Ok("extraction_method"));
+
+    if !has_extraction_method {
+        conn.execute_batch("ALTER TABLE commands ADD COLUMN extraction_method TEXT;")
+            .map_err(|e| Error::Db(e.to_string()))?;
+    }
+
+    let has_canonical_key: bool = conn
+        .prepare("PRAGMA table_info(entities)")
+        .map_err(|e| Error::Db(e.to_string()))?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| Error::Db(e.to_string()))?
+        .any(|col| col.as_deref() == Ok("canonical_key"));
+
+    if !has_canonical_key {
+        conn.execute_batch(
+            "ALTER TABLE entities ADD COLUMN canonical_key TEXT NOT NULL DEFAULT '';
+             UPDATE entities SET canonical_key = name WHERE canonical_key = '';
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_type_canonical ON entities(type, canonical_key);",
+        )
+        .map_err(|e| Error::Db(e.to_string()))?;
+    }
+
     Ok(())
 }
 

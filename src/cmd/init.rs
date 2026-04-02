@@ -17,9 +17,7 @@ __redtrail_preexec() {
         return
     fi
 
-    __REDTRAIL_CMD="$1"
     __REDTRAIL_CWD="$PWD"
-    __REDTRAIL_TS_START="$(date +%s)"
     __RT_CAPTURE_ACTIVE=""
 
     # Blacklist check — extract binary, handle path-qualified and env-prefixed
@@ -45,12 +43,22 @@ __redtrail_preexec() {
         fi
     fi
 
+    # Register command with DB — get back a command ID for tee and finish
+    __REDTRAIL_CMD_ID=$(command redtrail capture start \
+        --session-id "$REDTRAIL_SESSION_ID" \
+        --command "$1" \
+        --cwd "$PWD" \
+        --shell zsh \
+        --hostname "${HOST:-$(hostname)}" \
+        2>/dev/null)
+    [[ -z "$__REDTRAIL_CMD_ID" ]] && return
+
     # Set up capture via redtrail tee
     local ctl_fifo="/tmp/rt-ctl-$$"
     mkfifo "$ctl_fifo" 2>/dev/null || return
 
     command redtrail tee \
-        --session "$REDTRAIL_SESSION_ID" \
+        --command-id "$__REDTRAIL_CMD_ID" \
         --shell-pid "$$" \
         --ctl-fifo "$ctl_fifo" \
         2>/dev/null &
@@ -85,28 +93,16 @@ __redtrail_precmd() {
         while kill -0 "$__RT_TEE_PID" 2>/dev/null; do :; done
     fi
 
-    [[ -z "$__REDTRAIL_CMD" ]] && return
+    [[ -z "$__REDTRAIL_CMD_ID" ]] && return
 
-    local ts_end
-    ts_end="$(date +%s)"
+    # Finalize the command record — backgrounded to not block the prompt
+    command redtrail capture finish \
+        --command-id "$__REDTRAIL_CMD_ID" \
+        --exit-code "$exit_code" \
+        --cwd "$__REDTRAIL_CWD" \
+        2>/dev/null &!
 
-    local -a capture_args=(
-        --session-id "$REDTRAIL_SESSION_ID"
-        --command "$__REDTRAIL_CMD"
-        --cwd "$__REDTRAIL_CWD"
-        --exit-code "$exit_code"
-        --ts-start "$__REDTRAIL_TS_START"
-        --ts-end "$ts_end"
-        --shell zsh
-        --hostname "${HOST:-$(hostname)}"
-    )
-    local out_file="/tmp/rt-out-$$" err_file="/tmp/rt-err-$$"
-    [[ -f "$out_file" ]] && capture_args+=(--stdout-file "$out_file")
-    [[ -f "$err_file" ]] && capture_args+=(--stderr-file "$err_file")
-
-    command redtrail capture "${capture_args[@]}" 2>/dev/null &!
-
-    unset __REDTRAIL_CMD __REDTRAIL_CWD __REDTRAIL_TS_START
+    unset __REDTRAIL_CMD_ID __REDTRAIL_CWD
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE
 }
 
@@ -125,24 +121,24 @@ export REDTRAIL_SESSION_ID="$(command redtrail session-id 2>/dev/null || echo "r
 __RT_BLACKLIST=":vim:nvim:nano:vi:ssh:scp:top:htop:btop:less:more:man:tmux:screen:"
 
 __redtrail_preexec() {
-    [ -n "$COMP_LINE" ] && return
-    [ "$BASH_COMMAND" = "${PROMPT_COMMAND%%;*}" ] && return
-    [ -n "$__RT_INSIDE_PRECMD" ] && return
-    [ -n "$__RT_CAPTURE_ACTIVE" ] && return
+    local saved_exit=$?
+    [ -n "$COMP_LINE" ] && return $saved_exit
+    [ "$BASH_COMMAND" = "${PROMPT_COMMAND%%;*}" ] && return $saved_exit
+    [ -n "$__RT_INSIDE_PRECMD" ] && return $saved_exit
+    [ -n "$__RT_CAPTURE_ACTIVE" ] && return $saved_exit
 
     # Use history for full pipeline (BASH_COMMAND only has current simple command)
-    __REDTRAIL_CMD="$(HISTTIMEFORMAT= history 1 | sed 's/^[ ]*[0-9]*[ ]*//')"
+    local __rt_cmd
+    __rt_cmd="$(HISTTIMEFORMAT= history 1 | sed 's/^[ ]*[0-9]*[ ]*//')"
     __REDTRAIL_CWD="$PWD"
-    __REDTRAIL_TS_START="$(date +%s)"
 
     # Escape hatch: REDTRAIL_SKIP=1 cmd skips capture entirely
-    if [[ "$__REDTRAIL_CMD" == REDTRAIL_SKIP=1\ * || "$__REDTRAIL_CMD" == *\ REDTRAIL_SKIP=1\ * ]]; then
-        unset __REDTRAIL_CMD
-        return
+    if [[ "$__rt_cmd" == REDTRAIL_SKIP=1\ * || "$__rt_cmd" == *\ REDTRAIL_SKIP=1\ * ]]; then
+        return $saved_exit
     fi
 
     # Blacklist check
-    local cmd_str="$__REDTRAIL_CMD"
+    local cmd_str="$__rt_cmd"
     while :; do
         local word="${cmd_str%% *}"
         [[ "$word" == *=* ]] || break
@@ -152,7 +148,7 @@ __redtrail_preexec() {
     binary="${binary##*/}"
 
     if [[ ":$__RT_BLACKLIST:" == *":$binary:"* ]]; then
-        return
+        return $saved_exit
     fi
 
     # Resolve aliases so e.g. alias v=nvim is caught by the blacklist
@@ -164,16 +160,26 @@ __redtrail_preexec() {
         local resolved="${alias_val%% *}"
         resolved="${resolved##*/}"
         if [[ ":$__RT_BLACKLIST:" == *":$resolved:"* ]]; then
-            return
+            return $saved_exit
         fi
     fi
 
+    # Register command with DB — get back a command ID for tee and finish
+    __REDTRAIL_CMD_ID=$(command redtrail capture start \
+        --session-id "$REDTRAIL_SESSION_ID" \
+        --command "$__rt_cmd" \
+        --cwd "$PWD" \
+        --shell bash \
+        --hostname "${HOSTNAME:-$(hostname)}" \
+        2>/dev/null)
+    [[ -z "$__REDTRAIL_CMD_ID" ]] && return $saved_exit
+
     # Set up capture
     local ctl_fifo="/tmp/rt-ctl-$$"
-    mkfifo "$ctl_fifo" 2>/dev/null || return
+    mkfifo "$ctl_fifo" 2>/dev/null || return $saved_exit
 
     command redtrail tee \
-        --session "$REDTRAIL_SESSION_ID" \
+        --command-id "$__REDTRAIL_CMD_ID" \
         --shell-pid "$$" \
         --ctl-fifo "$ctl_fifo" \
         2>/dev/null &
@@ -184,13 +190,14 @@ __redtrail_preexec() {
     if ! read -t 1 pty_out pty_err < "$ctl_fifo"; then
         rm -f "$ctl_fifo"
         kill "$__RT_TEE_PID" 2>/dev/null
-        return
+        return $saved_exit
     fi
     rm -f "$ctl_fifo"
 
     exec {__RT_SAVE_OUT}>&1 {__RT_SAVE_ERR}>&2
     exec 1>"$pty_out" 2>"$pty_err"
     __RT_CAPTURE_ACTIVE=1
+    return $saved_exit
 }
 
 __redtrail_precmd() {
@@ -206,32 +213,19 @@ __redtrail_precmd() {
         while kill -0 "$__RT_TEE_PID" 2>/dev/null; do :; done
     fi
 
-    if [ -z "$__REDTRAIL_CMD" ]; then
+    if [ -z "$__REDTRAIL_CMD_ID" ]; then
         unset __RT_INSIDE_PRECMD
         return
     fi
 
-    local ts_end
-    ts_end="$(date +%s)"
+    # Finalize the command record — backgrounded to not block the prompt
+    command redtrail capture finish \
+        --command-id "$__REDTRAIL_CMD_ID" \
+        --exit-code "$exit_code" \
+        --cwd "$__REDTRAIL_CWD" \
+        2>/dev/null & disown
 
-    local capture_args=(
-        --session-id "$REDTRAIL_SESSION_ID"
-        --command "$__REDTRAIL_CMD"
-        --cwd "$__REDTRAIL_CWD"
-        --exit-code "$exit_code"
-        --ts-start "$__REDTRAIL_TS_START"
-        --ts-end "$ts_end"
-        --shell bash
-        --hostname "${HOSTNAME:-$(hostname)}"
-    )
-    local out_file="/tmp/rt-out-$$" err_file="/tmp/rt-err-$$"
-    [[ -f "$out_file" ]] && capture_args+=(--stdout-file "$out_file")
-    [[ -f "$err_file" ]] && capture_args+=(--stderr-file "$err_file")
-
-    # capture runs SYNC in bash — reads and deletes temp files before returning
-    command redtrail capture "${capture_args[@]}" 2>/dev/null
-
-    unset __REDTRAIL_CMD __REDTRAIL_CWD __REDTRAIL_TS_START
+    unset __REDTRAIL_CMD_ID __REDTRAIL_CWD
     unset __RT_SAVE_OUT __RT_SAVE_ERR __RT_TEE_PID __RT_CAPTURE_ACTIVE
     unset __RT_INSIDE_PRECMD
 }

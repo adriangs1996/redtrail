@@ -78,6 +78,21 @@ fn init_unknown_shell_fails() {
 }
 
 #[test]
+fn zsh_hook_contains_capture_start_and_finish() {
+    let output = redtrail_bin()
+        .args(["init", "zsh"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(hook.contains("capture start"), "zsh hook should call capture start");
+    assert!(hook.contains("capture finish"), "zsh hook should call capture finish");
+    assert!(hook.contains("--command-id"), "zsh hook should pass --command-id to tee and finish");
+    assert!(hook.contains("&!"), "zsh hook should background capture finish with &!");
+    assert!(hook.contains("__REDTRAIL_CMD_ID"), "zsh hook should use __REDTRAIL_CMD_ID variable");
+}
+
+#[test]
 fn zsh_hook_contains_fifo_setup() {
     let output = redtrail_bin()
         .args(["init", "zsh"])
@@ -89,7 +104,21 @@ fn zsh_hook_contains_fifo_setup() {
     assert!(hook.contains("redtrail tee"), "zsh hook should launch redtrail tee");
     assert!(hook.contains("read -t 1"), "zsh hook should have FIFO read timeout");
     assert!(hook.contains("__RT_BLACKLIST"), "zsh hook should have inline blacklist");
-    assert!(hook.contains("TRAPCHLD"), "zsh hook should have crash recovery");
+}
+
+#[test]
+fn bash_hook_contains_capture_start_and_finish() {
+    let output = redtrail_bin()
+        .args(["init", "bash"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(hook.contains("capture start"), "bash hook should call capture start");
+    assert!(hook.contains("capture finish"), "bash hook should call capture finish");
+    assert!(hook.contains("--command-id"), "bash hook should pass --command-id to tee and finish");
+    assert!(hook.contains("disown"), "bash hook should use disown after capture finish");
+    assert!(hook.contains("__REDTRAIL_CMD_ID"), "bash hook should use __REDTRAIL_CMD_ID variable");
 }
 
 #[test]
@@ -124,7 +153,7 @@ fn hooks_do_not_use_date_nanoseconds() {
 }
 
 #[test]
-fn hooks_capture_ts_start_at_preexec() {
+fn hooks_do_not_manage_timestamps() {
     for shell in &["zsh", "bash"] {
         let output = redtrail_bin()
             .args(["init", shell])
@@ -133,16 +162,74 @@ fn hooks_capture_ts_start_at_preexec() {
 
         let hook = String::from_utf8_lossy(&output.stdout);
         assert!(
-            hook.contains("__REDTRAIL_TS_START"),
-            "{shell} hook should capture ts_start at preexec.\nGot:\n{hook}"
+            !hook.contains("--ts-start"),
+            "{shell} hook should NOT pass --ts-start (DB handles timestamps)"
         );
         assert!(
-            hook.contains("--ts-start"),
-            "{shell} hook should pass --ts-start to capture.\nGot:\n{hook}"
+            !hook.contains("--ts-end"),
+            "{shell} hook should NOT pass --ts-end (DB handles timestamps)"
         );
         assert!(
-            hook.contains("--ts-end"),
-            "{shell} hook should pass --ts-end to capture.\nGot:\n{hook}"
+            !hook.contains("__REDTRAIL_TS_START"),
+            "{shell} hook should NOT use __REDTRAIL_TS_START (DB handles timestamps)"
+        );
+        assert!(
+            !hook.contains("--stdout-file"),
+            "{shell} hook should NOT use --stdout-file (tee streams to DB)"
+        );
+        assert!(
+            !hook.contains("--stderr-file"),
+            "{shell} hook should NOT use --stderr-file (tee streams to DB)"
         );
     }
+}
+
+#[test]
+fn bash_hook_preserves_exit_code_in_debug_trap() {
+    let output = redtrail_bin()
+        .args(["init", "bash"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        hook.contains("saved_exit"),
+        "bash DEBUG trap must save and restore $? to avoid clobbering exit codes"
+    );
+}
+
+#[test]
+fn zsh_hook_busy_waits_for_tee() {
+    let output = redtrail_bin()
+        .args(["init", "zsh"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        hook.contains("while kill -0"),
+        "zsh hook must busy-wait for tee to exit before capture finish"
+    );
+    assert!(
+        hook.contains("kill -USR1"),
+        "zsh hook must signal tee with SIGUSR1 to flush"
+    );
+}
+
+#[test]
+fn bash_hook_busy_waits_for_tee() {
+    let output = redtrail_bin()
+        .args(["init", "bash"])
+        .output()
+        .expect("failed to run");
+
+    let hook = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        hook.contains("while kill -0"),
+        "bash hook must busy-wait for tee to exit before capture finish"
+    );
+    assert!(
+        hook.contains("kill -USR1"),
+        "bash hook must signal tee with SIGUSR1 to flush"
+    );
 }

@@ -24,7 +24,7 @@ CMDS
 HOME="$TMPDIR" script -q -c "zsh -i" /dev/null <"$TMPDIR/commands.txt" >/dev/null 2>&1 || true
 
 # Get the session ID
-SESSION_ID=$("$RT" query "SELECT session_id FROM commands LIMIT 1" --json 2>/dev/null | grep -oP '"session_id"\s*:\s*"\K[^"]+' || echo "")
+SESSION_ID=$("$RT" query "SELECT session_id FROM commands LIMIT 1" --json 2>/dev/null | sed -n 's/.*"session_id"\s*:\s*"\([^"]*\)".*/\1/p' | head -1)
 
 if [ -z "$SESSION_ID" ]; then
   echo "FAIL: could not get session ID"

@@ -138,8 +138,6 @@ CREATE INDEX IF NOT EXISTS idx_commands_ts ON commands(timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_commands_source ON commands(source, timestamp_start);
 CREATE INDEX IF NOT EXISTS idx_commands_agent_session ON commands(agent_session_id, timestamp_start) WHERE agent_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_commands_git_repo ON commands(git_repo, timestamp_start) WHERE git_repo IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status) WHERE status = 'running';
-
 -- Redaction audit log
 CREATE TABLE IF NOT EXISTS redaction_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -225,11 +223,14 @@ fn migrate_status_column(conn: &Connection) -> Result<(), Error> {
 
     if !has_col {
         conn.execute_batch(
-            "ALTER TABLE commands ADD COLUMN status TEXT NOT NULL DEFAULT 'finished';
-             CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status) WHERE status = 'running';"
+            "ALTER TABLE commands ADD COLUMN status TEXT NOT NULL DEFAULT 'finished';"
         )
         .map_err(|e| Error::Db(e.to_string()))?;
     }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status) WHERE status = 'running';"
+    )
+    .map_err(|e| Error::Db(e.to_string()))?;
     Ok(())
 }
 

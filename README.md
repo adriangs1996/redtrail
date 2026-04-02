@@ -4,64 +4,92 @@
 
 # RedTrail
 
-**Your terminal has memory now**. Bring a searchable brain to your pentest engagements.
+You fixed that nasty bug last month. You know you did. But you can't remember what you ran, what the output was, or which Claude Code session actually led to the fix. So you spend 40 minutes having Claude rediscover the solution from scratch. RedTrail helps you capture that context, forever. And so does a regresion test :)
 
-RedTrail wraps your terminal.
-**No new syntax to learn. No workflow to change. Your shell stays your shell.**
-Every command you run — nmap, ffuf, gobuster, sqlmap — gets captured, stored, and made queryable.
-Your engagement builds a persistent trail of findings, hypotheses, and evidence. You never lose context again.
+RedTrail is a terminal intelligence engine that transparently captures everything that happens in your shell — whether typed by a human or executed by an AI agent — structures it into queryable knowledge, and surfaces actionable insights.
 
-The CLI command is `rt` (short for "RedTrail")
+No new syntax. No workflow change. Your shell stays your shell. RedTrail installs as shell hooks (zsh/bash) and silently records every command, its output, exit code, timing, and context. You never lose track of what happened.
 
 ```bash
-$ rt init --target 10.10.10.1
-$ eval "$(rt env)"       # It generate aliases for your tools, for example, `nmap` becomes `rt nmap`.
-(rt:htb-machine) 10.10.0.1 <-> 10.10.0.2 L0 $ nmap -sV 10.10.10.1           # captured, parsed, stored
-(rt:htb-machine) 10.10.0.1 <-> 10.10.0.2 L0 $ kb ports                      # what did we find?
-(rt:htb-machine) 10.10.0.1 <-> 10.10.0.2 L0 $ ask "what should I try next?" # AI assistant gives suggestions based on current findings
+eval "$(redtrail init zsh)"   # add to .zshrc — that's it
+# ... work normally ...
+redtrail history               # what did I run?
+redtrail history --failed      # what broke?
+redtrail history --search ssl  # find that openssl command from yesterday
+redtrail resolve "connection refused"  # seen this error before?
 ```
 
 ---
 
 ## Why
 
-Pentesting is messy. You run 40 commands across 3 terminals, switch between targets, lose track of what you already tried, and forget that one credential you found two hours ago.
+Developers and AI agents run hundreds of commands a day across
+terminals, sessions, and tools. Context evaporates:
 
-Sound familiar?
+- **Agent blind spots.** AI coding agents (Claude Code, Cursor, Codex)
+  execute commands but have no memory across sessions. Each conversation
+  starts cold. You can't even see what they did.
+- **Repeated debugging.** You hit the same error last week, fixed it,
+  and forgot how.
+- **Context switching.** You step away and come back with zero context
+  on what you were doing.
+- **Lost history.** Terminal scrollback is not a knowledge base. You ran
+  that command yesterday but can't find it.
+- **No output recall.** You remember the command but not what it printed.
 
-- **Lost context.** You found SSH creds earlier but forgot which host they were for.
-- **No history.** Terminal scrollback is not a knowledge base.
-- **Repeated work.** You re-run scans because you can't remember if you already checked that port.
-- **Reporting pain.** Reconstructing what you did from bash history is brutal.
-- **Context switching.** You step away for lunch and come back cold.
+RedTrail fixes this by capturing, storing, and structuring your terminal
+activity — so you (and your agents) can query it later.---
 
-RedTrail fixes this by sitting between you and your tools. It watches, records, organizes and suggests — so you can focus on thinking, not bookkeeping.
+## How RedTrail Compares
 
-Example of AI-assisted reasoning:
+| Feature                        | RedTrail | atuin | shell history |
+| ------------------------------ | -------- | ----- | ------------- |
+| Command capture                | ✓        | ✓     | ✓             |
+| Output capture (stdout/stderr) | ✓        | ✗     | ✗             |
+| AI agent awareness             | ✓        | ✗     | ✗             |
+| Error resolution lookup        | ✓        | ✗     | ✗             |
+| Agent session reports          | ✓        | ✗     | ✗             |
+| Context export for AI agents   | ✓        | ✗     | ✗             |
+| Secret redaction               | ✓        | ✗     | ✗             |
+| Full-text search on output     | ✓        | ✗     | ✗             |
+| Cloud sync                     | ✗        | ✓     | ✗             |
 
-![rt advise example — AI-driven strategic summary showing phase transition, recommended next steps, and risk assessment](docs/images/rt-advise.png)
+## What It Does (Phase 1: Silent Capture — Complete)
 
----
+### Capture
 
-## Why Now
+- **Shell hooks** — zsh and bash `preexec`/`precmd` hooks capture commands transparently. Zero behavior change.
+- **Full capture** — command text, stdout, stderr, exit code, timestamps, working directory, git repo/branch, hostname, shell.
+- **Streaming output** — stdout/stderr are streamed to the database every 1 second via a PTY-based tee process. Long-running commands (servers, watchers, builds) have their output visible in the database while still running.
+- **Agent-aware** — detects whether commands come from a human or an AI agent (Claude Code, Cursor, etc.) and tags them with source metadata.
+- **Claude Code integration** — `redtrail setup-hooks` installs hooks that capture agent tool events (Bash, Edit, Write, Read) directly.
 
-LLMs made it possible to turn raw command output into structured data without writing custom parsers for each tool. RedTrail builds on that
-to make your terminal workflow queryable and persistent.
+### Security
 
----
+- **Secret redaction** — secrets (API keys, tokens, passwords, PEM keys, connection strings) are detected and redacted _before_ data touches the database. Runs on every streaming flush and again as a final pass on command completion.
+- **Configurable modes** — `on_detect: redact` (default) replaces secrets with `[REDACTED:label]`. `on_detect: block` deletes the entire command row. `on_detect: warn` stores unredacted but flags detection.
+- **Custom patterns** — define your own secret patterns via a YAML file for proprietary token formats.
+- **Redaction audit log** — every redaction event is logged with the field, pattern label, and timestamp.
+- **Owner-only permissions** — database file is locked to 600 on creation.
 
-## What It Does
+### Storage
 
-- **Transparent proxy** — aliases wrap your tools (nmap, ffuf, gobuster, etc.). Commands run normally, but input and output are captured.
-- **Structured knowledge base** — hosts, ports, credentials, flags, web paths, and vulnerabilities are extracted and stored in a local SQLite database.
-- **Auto-extraction** — AI parses command output and populates the KB with structured findings. No manual data entry.
-- **Hypothesis tracking** — form hypotheses ("SSH might have weak creds"), link evidence, update status as you test them.
-- **Session management** — multiple sessions per workspace. Switch between them, export, resume later.
-- **Scope enforcement** — define allowed CIDRs, get warned when a command targets something out of scope.
-- **Flag detection** — auto-captures CTF flags from command output using configurable patterns.
-- **Noise budgeting** — tracks how "loud" your engagement is based on tool aggressiveness.
-- **AI assistant** — ask questions about your findings, get suggestions for next steps based on what you've already discovered.
-- **Report generation** — synthesize your trail into a structured engagement report.
+- **SQLite with WAL mode** — single local database file, concurrent-read safe.
+- **FTS5 full-text search** — search across commands and output.
+- **Streaming status** — commands have `status='running'` while executing, `status='finished'` on completion, `status='orphaned'` for stale processes.
+- **Compression** — large stdout/stderr is zlib-compressed at finalization.
+- **Retention** — configurable automatic cleanup of old data.
+
+### CLI
+
+- **History** — browsing with filters: failed, command, cwd, source, tool, search, today, verbose, json.
+- **Sessions** — list and inspect terminal sessions.
+- **Error resolution** — `redtrail resolve` looks up an error message and finds past fixes from history.
+- **Agent context** — `redtrail agent-context` generates a context document for a new AI agent session.
+- **Agent reports** — `redtrail agent-report` summarizes AI agent activity.
+- **Data control** — `forget` deletes data by command, session, or time range. `export` dumps as JSON.
+- **Raw queries** — `redtrail query "SELECT ..."` for ad-hoc read-only SQL.
+- **Configuration** — YAML config at `~/.config/redtrail/config.yaml`, manageable via `redtrail config`.
 
 ---
 
@@ -69,229 +97,168 @@ to make your terminal workflow queryable and persistent.
 
 ### 1. Install
 
-```bash
-cargo install --path .
-```
-
-### 2. Set up
-
-```bash
-rt setup                    # interactive wizard — checks prerequisites, configures LLM provider
-```
-
-### 3. Start an engagement
-
-```bash
-mkdir ~/pentests/target && cd ~/pentests/target
-rt init --target 10.10.10.1 --scope 10.10.10.0/24 --goal capture-flags
-eval "$(rt env)"            # activates shell aliases
-```
-
-### 4. Work normally
-
-```bash
-nmap -sV $TARGET            # proxied — output captured and extracted
-gobuster dir -u http://$TARGET -w /usr/share/wordlists/common.txt
-curl -s http://$TARGET/robots.txt
-```
-
-### 5. Query your findings
-
-```bash
-rt kb hosts                 # discovered hosts
-rt kb ports --host 10.10.10.1   # open ports on target
-rt kb creds                 # any credentials found
-rt status                   # engagement overview
-```
-
-### 6. Get suggestions
-
-```bash
-rt ask "what services look interesting?"
-rt ask "I have SSH creds, what should I try?"
-```
-
-### 7. Track your reasoning
-
-```bash
-rt hypothesis create "FTP allows anonymous login" --confidence 0.6
-rt evidence add 1 "vsftpd 3.0.3 — known to allow anon by default"
-rt hypothesis update 1 --status confirmed
-```
-
-### 8. Clean up
-
-```bash
-rt deactivate               # removes aliases from current shell
-rt report generate          # generate engagement report
-rt session export           # export session data
-```
-
----
-
-## Core Concepts
-
-### Workspace
-
-Any directory where you run `rt init`. RedTrail links the directory to a session in its global database — no files are created in your project folder. Think of it like a Python virtualenv — scoped to a directory, activated per shell session.
-
-All data lives in a single global database at `~/.redtrail/redtrail.db`. Configuration is also stored in the database, managed via `rt config` commands.
-
-### Session
-
-An engagement context tied to a workspace directory. Tracks target, scope, goal, phase, and noise budget. You can have multiple sessions per directory — useful for retesting or separating approaches. One session is active per workspace at a time.
-
-### Knowledge Base
-
-The structured store of everything discovered: hosts, ports, services, credentials, flags, web paths, access levels, vulnerabilities, notes. Populated automatically by the extraction agent or manually via `rt kb add-*` commands. Queryable with `rt kb <type>` or directly via SQLite.
-
-Its the searchable "memory" of your engagements.
-
-### Trail
-
-The full record of your engagement: every command run, every finding extracted, every hypothesis formed, every piece of evidence collected. This is what makes your workflow reproducible and reportable.
-
-### Phase
-
-RedTrail tracks engagement progress automatically:
-
-| Phase                       | Meaning                                     |
-| --------------------------- | ------------------------------------------- |
-| **L0 — Setup**              | Workspace initialized, no enumeration yet   |
-| **L1 — Surface Mapped**     | Hosts discovered, attack surface visible    |
-| **L2 — Hypotheses Pending** | Hypotheses formed, waiting to be tested     |
-| **L3 — Confirmed**          | Vulnerabilities confirmed, ready to exploit |
-
-Phase advances automatically based on your knowledge base state.
-
-Is the brain, the methodology. Internally, I call it the strategist
-
----
-
-## The AI Feature
-
-RedTrail includes an AI assistant that reads your knowledge base and provides contextual suggestions. It's useful. It's also optional.
-
-### What it does
-
-- **Extraction** — after each command, an AI agent parses the output and writes structured records to the KB. This is the main quality-of-life feature. You run nmap, and the hosts/ports/services appear in `rt kb` without you doing anything.
-- **Ask** — `rt ask "question"` gives you a conversational interface over your findings. It knows what you've discovered, what hypotheses are open, and what phase you're in.
-- **Strategic advice** — the assistant can suggest next steps based on a structured methodology (reconnaissance → hypothesis → testing → exploitation).
-
-### What it doesn't do
-
-- It doesn't run commands for you, but lets you decide.
-- It doesn't make decisions for you, but keeps your methodology.
-- It doesn't replace knowing what you're doing, there is no way around this.
-
-## Philosophy
-
-RedTrail is a **human-in-the-loop** tool. Always.
-
-The human decides what to run. The human interprets the results. The human chooses the attack path. RedTrail handles the tedious parts — recording, organizing, and recalling — so you can focus on the parts that require judgment. You have ideas, the assistant suggests tools approve or reject them.
-
-We believe:
-
-- **Tools should augment, not replace.** A pentester's intuition is irreplaceable. RedTrail gives it better inputs.
-- **Context is king.** The difference between a junior and senior pentester isn't what tools they know — it's how well they connect findings across an engagement. RedTrail makes those connections visible.
-- **Transparency matters.** Everything RedTrail stores is in a local SQLite file you own. No cloud. No telemetry. No magic.
-
----
-
-## Use Cases
-
-### CTF Competitions
-
-Init a workspace per challenge. Auto-capture flags. Never lose track of which ports you already scanned. Export your trail for writeups.
-
-```bash
-rt init --target 10.10.10.1 --goal ctf
-eval "$(rt env)"
-# ... hack away ...
-rt kb flags               # what did we capture?
-```
-
-### Client Engagements
-
-Scope enforcement keeps you honest. Hypothesis tracking gives you a structured methodology. Report generation saves hours of post-engagement documentation.
-
-```bash
-rt init --target 192.168.1.0/24 --scope 192.168.1.0/24 --goal general
-```
-
-### Bug Bounty
-
-Track findings across sessions. Come back to a target days later and pick up exactly where you left off. The knowledge base remembers what you don't.
-
-### Learning & Practice
-
-Review your command history to understand what worked and why. The structured trail is a better learning tool than raw terminal output.
-
----
-
-## Installation
-
-### From source (recommended for now)
-
 Requires [Rust](https://www.rust-lang.org/tools/install) (1.85+).
 
 ```bash
-git clone https://github.com/your-org/redtrail.git
+git clone https://github.com/adriangonzalez/redtrail.git
 cd redtrail
 cargo install --path .
 ```
 
-The binary `rt` will be installed to `~/.cargo/bin/`. Make sure it's in your PATH.
+### 2. Activate shell hooks
 
-### Prerequisites
-
-- An LLM API key (Anthropic, OpenAI, or compatible) for AI features
-- Standard pentesting tools (nmap, gobuster, ffuf, etc.) — RedTrail wraps them, doesn't replace them
-
-### First run
+Add to your `~/.zshrc` (or `~/.bashrc`):
 
 ```bash
-rt setup                    # walks you through configuration
+eval "$(redtrail init zsh)"    # or: eval "$(redtrail init bash)"
 ```
 
-This sets up your global config and verifies prerequisites.
+Open a new terminal. That's it — RedTrail is now capturing.
+
+### 3. (Optional) Set up agent capture
+
+If you use Claude Code:
+
+```bash
+redtrail setup-hooks
+```
+
+This installs hooks so that agent-executed commands are captured with full tool metadata.
+
+### 4. Use it
+
+```bash
+redtrail history                          # recent commands
+redtrail history --failed                 # commands that failed
+redtrail history --cmd git                # only git commands
+redtrail history --cwd .                  # commands run in this directory
+redtrail history --search "connection refused"  # full-text search
+redtrail history --source claude_code     # only agent commands
+redtrail history --verbose                # include stdout/stderr
+redtrail history --json                   # JSON output
+
+redtrail sessions                         # list sessions
+redtrail session <id>                     # commands in a session
+redtrail status                           # database stats
+
+redtrail resolve "error: ECONNREFUSED"    # find past fixes
+redtrail agent-context                    # context doc for AI agents
+redtrail agent-report --last 2h           # agent activity summary
+
+redtrail forget --last 1h                 # delete last hour
+redtrail forget --command <id>            # delete specific command
+redtrail forget --session <id>            # delete entire session
+
+redtrail export --since 7d               # export as JSON
+redtrail query "SELECT * FROM commands WHERE exit_code != 0 LIMIT 10"
+```
 
 ---
 
-## Roadmap
+## Architecture
 
-RedTrail is under active development. Here's what's on the horizon:
+```
+┌──────────────────────────┐  ┌───────────────────────────────┐
+│      USER'S SHELL        │  │       AI AGENTS               │
+│  preexec/precmd hooks    │  │  Claude Code · Cursor · Codex │
+│  zero behavior change    │  │  hooks capture tool events    │
+└────────────┬─────────────┘  └───────────────┬───────────────┘
+             │                                │
+             ▼                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     CAPTURE LAYER                           │
+│  capture start → tee (PTY relay + 1s DB flush) → finish    │
+│  command parsing · secret redaction · agent detection       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   SQLITE DATABASE (WAL mode)                │
+│   commands · sessions · redaction_log · FTS5 search         │
+│   600 permissions · local only · single file                │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                        CLI                                  │
+│  history · sessions · status · forget · query · export      │
+│  resolve · agent-context · agent-report · config            │
+└─────────────────────────────────────────────────────────────┘
+```
 
-- [ ] Plugin ecosystem for community skills
-- [ ] Multi-target campaign management
-- [ ] Collaboration features for team engagements
-- [ ] Richer reporting templates
-- [ ] Shell completions (bash, zsh, fish)
-- [ ] Package distribution (Homebrew, AUR, etc.)
+### Capture Lifecycle
+
+Every command goes through a three-stage lifecycle:
+
+1. **`capture start`** (preexec) — inserts a `status='running'` row, returns a command ID. Runs synchronously (<15ms).
+2. **`redtrail tee`** (background) — PTY relay process. Reads command output from PTY masters, writes to `/dev/tty` (terminal) and flushes to the database every 1 second with secret redaction applied.
+3. **`capture finish`** (precmd, backgrounded) — sets exit code, timestamp, status='finished'. Runs a final defense-in-depth redaction pass, syncs the FTS index, and compresses large output.
+
+This design means long-running commands (web servers, watchers, log tailers) have their output visible in the database while still executing — not just after termination.
+
+---
+
+## Configuration
+
+```yaml
+# ~/.config/redtrail/config.yaml
+capture:
+  enabled: true
+  blacklist_commands: [vim, nvim, nano, ssh, top, htop, less, more, man]
+  max_stdout_bytes: 524288 # 512KB per command
+  retention_days: 90
+
+secrets:
+  on_detect: redact # redact | block | warn
+  patterns_file: null # path to custom patterns YAML
+```
+
+---
+
+## Design Principles
+
+1. **Zero friction.** Source one line in your shell config. No prefixes, no wrappers, no behavior change.
+2. **Silence by default.** RedTrail never prints to your terminal during normal use. Invisible until you query it.
+3. **Privacy first.** All data is local. Nothing leaves the machine. Secrets are redacted before storage. Database permissions are locked to owner-only.
+4. **Performance.** Shell hooks add <50ms. Database writes are async. The tool must never make your terminal feel sluggish.
+5. **Graceful degradation.** Every layer works independently. If the database is locked, output still flows to your terminal. If capture start fails, the command runs normally.
+6. **Agent-aware.** AI agents are first-class citizens. Their commands are captured with the same fidelity as human-typed ones.
+
+---
+
+## Testing
+
+RedTrail has a comprehensive live test suite that runs each test in an isolated Docker container with real shell hooks, PTY capture, and database verification.
+
+```bash
+make test-live              # run all 36 live tests
+make test-live --fast       # skip LLM-dependent tests
+cargo test                  # run unit tests
+```
+
+---
+
+### Coming Next
+
+- **Phase 2:** Intelligent extraction — structured entities from command output
+- **Phase 3:** Git safety — catch secrets and mistakes before you push
+- **Phase 4+:** Background pattern mining, autonomous improvement loops, MCP integration---
 
 ---
 
 ## Status
 
-**RedTrail is early-stage software (v0.1.0)** and experimental, expect rough edges, specially around AI features. APIs and storage formats may change between versions. Back up your `.redtrail/` directories if your data matters. Right now, there is no anonymization
-or encryption — all data is stored in plaintext in a local SQLite file.
-**Do not use this on sensitive engagements until security features are implemented**.
-**There is no sanitization of data ingested by the AI agent** so prompt injection is possible if you run on targets you are not aware of. I recommend
-on CTF machines or lab environments until this is addressed.
-I change the features frequently while I find the sweet spot, so expect some instability. The core command capture and storage is stable, but the AI extraction and assistant features are in active experimentation.
-
-We're building in the open because we think the idea is useful and want feedback from real pentesters.
+Absolute early days. I envision RedTrail in phases, and this barely finishes Phase 1, so
+expect really rough edges, bugs, and missing features. Working really hard on solving the context problem for terminal
+users and agents - if that resonates, follow along and share feedback!
 
 ---
 
 ## Contributing
 
-We are not allowing for code contributions just yet, but, issues and feedback is really useful. If you're a pentester who's tired of losing context or taking notes, or having a checklist with your methodology, we'd especially love your input on methodology and workflow.
+Probably not the best time to contribute with code because my lack of time to fully interact with community, but feedback, ideas, suggestions, and, if you need to express the feature with code, then a PR, are all very welcome.
 
 - **Issues** — bug reports, feature requests, workflow suggestions
-- **Skills** — write and share methodology modules
-
-Please open an issue commenting on what you like, what you don't, and what you'd like to see. The best way to contribute right now is to use it and tell us how it fits (or doesn't fit) into your workflow.
 
 ---
 
@@ -302,5 +269,5 @@ This project is licensed under the [MIT License](LICENSE).
 ---
 
 <p align="center">
-<em>Built for people who hack in terminals.</em>
+  <em>Your AI agent forgets everything. RedTrail doesn't.</em>
 </p>

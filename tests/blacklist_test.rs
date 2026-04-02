@@ -2,19 +2,30 @@ use redtrail::core::capture;
 
 #[test]
 fn default_blacklist_blocks_vim() {
-    assert!(capture::is_blacklisted("vim", &capture::default_blacklist()));
+    assert!(capture::is_blacklisted(
+        "vim",
+        &capture::default_blacklist()
+    ));
 }
 
 #[test]
 fn default_blacklist_blocks_ssh() {
-    assert!(capture::is_blacklisted("ssh", &capture::default_blacklist()));
+    assert!(capture::is_blacklisted(
+        "ssh",
+        &capture::default_blacklist()
+    ));
 }
 
 #[test]
 fn default_blacklist_blocks_interactive_tools() {
     let bl = capture::default_blacklist();
-    for cmd in &["vim", "nvim", "nano", "ssh", "top", "htop", "less", "more", "man", "tmux", "screen"] {
-        assert!(capture::is_blacklisted(cmd, &bl), "{cmd} should be blacklisted");
+    for cmd in &[
+        "vim", "nvim", "nano", "ssh", "top", "htop", "less", "more", "man", "tmux", "screen",
+    ] {
+        assert!(
+            capture::is_blacklisted(cmd, &bl),
+            "{cmd} should be blacklisted"
+        );
     }
 }
 
@@ -22,7 +33,10 @@ fn default_blacklist_blocks_interactive_tools() {
 fn non_blacklisted_commands_pass() {
     let bl = capture::default_blacklist();
     for cmd in &["ls", "git", "cargo", "echo", "docker", "curl"] {
-        assert!(!capture::is_blacklisted(cmd, &bl), "{cmd} should NOT be blacklisted");
+        assert!(
+            !capture::is_blacklisted(cmd, &bl),
+            "{cmd} should NOT be blacklisted"
+        );
     }
 }
 

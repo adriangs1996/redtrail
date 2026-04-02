@@ -13,10 +13,7 @@ pub fn list(conn: &Connection) -> Result<(), Error> {
     for s in &sessions {
         let cwd = s.cwd_initial.as_deref().unwrap_or("-");
         let shell = s.shell.as_deref().unwrap_or("?");
-        println!(
-            "{}\t{}\t{}\tcmds:{}",
-            s.id, cwd, shell, s.command_count
-        );
+        println!("{}\t{}\t{}\tcmds:{}", s.id, cwd, shell, s.command_count);
     }
 
     Ok(())
@@ -36,14 +33,20 @@ pub fn detail(conn: &Connection, session_id: &str) -> Result<(), Error> {
     println!("Commands: {}", session.command_count);
     println!("---");
 
-    let commands = db::get_commands(conn, &db::CommandFilter {
-        session_id: Some(session_id),
-        limit: Some(500),
-        ..Default::default()
-    })?;
+    let commands = db::get_commands(
+        conn,
+        &db::CommandFilter {
+            session_id: Some(session_id),
+            limit: Some(500),
+            ..Default::default()
+        },
+    )?;
 
     for c in commands.iter().rev() {
-        let exit = c.exit_code.map(|e| e.to_string()).unwrap_or_else(|| "?".into());
+        let exit = c
+            .exit_code
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "?".into());
         println!("[{}] {}", exit, c.command_raw);
     }
 

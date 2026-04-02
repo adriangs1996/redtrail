@@ -104,7 +104,8 @@ MIIEpAIBAAKCAQEA0Z3VS5JJ...
 
     #[test]
     fn detects_key_in_json() {
-        let input = r#"{"private_key": "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"}"#;
+        let input =
+            r#"{"private_key": "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"}"#;
         assert_detects(input, "PEM key in JSON value");
     }
 

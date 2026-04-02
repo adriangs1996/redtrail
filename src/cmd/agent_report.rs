@@ -1,11 +1,9 @@
 use rusqlite::Connection;
 
-use crate::core::analysis::{analyze_session, AnalysisResult};
+use crate::core::analysis::{AnalysisResult, analyze_session};
 use crate::core::db::{self, CommandFilter, CommandRow};
 use crate::core::enrich::run_enrichment;
-use crate::core::fmt::ascii::{
-    self, BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW,
-};
+use crate::core::fmt::ascii::{self, BOLD, CYAN, DIM, GREEN, RED, RESET, YELLOW};
 use crate::core::fmt::markdown;
 use crate::error::Error;
 
@@ -46,57 +44,75 @@ pub fn run(conn: &Connection, args: &AgentReportArgs) -> Result<(), Error> {
 
 fn fetch_commands(conn: &Connection, args: &AgentReportArgs) -> Result<Vec<CommandRow>, Error> {
     if let Some(session_id) = args.session {
-        return db::get_commands(conn, &CommandFilter {
-            agent_session_id: Some(session_id),
-            limit: Some(5000),
-            ..Default::default()
-        });
+        return db::get_commands(
+            conn,
+            &CommandFilter {
+                agent_session_id: Some(session_id),
+                limit: Some(5000),
+                ..Default::default()
+            },
+        );
     }
 
     if let Some(last) = args.last {
         let since = ascii::parse_duration_ago(last)?;
         let git_repo = resolve_cwd(args.cwd);
-        return db::get_commands(conn, &CommandFilter {
-            since: Some(since),
-            source: Some("claude_code"),
-            git_repo: git_repo.as_deref(),
-            limit: Some(5000),
-            ..Default::default()
-        });
+        return db::get_commands(
+            conn,
+            &CommandFilter {
+                since: Some(since),
+                source: Some("claude_code"),
+                git_repo: git_repo.as_deref(),
+                limit: Some(5000),
+                ..Default::default()
+            },
+        );
     }
 
     if let Some(cwd_arg) = args.cwd {
         let git_repo = resolve_cwd(Some(cwd_arg));
-        return db::get_commands(conn, &CommandFilter {
-            source: Some("claude_code"),
-            git_repo: git_repo.as_deref(),
-            limit: Some(5000),
-            ..Default::default()
-        });
+        return db::get_commands(
+            conn,
+            &CommandFilter {
+                source: Some("claude_code"),
+                git_repo: git_repo.as_deref(),
+                limit: Some(5000),
+                ..Default::default()
+            },
+        );
     }
 
     // Default: find the most recent agent command, then fetch its full session.
-    let recent = db::get_commands(conn, &CommandFilter {
-        source: Some("claude_code"),
-        limit: Some(1),
-        ..Default::default()
-    })?;
+    let recent = db::get_commands(
+        conn,
+        &CommandFilter {
+            source: Some("claude_code"),
+            limit: Some(1),
+            ..Default::default()
+        },
+    )?;
 
     if let Some(cmd) = recent.first() {
         if let Some(agent_sid) = &cmd.agent_session_id {
-            return db::get_commands(conn, &CommandFilter {
-                agent_session_id: Some(agent_sid),
-                limit: Some(5000),
-                ..Default::default()
-            });
+            return db::get_commands(
+                conn,
+                &CommandFilter {
+                    agent_session_id: Some(agent_sid),
+                    limit: Some(5000),
+                    ..Default::default()
+                },
+            );
         }
         // Fallback: return just the recent commands from this session_id.
-        return db::get_commands(conn, &CommandFilter {
-            session_id: Some(&cmd.session_id),
-            source: Some("claude_code"),
-            limit: Some(5000),
-            ..Default::default()
-        });
+        return db::get_commands(
+            conn,
+            &CommandFilter {
+                session_id: Some(&cmd.session_id),
+                source: Some("claude_code"),
+                limit: Some(5000),
+                ..Default::default()
+            },
+        );
     }
 
     Ok(Vec::new())
@@ -129,7 +145,11 @@ fn resolve_cwd(cwd: Option<&str>) -> Option<String> {
 
 fn print_empty_message(args: &AgentReportArgs) {
     let color = ascii::colors_enabled();
-    let (bold, dim, reset_s) = if color { (BOLD, DIM, RESET) } else { ("", "", "") };
+    let (bold, dim, reset_s) = if color {
+        (BOLD, DIM, RESET)
+    } else {
+        ("", "", "")
+    };
 
     println!("{bold}No agent activity found.{reset_s}");
     println!();
@@ -173,7 +193,8 @@ fn print_ascii(a: &AnalysisResult) {
     println!();
 
     // Files
-    if !a.files_created.is_empty() || !a.files_modified.is_empty() || !a.files_read_only.is_empty() {
+    if !a.files_created.is_empty() || !a.files_modified.is_empty() || !a.files_read_only.is_empty()
+    {
         println!("{bold}Files{reset_s}");
         for f in &a.files_created {
             println!("  {green}+ {f}{reset_s}");
@@ -198,7 +219,10 @@ fn print_ascii(a: &AnalysisResult) {
             } else {
                 String::new()
             };
-            println!("  {name}: {bold}{}{reset_s} total, {green}{} ok{reset_s}{fail_str}", stats.total, stats.succeeded);
+            println!(
+                "  {name}: {bold}{}{reset_s} total, {green}{} ok{reset_s}{fail_str}",
+                stats.total, stats.succeeded
+            );
         }
         println!();
     }
@@ -266,7 +290,8 @@ fn print_markdown(a: &AnalysisResult) {
     }
     println!();
 
-    if !a.files_created.is_empty() || !a.files_modified.is_empty() || !a.files_read_only.is_empty() {
+    if !a.files_created.is_empty() || !a.files_modified.is_empty() || !a.files_read_only.is_empty()
+    {
         println!("## Files");
         println!();
         for f in &a.files_created {
@@ -289,7 +314,10 @@ fn print_markdown(a: &AnalysisResult) {
         for (name, stats) in &bins {
             println!(
                 "- `{}`: {} total, {} ok, {} failed",
-                markdown::escape(name), stats.total, stats.succeeded, stats.failed
+                markdown::escape(name),
+                stats.total,
+                stats.succeeded,
+                stats.failed
             );
         }
         println!();
@@ -299,8 +327,16 @@ fn print_markdown(a: &AnalysisResult) {
         println!("## Error Sequences");
         println!();
         for seq in &a.error_sequences {
-            let status = if seq.resolved { "resolved" } else { "unresolved" };
-            println!("- `{}` [{}]", markdown::escape(&seq.failing_command), status);
+            let status = if seq.resolved {
+                "resolved"
+            } else {
+                "unresolved"
+            };
+            println!(
+                "- `{}` [{}]",
+                markdown::escape(&seq.failing_command),
+                status
+            );
             for action in &seq.fix_actions {
                 println!("  - {}", markdown::escape(action));
             }
@@ -327,7 +363,10 @@ fn print_markdown(a: &AnalysisResult) {
         "- {} commands ({} agent, {} human)",
         a.total_commands, a.agent_commands, a.human_commands
     );
-    println!("- {} errors, {} resolved", a.total_errors, a.errors_resolved);
+    println!(
+        "- {} errors, {} resolved",
+        a.total_errors, a.errors_resolved
+    );
 }
 
 // --- JSON output ---

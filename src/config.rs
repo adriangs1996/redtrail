@@ -23,16 +23,12 @@ pub struct CaptureConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum OnDetect {
+    #[default]
     Redact,
     Warn,
     Block,
-}
-
-impl Default for OnDetect {
-    fn default() -> Self {
-        OnDetect::Redact
-    }
 }
 
 impl std::fmt::Display for OnDetect {
@@ -52,7 +48,9 @@ impl std::str::FromStr for OnDetect {
             "redact" => Ok(OnDetect::Redact),
             "warn" => Ok(OnDetect::Warn),
             "block" => Ok(OnDetect::Block),
-            other => Err(format!("invalid on_detect value: {other} (expected redact, warn, or block)")),
+            other => Err(format!(
+                "invalid on_detect value: {other} (expected redact, warn, or block)"
+            )),
         }
     }
 }
@@ -149,9 +147,7 @@ impl Config {
                     .map_err(|_| Error::Config("expected bool".into()))?
             }
             "secrets.on_detect" => {
-                self.secrets.on_detect = value
-                    .parse::<OnDetect>()
-                    .map_err(|e| Error::Config(e))?
+                self.secrets.on_detect = value.parse::<OnDetect>().map_err(Error::Config)?
             }
             "secrets.patterns_file" => {
                 self.secrets.patterns_file = Some(value.to_string());

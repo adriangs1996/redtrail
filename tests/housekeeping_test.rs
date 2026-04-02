@@ -8,10 +8,13 @@ fn setup() -> rusqlite::Connection {
 fn session_command_count_increments_on_insert() {
     let conn = setup();
 
-    let sid = db::create_session(&conn, &db::NewSession {
-        source: "human",
-        ..Default::default()
-    })
+    let sid = db::create_session(
+        &conn,
+        &db::NewSession {
+            source: "human",
+            ..Default::default()
+        },
+    )
     .unwrap();
 
     // Before any commands
@@ -19,24 +22,30 @@ fn session_command_count_increments_on_insert() {
     assert_eq!(session.command_count, 0);
 
     // Insert two commands
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: &sid,
-        command_raw: "echo 1",
-        exit_code: Some(0),
-        timestamp_start: 1000,
-        source: "human",
-        ..Default::default()
-    })
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: &sid,
+            command_raw: "echo 1",
+            exit_code: Some(0),
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
     .unwrap();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: &sid,
-        command_raw: "false",
-        exit_code: Some(1),
-        timestamp_start: 1001,
-        source: "human",
-        ..Default::default()
-    })
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: &sid,
+            command_raw: "false",
+            exit_code: Some(1),
+            timestamp_start: 1001,
+            source: "human",
+            ..Default::default()
+        },
+    )
     .unwrap();
 
     let session = db::get_session(&conn, &sid).unwrap();
@@ -55,6 +64,9 @@ fn file_db_has_restrictive_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let meta = std::fs::metadata(&path).unwrap();
         let mode = meta.permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "DB file should be 600 (owner rw only), got: {mode:o}");
+        assert_eq!(
+            mode, 0o600,
+            "DB file should be 600 (owner rw only), got: {mode:o}"
+        );
     }
 }

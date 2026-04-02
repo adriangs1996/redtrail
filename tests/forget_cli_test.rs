@@ -16,25 +16,38 @@ fn setup_db() -> (tempfile::TempDir, String, String) {
     let db_path = dir.path().join("test.db");
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
 
-    let sid = redtrail::core::db::create_session(&conn, &redtrail::core::db::NewSession {
-        source: "human", ..Default::default()
-    }).unwrap();
+    let sid = redtrail::core::db::create_session(
+        &conn,
+        &redtrail::core::db::NewSession {
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let cmd_id = redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
-        session_id: &sid,
-        command_raw: "echo hello",
-        timestamp_start: 1000, // ancient
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    let cmd_id = redtrail::core::db::insert_command(
+        &conn,
+        &redtrail::core::db::NewCommand {
+            session_id: &sid,
+            command_raw: "echo hello",
+            timestamp_start: 1000, // ancient
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
-        session_id: &sid,
-        command_raw: "echo world",
-        timestamp_start: now_ts(), // recent
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    redtrail::core::db::insert_command(
+        &conn,
+        &redtrail::core::db::NewCommand {
+            session_id: &sid,
+            command_raw: "echo world",
+            timestamp_start: now_ts(), // recent
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     (dir, sid, cmd_id)
 }
@@ -50,10 +63,16 @@ fn forget_command_via_cli() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    let cmds =
+        redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default())
+            .unwrap();
     assert_eq!(cmds.len(), 1, "one command should remain");
     assert_eq!(cmds[0].command_raw, "echo world");
 }
@@ -72,7 +91,9 @@ fn forget_session_via_cli() {
     assert!(output.status.success());
 
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    let cmds =
+        redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default())
+            .unwrap();
     assert!(cmds.is_empty(), "all commands should be deleted");
 }
 
@@ -88,10 +109,19 @@ fn forget_last_duration_via_cli() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    let cmds =
+        redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default())
+            .unwrap();
     assert_eq!(cmds.len(), 1);
-    assert_eq!(cmds[0].command_raw, "echo hello", "ancient command should survive");
+    assert_eq!(
+        cmds[0].command_raw, "echo hello",
+        "ancient command should survive"
+    );
 }

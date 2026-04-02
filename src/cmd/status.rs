@@ -46,11 +46,9 @@ pub fn run(conn: &Connection, db_path: Option<&str>) -> Result<(), Error> {
 
     // Last capture timestamp
     let last_capture: Option<i64> = conn
-        .query_row(
-            "SELECT MAX(timestamp_start) FROM commands",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT MAX(timestamp_start) FROM commands", [], |r| {
+            r.get(0)
+        })
         .map_err(|e| Error::Db(e.to_string()))?;
 
     let last_capture_str = match last_capture {
@@ -75,7 +73,11 @@ pub fn run(conn: &Connection, db_path: Option<&str>) -> Result<(), Error> {
 
     // Capture status: check if REDTRAIL_SESSION_ID is set (shell hooks active)
     let capture_active = std::env::var("REDTRAIL_SESSION_ID").is_ok();
-    let capture_str = if capture_active { "active" } else { "inactive (shell hooks not loaded)" };
+    let capture_str = if capture_active {
+        "active"
+    } else {
+        "inactive (shell hooks not loaded)"
+    };
 
     println!("Database:   {}", db_path.unwrap_or("in-memory"));
     println!("DB size:    {db_size}");

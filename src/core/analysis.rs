@@ -1,9 +1,9 @@
 /// Session analysis: aggregate statistics from a slice of CommandRows.
 use std::collections::{HashMap, HashSet};
 
-use crate::core::classify::{classify_command, CommandCategory};
+use crate::core::classify::{CommandCategory, classify_command};
 use crate::core::db::CommandRow;
-use crate::core::errors::{detect_error_fix_sequences, ErrorFixSequence};
+use crate::core::errors::{ErrorFixSequence, detect_error_fix_sequences};
 
 /// Per-binary execution statistics.
 #[derive(Debug, Clone, Default)]
@@ -49,7 +49,6 @@ pub struct AnalysisResult {
     pub total_errors: usize,
     pub errors_resolved: usize,
 }
-
 
 /// Binaries that read files (shell tools).
 const FILE_READ_BINARIES: &[&str] = &["cat", "head", "tail", "less", "more", "bat", "wc"];

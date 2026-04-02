@@ -32,9 +32,8 @@ impl SecretScanner for GithubTokenScanner {
                 .start()
                 .checked_sub(1)
                 .and_then(|i| input.as_bytes().get(i).copied());
-            let left_ok = prev.is_none_or(|b| {
-                !b.is_ascii_hexdigit() && b != b'_' && !b.is_ascii_alphabetic()
-            });
+            let left_ok = prev
+                .is_none_or(|b| !b.is_ascii_hexdigit() && b != b'_' && !b.is_ascii_alphabetic());
             let right_ok = input
                 .as_bytes()
                 .get(m.end())

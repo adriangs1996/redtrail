@@ -5,25 +5,38 @@ fn setup() -> rusqlite::Connection {
 }
 
 fn seed(conn: &rusqlite::Connection) -> (String, String, String) {
-    let sid = db::create_session(conn, &db::NewSession {
-        source: "human", ..Default::default()
-    }).unwrap();
+    let sid = db::create_session(
+        conn,
+        &db::NewSession {
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let id1 = db::insert_command(conn, &db::NewCommand {
-        session_id: &sid,
-        command_raw: "echo old",
-        timestamp_start: 1000,
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    let id1 = db::insert_command(
+        conn,
+        &db::NewCommand {
+            session_id: &sid,
+            command_raw: "echo old",
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let id2 = db::insert_command(conn, &db::NewCommand {
-        session_id: &sid,
-        command_raw: "echo recent",
-        timestamp_start: 9999999999, // far future
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    let id2 = db::insert_command(
+        conn,
+        &db::NewCommand {
+            session_id: &sid,
+            command_raw: "echo recent",
+            timestamp_start: 9999999999, // far future
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     (sid, id1, id2)
 }

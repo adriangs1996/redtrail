@@ -39,7 +39,10 @@ mod tests {
 
     fn assert_ignores(input: &str, msg: &str) {
         let matches = scan(input);
-        assert!(matches.is_empty(), "should NOT detect: {msg} — input: {input}");
+        assert!(
+            matches.is_empty(),
+            "should NOT detect: {msg} — input: {input}"
+        );
     }
 
     // ──────────────────────────────────────────────────────────────

@@ -13,9 +13,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Output shell hook script for the given shell
-    Init {
-        shell: String,
-    },
+    Init { shell: String },
     /// Show command history
     History {
         /// Show only failed commands (non-zero exit code)
@@ -170,10 +168,7 @@ enum Commands {
 #[derive(Subcommand)]
 enum ConfigAction {
     /// Set a configuration value
-    Set {
-        key: String,
-        value: String,
-    },
+    Set { key: String, value: String },
 }
 
 #[derive(Subcommand)]
@@ -211,7 +206,9 @@ fn config_path() -> String {
 
 fn db_path() -> Option<String> {
     std::env::var("REDTRAIL_DB").ok().or_else(|| {
-        db::global_db_path().ok().map(|p| p.to_string_lossy().to_string())
+        db::global_db_path()
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
     })
 }
 
@@ -228,7 +225,17 @@ pub fn run() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::Init { shell } => cmd::init::run(&shell),
-        Commands::History { failed, cmd, cwd, today, search, source, tool, verbose, json } => {
+        Commands::History {
+            failed,
+            cmd,
+            cwd,
+            today,
+            search,
+            source,
+            tool,
+            verbose,
+            json,
+        } => {
             let resolved_cwd = cwd.map(|c| {
                 if c == "." {
                     std::env::current_dir()
@@ -241,17 +248,20 @@ pub fn run() -> Result<(), Error> {
                 }
             });
             let conn = open_db()?;
-            cmd::history::run(&conn, &cmd::history::HistoryArgs {
-                failed,
-                cmd: cmd.as_deref(),
-                cwd: resolved_cwd.as_deref(),
-                today,
-                search: search.as_deref(),
-                source: source.as_deref(),
-                tool: tool.as_deref(),
-                verbose,
-                json,
-            })
+            cmd::history::run(
+                &conn,
+                &cmd::history::HistoryArgs {
+                    failed,
+                    cmd: cmd.as_deref(),
+                    cwd: resolved_cwd.as_deref(),
+                    today,
+                    search: search.as_deref(),
+                    source: source.as_deref(),
+                    tool: tool.as_deref(),
+                    verbose,
+                    json,
+                },
+            )
         }
         Commands::Query { sql, json } => {
             let conn = open_db()?;
@@ -269,7 +279,11 @@ pub fn run() -> Result<(), Error> {
             let conn = open_db()?;
             cmd::status::run(&conn, db_path().as_deref())
         }
-        Commands::Forget { command, session, last } => {
+        Commands::Forget {
+            command,
+            session,
+            last,
+        } => {
             let conn = open_db()?;
             let since = if let Some(dur) = &last {
                 let secs = redtrail::core::capture::parse_duration(dur)?;
@@ -281,24 +295,33 @@ pub fn run() -> Result<(), Error> {
             } else {
                 None
             };
-            cmd::forget::run(&conn, &cmd::forget::ForgetArgs {
-                command: command.as_deref(),
-                session: session.as_deref(),
-                since,
-            })
+            cmd::forget::run(
+                &conn,
+                &cmd::forget::ForgetArgs {
+                    command: command.as_deref(),
+                    session: session.as_deref(),
+                    since,
+                },
+            )
         }
         Commands::SessionId => {
             let conn = open_db()?;
-            let cwd = std::env::current_dir().ok()
+            let cwd = std::env::current_dir()
+                .ok()
                 .and_then(|p| p.to_str().map(String::from));
-            let hostname = std::env::var("HOSTNAME").or_else(|_| std::env::var("HOST")).ok();
+            let hostname = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("HOST"))
+                .ok();
             let shell = std::env::var("SHELL").ok();
-            let id = db::create_session(&conn, &db::NewSession {
-                cwd_initial: cwd.as_deref(),
-                hostname: hostname.as_deref(),
-                shell: shell.as_deref(),
-                source: "human",
-            })?;
+            let id = db::create_session(
+                &conn,
+                &db::NewSession {
+                    cwd_initial: cwd.as_deref(),
+                    hostname: hostname.as_deref(),
+                    shell: shell.as_deref(),
+                    source: "human",
+                },
+            )?;
             print!("{id}");
             Ok(())
         }
@@ -306,41 +329,54 @@ pub fn run() -> Result<(), Error> {
             let config = redtrail::config::Config::load(&config_path()).unwrap_or_default();
             let conn = open_db()?;
             match action {
-                CaptureAction::Start { session_id, command, cwd, shell, hostname } => {
-                    cmd::capture::start(&conn, &cmd::capture::StartArgs {
+                CaptureAction::Start {
+                    session_id,
+                    command,
+                    cwd,
+                    shell,
+                    hostname,
+                } => cmd::capture::start(
+                    &conn,
+                    &cmd::capture::StartArgs {
                         session_id: &session_id,
                         command: &command,
                         cwd: cwd.as_deref(),
                         shell: shell.as_deref(),
                         hostname: hostname.as_deref(),
                         config: &config,
-                    })
-                }
-                CaptureAction::Finish { command_id, exit_code, cwd } => {
-                    cmd::capture::finish(&conn, &cmd::capture::FinishArgs {
+                    },
+                ),
+                CaptureAction::Finish {
+                    command_id,
+                    exit_code,
+                    cwd,
+                } => cmd::capture::finish(
+                    &conn,
+                    &cmd::capture::FinishArgs {
                         command_id: &command_id,
                         exit_code,
                         cwd: cwd.as_deref(),
                         config: &config,
-                    })
-                }
+                    },
+                ),
             }
         }
         Commands::Ingest => {
             let conn = open_db()?;
             cmd::ingest::run(&conn)
         }
-        Commands::SetupHooks => {
-            cmd::setup_hooks::run()
-        }
-        Commands::Tee { command_id, shell_pid, ctl_fifo, max_bytes } => {
-            cmd::tee::run(&cmd::tee::TeeArgs {
-                command_id: &command_id,
-                shell_pid: &shell_pid,
-                ctl_fifo: &ctl_fifo,
-                max_bytes,
-            })
-        }
+        Commands::SetupHooks => cmd::setup_hooks::run(),
+        Commands::Tee {
+            command_id,
+            shell_pid,
+            ctl_fifo,
+            max_bytes,
+        } => cmd::tee::run(&cmd::tee::TeeArgs {
+            command_id: &command_id,
+            shell_pid: &shell_pid,
+            ctl_fifo: &ctl_fifo,
+            max_bytes,
+        }),
         Commands::Export { since } => {
             let conn = open_db()?;
             let since_ts = if let Some(dur) = &since {
@@ -359,37 +395,65 @@ pub fn run() -> Result<(), Error> {
             let config_path = config_path();
             match action {
                 None => cmd::config::view(&config_path),
-                Some(ConfigAction::Set { key, value }) => cmd::config::set(&config_path, &key, &value),
+                Some(ConfigAction::Set { key, value }) => {
+                    cmd::config::set(&config_path, &key, &value)
+                }
             }
         }
-        Commands::Resolve { error, stdin, cwd, binary_filter, global, json } => {
+        Commands::Resolve {
+            error,
+            stdin,
+            cwd,
+            binary_filter,
+            global,
+            json,
+        } => {
             let conn = open_db()?;
-            cmd::resolve::run(&conn, &cmd::resolve::ResolveArgs {
-                error: error.as_deref(),
-                stdin,
-                cwd: cwd.as_deref(),
-                cmd: binary_filter.as_deref(),
-                global,
-                json,
-            })
+            cmd::resolve::run(
+                &conn,
+                &cmd::resolve::ResolveArgs {
+                    error: error.as_deref(),
+                    stdin,
+                    cwd: cwd.as_deref(),
+                    cmd: binary_filter.as_deref(),
+                    global,
+                    json,
+                },
+            )
         }
-        Commands::AgentContext { format, since, max_tokens } => {
+        Commands::AgentContext {
+            format,
+            since,
+            max_tokens,
+        } => {
             let conn = open_db()?;
-            cmd::agent_context::run(&conn, &cmd::agent_context::AgentContextArgs {
-                format: &format,
-                since: since.as_deref(),
-                max_tokens,
-            })
+            cmd::agent_context::run(
+                &conn,
+                &cmd::agent_context::AgentContextArgs {
+                    format: &format,
+                    since: since.as_deref(),
+                    max_tokens,
+                },
+            )
         }
-        Commands::AgentReport { session, last, cwd, json, markdown } => {
+        Commands::AgentReport {
+            session,
+            last,
+            cwd,
+            json,
+            markdown,
+        } => {
             let conn = open_db()?;
-            cmd::agent_report::run(&conn, &cmd::agent_report::AgentReportArgs {
-                session: session.as_deref(),
-                last: last.as_deref(),
-                cwd: cwd.as_deref(),
-                json,
-                markdown,
-            })
+            cmd::agent_report::run(
+                &conn,
+                &cmd::agent_report::AgentReportArgs {
+                    session: session.as_deref(),
+                    last: last.as_deref(),
+                    cwd: cwd.as_deref(),
+                    json,
+                    markdown,
+                },
+            )
         }
     }
 }

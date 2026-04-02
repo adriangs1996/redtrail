@@ -3,11 +3,14 @@ use crate::error::Error;
 use rusqlite::Connection;
 
 pub fn run(conn: &Connection, since: Option<i64>) -> Result<(), Error> {
-    let commands = db::get_commands(conn, &db::CommandFilter {
-        since,
-        limit: Some(10_000),
-        ..Default::default()
-    })?;
+    let commands = db::get_commands(
+        conn,
+        &db::CommandFilter {
+            since,
+            limit: Some(10_000),
+            ..Default::default()
+        },
+    )?;
 
     let entries: Vec<serde_json::Value> = commands
         .iter()

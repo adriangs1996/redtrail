@@ -260,9 +260,11 @@ fn resolve_fallback_to_failed_commands() {
         "Should find failed commands via get_commands"
     );
     assert!(
-        failed
-            .iter()
-            .any(|c| c.stderr.as_deref().unwrap_or("").contains("recipe for target")),
+        failed.iter().any(|c| c
+            .stderr
+            .as_deref()
+            .unwrap_or("")
+            .contains("recipe for target")),
         "Should find the make failure"
     );
 }

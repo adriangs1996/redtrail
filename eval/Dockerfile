@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   git \
   curl \
   ca-certificates \
+  sqlite3 \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js (required for Claude Code)

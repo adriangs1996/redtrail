@@ -5,7 +5,9 @@ use rusqlite::Connection;
 
 use crate::core::db::{self, CommandFilter, CommandRow};
 use crate::core::errors::{extract_error_lines, normalize_error};
-use crate::core::fmt::ascii::{colors_enabled, format_relative_time, BOLD, DIM, GREEN, RED, RESET, YELLOW};
+use crate::core::fmt::ascii::{
+    BOLD, DIM, GREEN, RED, RESET, YELLOW, colors_enabled, format_relative_time,
+};
 use crate::error::Error;
 
 pub struct ResolveArgs<'a> {
@@ -299,7 +301,10 @@ fn build_patterns(
     Ok(pattern_map.into_values().collect())
 }
 
-fn find_resolution(conn: &Connection, failed_cmd: &CommandRow) -> Result<Option<Resolution>, Error> {
+fn find_resolution(
+    conn: &Connection,
+    failed_cmd: &CommandRow,
+) -> Result<Option<Resolution>, Error> {
     let binary = match &failed_cmd.command_binary {
         Some(b) => b.as_str(),
         None => return Ok(None),
@@ -324,7 +329,12 @@ fn find_resolution(conn: &Connection, failed_cmd: &CommandRow) -> Result<Option<
 
     let result = stmt
         .query_row(
-            rusqlite::params![failed_cmd.session_id, binary, failed_cmd.timestamp_start, max_ts],
+            rusqlite::params![
+                failed_cmd.session_id,
+                binary,
+                failed_cmd.timestamp_start,
+                max_ts
+            ],
             |row| {
                 Ok(Resolution {
                     fix_command: row.get(0)?,
@@ -378,18 +388,13 @@ fn print_ascii(patterns: &[ErrorPattern], widened: bool) {
 
     if widened {
         if color {
-            eprintln!(
-                "{YELLOW}No matches in current project; showing global results.{RESET}"
-            );
+            eprintln!("{YELLOW}No matches in current project; showing global results.{RESET}");
         } else {
             eprintln!("No matches in current project; showing global results.");
         }
     }
 
-    println!(
-        "Found {} matching error pattern(s).",
-        patterns.len()
-    );
+    println!("Found {} matching error pattern(s).", patterns.len());
     println!();
 
     for pattern in patterns {
@@ -404,10 +409,7 @@ fn print_ascii(patterns: &[ErrorPattern], widened: bool) {
             );
         } else {
             println!("  Error: \"{sample}\"");
-            println!(
-                "  Seen: {} time(s) (last: {})",
-                pattern.occurrences, last
-            );
+            println!("  Seen: {} time(s) (last: {})", pattern.occurrences, last);
         }
 
         // Deduplicate and count resolutions

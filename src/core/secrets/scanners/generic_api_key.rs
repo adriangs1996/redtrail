@@ -9,7 +9,11 @@ struct GenericApiKeyScanner;
 
 fn is_placeholder(val: &str) -> bool {
     let upper = val.to_uppercase();
-    upper.contains("YOUR_") || upper.contains("_HERE") || upper.contains("EXAMPLE") || upper.contains("CHANGEME") || upper.contains("REPLACE")
+    upper.contains("YOUR_")
+        || upper.contains("_HERE")
+        || upper.contains("EXAMPLE")
+        || upper.contains("CHANGEME")
+        || upper.contains("REPLACE")
 }
 
 impl SecretScanner for GenericApiKeyScanner {
@@ -32,9 +36,7 @@ impl SecretScanner for GenericApiKeyScanner {
         }
 
         // Authorization: Bearer <token> (32+ chars)
-        let bearer_re = Regex::new(
-            r"(?i)Authorization:\s*Bearer\s+(\S{32,})",
-        ).unwrap();
+        let bearer_re = Regex::new(r"(?i)Authorization:\s*Bearer\s+(\S{32,})").unwrap();
         for cap in bearer_re.captures_iter(input) {
             let val = cap.get(1).unwrap();
             matches.push(SecretMatch {
@@ -45,9 +47,7 @@ impl SecretScanner for GenericApiKeyScanner {
         }
 
         // Authorization: Basic <base64> (20+ chars)
-        let basic_re = Regex::new(
-            r"(?i)Authorization:\s*Basic\s+([A-Za-z0-9+/=]{20,})",
-        ).unwrap();
+        let basic_re = Regex::new(r"(?i)Authorization:\s*Basic\s+([A-Za-z0-9+/=]{20,})").unwrap();
         for cap in basic_re.captures_iter(input) {
             let val = cap.get(1).unwrap();
             matches.push(SecretMatch {
@@ -81,7 +81,10 @@ mod tests {
 
     fn assert_ignores(input: &str, msg: &str) {
         let matches = scan(input);
-        assert!(matches.is_empty(), "should NOT detect: {msg} — input: {input}");
+        assert!(
+            matches.is_empty(),
+            "should NOT detect: {msg} — input: {input}"
+        );
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -168,10 +171,7 @@ mod tests {
 
     #[test]
     fn ignores_short_value_near_keyword() {
-        assert_ignores(
-            "api_key: abc",
-            "short value — not a real key",
-        );
+        assert_ignores("api_key: abc", "short value — not a real key");
     }
 
     #[test]

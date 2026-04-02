@@ -18,7 +18,10 @@ fn agent_context_empty_project() {
         },
     )
     .unwrap();
-    assert!(commands.is_empty(), "Expected no commands for empty project");
+    assert!(
+        commands.is_empty(),
+        "Expected no commands for empty project"
+    );
 }
 
 #[test]
@@ -60,10 +63,7 @@ fn agent_context_token_budget_trims_at_section_boundary() {
     // Section 3 starts at ~230, total is ~350.
     // Set budget to ~60 tokens (240 chars), should trim at section 2 boundary.
     let result = agent_context::trim_to_budget(&text, 60);
-    assert!(
-        result.contains("## Section 1"),
-        "Should keep section 1"
-    );
+    assert!(result.contains("## Section 1"), "Should keep section 1");
     assert!(
         result.contains("[Truncated to fit token budget]"),
         "Should include truncation notice"

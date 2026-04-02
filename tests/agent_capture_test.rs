@@ -18,11 +18,16 @@ fn capture_detects_claude_code_from_env() {
 
     redtrail_bin()
         .args([
-            "capture", "start",
-            "--session-id", "s1",
-            "--command", "git status",
-            "--shell", "zsh",
-            "--hostname", "devbox",
+            "capture",
+            "start",
+            "--session-id",
+            "s1",
+            "--command",
+            "git status",
+            "--shell",
+            "zsh",
+            "--hostname",
+            "devbox",
         ])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         .env("CLAUDE_CODE", "1")
@@ -30,9 +35,14 @@ fn capture_detects_claude_code_from_env() {
         .expect("failed to run");
 
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    let cmds =
+        redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default())
+            .unwrap();
     assert_eq!(cmds.len(), 1);
-    assert_eq!(cmds[0].source, "claude_code", "should detect Claude Code from CLAUDE_CODE env");
+    assert_eq!(
+        cmds[0].source, "claude_code",
+        "should detect Claude Code from CLAUDE_CODE env"
+    );
 }
 
 #[test]
@@ -42,11 +52,16 @@ fn capture_defaults_to_human_without_agent_env() {
 
     redtrail_bin()
         .args([
-            "capture", "start",
-            "--session-id", "s1",
-            "--command", "ls -la",
-            "--shell", "zsh",
-            "--hostname", "devbox",
+            "capture",
+            "start",
+            "--session-id",
+            "s1",
+            "--command",
+            "ls -la",
+            "--shell",
+            "zsh",
+            "--hostname",
+            "devbox",
         ])
         .env("REDTRAIL_DB", db_path.to_str().unwrap())
         // Explicitly remove agent env vars
@@ -57,6 +72,8 @@ fn capture_defaults_to_human_without_agent_env() {
         .expect("failed to run");
 
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
-    let cmds = redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default()).unwrap();
+    let cmds =
+        redtrail::core::db::get_commands(&conn, &redtrail::core::db::CommandFilter::default())
+            .unwrap();
     assert_eq!(cmds[0].source, "human");
 }

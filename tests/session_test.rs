@@ -30,7 +30,10 @@ fn create_session_stores_and_retrieves() {
 #[test]
 fn create_session_generates_unique_ids() {
     let conn = setup();
-    let s = db::NewSession { source: "human", ..Default::default() };
+    let s = db::NewSession {
+        source: "human",
+        ..Default::default()
+    };
 
     let id1 = db::create_session(&conn, &s).unwrap();
     let id2 = db::create_session(&conn, &s).unwrap();
@@ -42,30 +45,45 @@ fn commands_linked_to_session() {
     let conn = setup();
     let sid = db::create_session(
         &conn,
-        &db::NewSession { source: "human", ..Default::default() },
+        &db::NewSession {
+            source: "human",
+            ..Default::default()
+        },
     )
     .unwrap();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: &sid,
-        command_raw: "ls",
-        timestamp_start: 1000,
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: &sid,
+            command_raw: "ls",
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: &sid,
-        command_raw: "pwd",
-        timestamp_start: 1001,
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: &sid,
+            command_raw: "pwd",
+            timestamp_start: 1001,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let cmds = db::get_commands(&conn, &db::CommandFilter {
-        session_id: Some(&sid),
-        ..Default::default()
-    }).unwrap();
+    let cmds = db::get_commands(
+        &conn,
+        &db::CommandFilter {
+            session_id: Some(&sid),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(cmds.len(), 2);
     assert!(cmds.iter().all(|c| c.session_id == sid));
@@ -75,17 +93,25 @@ fn commands_linked_to_session() {
 fn list_sessions_returns_recent() {
     let conn = setup();
 
-    let s1 = db::create_session(&conn, &db::NewSession {
-        cwd_initial: Some("/project-a"),
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    let s1 = db::create_session(
+        &conn,
+        &db::NewSession {
+            cwd_initial: Some("/project-a"),
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let s2 = db::create_session(&conn, &db::NewSession {
-        cwd_initial: Some("/project-b"),
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    let s2 = db::create_session(
+        &conn,
+        &db::NewSession {
+            cwd_initial: Some("/project-b"),
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     let sessions = db::list_sessions(&conn, 10).unwrap();
     assert_eq!(sessions.len(), 2);

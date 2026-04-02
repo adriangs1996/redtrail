@@ -9,22 +9,30 @@ fn setup_db() -> (tempfile::TempDir, String) {
     let db_path = dir.path().join("test.db");
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
 
-    let sid = redtrail::core::db::create_session(&conn, &redtrail::core::db::NewSession {
-        cwd_initial: Some("/home/user/project"),
-        hostname: Some("devbox"),
-        shell: Some("zsh"),
-        source: "human",
-    }).unwrap();
+    let sid = redtrail::core::db::create_session(
+        &conn,
+        &redtrail::core::db::NewSession {
+            cwd_initial: Some("/home/user/project"),
+            hostname: Some("devbox"),
+            shell: Some("zsh"),
+            source: "human",
+        },
+    )
+    .unwrap();
 
     for i in 0..3 {
-        redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
-            session_id: &sid,
-            command_raw: &format!("cmd-{i}"),
-            exit_code: Some(0),
-            timestamp_start: 1000 + i,
-            source: "human",
-            ..Default::default()
-        }).unwrap();
+        redtrail::core::db::insert_command(
+            &conn,
+            &redtrail::core::db::NewCommand {
+                session_id: &sid,
+                command_raw: &format!("cmd-{i}"),
+                exit_code: Some(0),
+                timestamp_start: 1000 + i,
+                source: "human",
+                ..Default::default()
+            },
+        )
+        .unwrap();
     }
 
     (dir, sid)
@@ -41,9 +49,16 @@ fn sessions_lists_all_sessions() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains(&sid[..8]), "should show session ID (at least prefix), got:\n{stdout}");
+    assert!(
+        stdout.contains(&sid[..8]),
+        "should show session ID (at least prefix), got:\n{stdout}"
+    );
 }
 
 #[test]
@@ -57,7 +72,11 @@ fn session_detail_shows_commands() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("cmd-0"), "should show commands in session");
     assert!(stdout.contains("cmd-1"), "should show commands in session");

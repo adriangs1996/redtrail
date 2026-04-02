@@ -76,11 +76,21 @@ fn history_lists_commands() {
         .output()
         .expect("failed to run redtrail");
 
-    assert!(output.status.success(), "history should succeed. stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "history should succeed. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("git status"), "should show git status command");
-    assert!(stdout.contains("cargo build"), "should show cargo build command");
+    assert!(
+        stdout.contains("git status"),
+        "should show git status command"
+    );
+    assert!(
+        stdout.contains("cargo build"),
+        "should show cargo build command"
+    );
     assert!(stdout.contains("echo hello"), "should show echo command");
 }
 
@@ -99,8 +109,14 @@ fn history_failed_only() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("cargo build"), "should show failed command");
-    assert!(!stdout.contains("git status"), "should NOT show successful commands");
-    assert!(!stdout.contains("echo hello"), "should NOT show successful commands");
+    assert!(
+        !stdout.contains("git status"),
+        "should NOT show successful commands"
+    );
+    assert!(
+        !stdout.contains("echo hello"),
+        "should NOT show successful commands"
+    );
 }
 
 #[test]
@@ -118,7 +134,10 @@ fn history_filter_by_cmd() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("git status"), "should show git commands");
-    assert!(!stdout.contains("cargo build"), "should NOT show non-git commands");
+    assert!(
+        !stdout.contains("cargo build"),
+        "should NOT show non-git commands"
+    );
 }
 
 #[test]
@@ -154,7 +173,10 @@ fn history_empty_result_is_not_error() {
         .output()
         .expect("failed to run redtrail");
 
-    assert!(output.status.success(), "empty result should still be exit 0");
+    assert!(
+        output.status.success(),
+        "empty result should still be exit 0"
+    );
 }
 
 #[test]
@@ -170,8 +192,14 @@ fn history_search_finds_in_command() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("git status"), "should find 'status' in command_raw");
-    assert!(!stdout.contains("cargo build"), "should NOT show non-matching");
+    assert!(
+        stdout.contains("git status"),
+        "should find 'status' in command_raw"
+    );
+    assert!(
+        !stdout.contains("cargo build"),
+        "should NOT show non-matching"
+    );
 }
 
 #[test]
@@ -187,7 +215,10 @@ fn history_search_finds_in_stderr() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("cargo build"), "should find 'mismatched' in stderr of cargo build");
+    assert!(
+        stdout.contains("cargo build"),
+        "should find 'mismatched' in stderr of cargo build"
+    );
 }
 
 #[test]
@@ -220,10 +251,20 @@ fn history_verbose_shows_stdout_stderr() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("compiling main.c"), "verbose should show stdout");
-    assert!(stdout.contains("error: undefined reference"), "verbose should show stderr");
+    assert!(
+        stdout.contains("compiling main.c"),
+        "verbose should show stdout"
+    );
+    assert!(
+        stdout.contains("error: undefined reference"),
+        "verbose should show stderr"
+    );
 }
 
 #[test]
@@ -242,7 +283,10 @@ fn history_auto_json_when_piped() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: Result<serde_json::Value, _> = serde_json::from_str(&stdout);
-    assert!(parsed.is_ok(), "piped output should be valid JSON, got:\n{stdout}");
+    assert!(
+        parsed.is_ok(),
+        "piped output should be valid JSON, got:\n{stdout}"
+    );
     assert!(parsed.unwrap().is_array());
 }
 
@@ -295,10 +339,20 @@ fn history_cwd_dot_resolves_to_current_dir() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ls -la"), "should show command in current dir");
-    assert!(!stdout.contains("pwd"), "should NOT show command from different dir");
+    assert!(
+        stdout.contains("ls -la"),
+        "should show command in current dir"
+    );
+    assert!(
+        !stdout.contains("pwd"),
+        "should NOT show command from different dir"
+    );
 }
 
 #[test]
@@ -314,5 +368,8 @@ fn history_search_no_match() {
 
     assert!(output.status.success(), "no match should still be exit 0");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.trim().is_empty() || !stdout.contains("git"), "should return empty");
+    assert!(
+        stdout.trim().is_empty() || !stdout.contains("git"),
+        "should return empty"
+    );
 }

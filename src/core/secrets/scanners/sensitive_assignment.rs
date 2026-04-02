@@ -6,8 +6,13 @@ use crate::core::secrets::engine::{SecretMatch, SecretScanner};
 /// Strong keywords always trigger regardless of value.
 /// Weak keywords (TOKEN, KEY) only trigger when the value is >= 10 chars.
 const STRONG_KEYWORDS: &[&str] = &[
-    "secret", "password", "passwd", "credential", "private",
-    "signing", "encryption",
+    "secret",
+    "password",
+    "passwd",
+    "credential",
+    "private",
+    "signing",
+    "encryption",
 ];
 
 fn has_strong_keyword(key: &str) -> bool {
@@ -290,18 +295,12 @@ mod tests {
 
     #[test]
     fn detects_in_ci_yaml() {
-        assert_detects(
-            "  SECRET_KEY=abc123",
-            "secret in CI/CD YAML config",
-        );
+        assert_detects("  SECRET_KEY=abc123", "secret in CI/CD YAML config");
     }
 
     #[test]
     fn detects_in_systemd_env_file() {
-        assert_detects(
-            "DB_PASSWORD=hunter2",
-            "password in systemd EnvironmentFile",
-        );
+        assert_detects("DB_PASSWORD=hunter2", "password in systemd EnvironmentFile");
     }
 
     #[test]
@@ -367,10 +366,7 @@ mod tests {
 
     #[test]
     fn detects_value_with_special_characters() {
-        assert_detects(
-            "PASSWORD=p@$$w0rd!#%^",
-            "value with special characters",
-        );
+        assert_detects("PASSWORD=p@$$w0rd!#%^", "value with special characters");
     }
 
     #[test]
@@ -393,10 +389,7 @@ mod tests {
 
     #[test]
     fn detects_base64_value() {
-        assert_detects(
-            "SECRET=dGhpcyBpcyBhIHNlY3JldA==",
-            "base64-encoded value",
-        );
+        assert_detects("SECRET=dGhpcyBpcyBhIHNlY3JldA==", "base64-encoded value");
     }
 
     #[test]
@@ -410,18 +403,12 @@ mod tests {
     #[test]
     fn detects_quoted_value() {
         // Quoted values: the quotes may be part of \S+
-        assert_detects(
-            r#"PASSWORD="hunter2""#,
-            "double-quoted value",
-        );
+        assert_detects(r#"PASSWORD="hunter2""#, "double-quoted value");
     }
 
     #[test]
     fn detects_single_quoted_value() {
-        assert_detects(
-            "PASSWORD='hunter2'",
-            "single-quoted value",
-        );
+        assert_detects("PASSWORD='hunter2'", "single-quoted value");
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -431,7 +418,10 @@ mod tests {
     #[test]
     fn labels_password_key_as_password() {
         let matches = scan("DB_PASSWORD=hunter2");
-        assert_eq!(matches[0].label, "password", "PASSWORD key → password label");
+        assert_eq!(
+            matches[0].label, "password",
+            "PASSWORD key → password label"
+        );
     }
 
     #[test]
@@ -540,10 +530,7 @@ mod tests {
 
     #[test]
     fn ignores_dollar_at_env() {
-        assert_ignores(
-            "SECRET=$SECRET_FROM_VAULT",
-            "value is $ENV_VAR reference",
-        );
+        assert_ignores("SECRET=$SECRET_FROM_VAULT", "value is $ENV_VAR reference");
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -570,12 +557,18 @@ mod tests {
 
     #[test]
     fn ignores_key_without_secret_password_passwd() {
-        assert_ignores("API_KEY=abc123", "key is API_KEY, not SECRET/PASSWORD/PASSWD");
+        assert_ignores(
+            "API_KEY=abc123",
+            "key is API_KEY, not SECRET/PASSWORD/PASSWD",
+        );
     }
 
     #[test]
     fn ignores_token_assignment() {
-        assert_ignores("AUTH_TOKEN=abc123", "key is AUTH_TOKEN, no secret/password keyword");
+        assert_ignores(
+            "AUTH_TOKEN=abc123",
+            "key is AUTH_TOKEN, no secret/password keyword",
+        );
     }
 
     #[test]
@@ -679,7 +672,10 @@ mod tests {
 
     #[test]
     fn handles_assignment_at_end_of_input() {
-        assert_detects("SECRET=hunter2", "assignment at end with no trailing newline");
+        assert_detects(
+            "SECRET=hunter2",
+            "assignment at end with no trailing newline",
+        );
     }
 
     #[test]
@@ -752,9 +748,6 @@ mod tests {
 
     #[test]
     fn should_detect_credentials_assignment() {
-        assert_detects(
-            "CREDENTIALS=user:pass",
-            "CREDENTIALS= assignment",
-        );
+        assert_detects("CREDENTIALS=user:pass", "CREDENTIALS= assignment");
     }
 }

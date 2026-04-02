@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use rusqlite::Connection;
 
-use crate::core::analysis::{analyze_session, AnalysisResult};
-use crate::core::classify::{classify_command, CommandCategory};
+use crate::core::analysis::{AnalysisResult, analyze_session};
+use crate::core::classify::{CommandCategory, classify_command};
 use crate::core::db::{self, CommandFilter, CommandRow};
 use crate::core::fmt::ascii::{format_relative_time, parse_duration_ago};
 use crate::core::fmt::markdown;
@@ -121,11 +121,7 @@ fn select_recent_sessions(
     sessions: &[(String, Vec<CommandRow>)],
     since: Option<&str>,
 ) -> Vec<(String, Vec<CommandRow>)> {
-    let limit = if since.is_some() {
-        sessions.len()
-    } else {
-        3
-    };
+    let limit = if since.is_some() { sessions.len() } else { 3 };
     sessions
         .iter()
         .take(limit)
@@ -156,7 +152,10 @@ fn render_markdown(
     }
     // Last activity from most recent command across all data
     if let Some(latest_ts) = all_commands.iter().map(|c| c.timestamp_start).max() {
-        out.push_str(&format!("- **Last activity:** {}\n", format_relative_time(latest_ts)));
+        out.push_str(&format!(
+            "- **Last activity:** {}\n",
+            format_relative_time(latest_ts)
+        ));
     }
     out.push('\n');
 
@@ -206,10 +205,7 @@ fn render_markdown(
                 .count();
 
             let outcome = if a.tests_failed > resolved_test_errors {
-                format!(
-                    "{} test(s) failing.",
-                    a.tests_failed - resolved_test_errors
-                )
+                format!("{} test(s) failing.", a.tests_failed - resolved_test_errors)
             } else if a.test_runs > 0 {
                 "All tests passing.".to_string()
             } else if a.total_errors == 0 {
@@ -294,7 +290,11 @@ fn render_markdown(
     if !freq.is_empty() {
         out.push_str("## Project Workflow\nMost used commands:\n");
         for (cmd_label, count) in freq.iter().take(15) {
-            out.push_str(&format!("- `{}` (x{})\n", markdown::escape(cmd_label), count));
+            out.push_str(&format!(
+                "- `{}` (x{})\n",
+                markdown::escape(cmd_label),
+                count
+            ));
         }
         out.push('\n');
     }
@@ -380,9 +380,7 @@ fn render_json(
         })
         .collect();
 
-    let branch = analyses
-        .first()
-        .and_then(|(_, _, a)| a.branch.clone());
+    let branch = analyses.first().and_then(|(_, _, a)| a.branch.clone());
     let latest_ts = all_commands.iter().map(|c| c.timestamp_start).max();
 
     let val = serde_json::json!({
@@ -425,10 +423,7 @@ pub fn trim_to_budget(output: &str, max_tokens: usize) -> String {
     }
     let truncated = &output[..max_chars];
     if let Some(pos) = truncated.rfind("\n## ") {
-        format!(
-            "{}\n\n*[Truncated to fit token budget]*\n",
-            &output[..pos]
-        )
+        format!("{}\n\n*[Truncated to fit token budget]*\n", &output[..pos])
     } else {
         format!("{}...\n\n*[Truncated to fit token budget]*\n", truncated)
     }

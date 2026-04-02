@@ -37,9 +37,16 @@ fn query_select_returns_results() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("1"), "should show count of 1, got: {stdout}");
+    assert!(
+        stdout.contains("1"),
+        "should show count of 1, got: {stdout}"
+    );
 }
 
 #[test]
@@ -53,10 +60,7 @@ fn query_non_select_is_rejected() {
         .output()
         .expect("failed to run");
 
-    assert!(
-        !output.status.success(),
-        "DROP should be rejected"
-    );
+    assert!(!output.status.success(), "DROP should be rejected");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -92,7 +96,7 @@ fn query_json_flag() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout)
-        .expect(&format!("should be valid JSON, got: {stdout}"));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect(&format!("should be valid JSON, got: {stdout}"));
     assert!(parsed.is_array());
 }

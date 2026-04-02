@@ -32,7 +32,10 @@ mod tests {
 
     fn assert_ignores(input: &str, msg: &str) {
         let matches = scan(input);
-        assert!(matches.is_empty(), "should NOT detect: {msg} — input: {input}");
+        assert!(
+            matches.is_empty(),
+            "should NOT detect: {msg} — input: {input}"
+        );
     }
 
     // A realistic HS256 JWT (header.payload.signature)
@@ -147,7 +150,8 @@ mod tests {
 
     #[test]
     fn detects_jwt_in_curl_header() {
-        let input = format!(r#"curl -H "Authorization: Bearer {VALID_HS256}" https://api.example.com"#);
+        let input =
+            format!(r#"curl -H "Authorization: Bearer {VALID_HS256}" https://api.example.com"#);
         assert_detects(&input, "JWT in curl command");
     }
 
@@ -243,7 +247,9 @@ mod tests {
 
     #[test]
     fn detects_jwt_in_graphql_query() {
-        let input = format!(r#"{{"query": "mutation {{ login }}", "extensions": {{"token": "{VALID_HS256}"}}}}"#);
+        let input = format!(
+            r#"{{"query": "mutation {{ login }}", "extensions": {{"token": "{VALID_HS256}"}}}}"#
+        );
         assert_detects(&input, "JWT in GraphQL request body");
     }
 
@@ -331,10 +337,7 @@ mod tests {
 
     #[test]
     fn detects_jwt_with_minimal_payload() {
-        assert_detects(
-            "eyJhbGciOiJIUzI1NiJ9.eyJ9.c2ln",
-            "JWT with minimal payload",
-        );
+        assert_detects("eyJhbGciOiJIUzI1NiJ9.eyJ9.c2ln", "JWT with minimal payload");
     }
 
     #[test]
@@ -433,26 +436,17 @@ mod tests {
 
     #[test]
     fn ignores_two_dots_but_empty_segments() {
-        assert_ignores(
-            "eyJ..",
-            "eyJ with two dots but empty payload and signature",
-        );
+        assert_ignores("eyJ..", "eyJ with two dots but empty payload and signature");
     }
 
     #[test]
     fn ignores_uuid() {
-        assert_ignores(
-            "550e8400-e29b-41d4-a716-446655440000",
-            "UUID — not a JWT",
-        );
+        assert_ignores("550e8400-e29b-41d4-a716-446655440000", "UUID — not a JWT");
     }
 
     #[test]
     fn ignores_aws_key() {
-        assert_ignores(
-            "AKIAIOSFODNN7EXAMPLE",
-            "AWS access key — not a JWT",
-        );
+        assert_ignores("AKIAIOSFODNN7EXAMPLE", "AWS access key — not a JWT");
     }
 
     #[test]
@@ -481,10 +475,7 @@ mod tests {
 
     #[test]
     fn ignores_file_path_with_dots() {
-        assert_ignores(
-            "/path/to/some.file.txt",
-            "file path with dots",
-        );
+        assert_ignores("/path/to/some.file.txt", "file path with dots");
     }
 
     #[test]
@@ -623,9 +614,7 @@ mod tests {
 
     #[test]
     fn detects_jwt_in_swagger_example() {
-        let input = format!(
-            r#"securityDefinitions:\n  Bearer:\n    example: "{VALID_HS256}""#,
-        );
+        let input = format!(r#"securityDefinitions:\n  Bearer:\n    example: "{VALID_HS256}""#,);
         assert_detects(&input, "JWT hardcoded in Swagger/OpenAPI spec");
     }
 

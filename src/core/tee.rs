@@ -1,6 +1,8 @@
 use crate::config::OnDetect;
 use crate::core::db;
-use crate::core::secrets::engine::{load_custom_patterns, redact_with_custom_patterns, CustomPattern};
+use crate::core::secrets::engine::{
+    CustomPattern, load_custom_patterns, redact_with_custom_patterns,
+};
 use crate::error::Error;
 use std::os::fd::AsRawFd;
 
@@ -109,6 +111,7 @@ fn flush_to_db(
     on_detect: OnDetect,
     custom_patterns: &[CustomPattern],
     warn_logged: &mut bool,
+    redaction_logged: &mut bool,
 ) -> bool {
     let stdout_clean = strip_ansi(stdout_buf);
     let stderr_clean = strip_ansi(stderr_buf);
@@ -126,9 +129,9 @@ fn flush_to_db(
 
     match on_detect {
         OnDetect::Redact => {
-            let (stdout_redacted, _) =
+            let (stdout_redacted, stdout_labels) =
                 redact_with_custom_patterns(&stdout_clean, custom_patterns);
-            let (stderr_redacted, _) =
+            let (stderr_redacted, stderr_labels) =
                 redact_with_custom_patterns(&stderr_clean, custom_patterns);
             let so = if stdout_redacted.is_empty() {
                 None
@@ -148,6 +151,16 @@ fn flush_to_db(
                 stdout_truncated,
                 stderr_truncated,
             );
+            // Log redaction events once (first detection)
+            if !*redaction_logged && (!stdout_labels.is_empty() || !stderr_labels.is_empty()) {
+                for label in &stdout_labels {
+                    let _ = db::log_redaction(db_conn, command_id, "stdout", label);
+                }
+                for label in &stderr_labels {
+                    let _ = db::log_redaction(db_conn, command_id, "stderr", label);
+                }
+                *redaction_logged = true;
+            }
             false
         }
         OnDetect::Warn => {
@@ -172,10 +185,8 @@ fn flush_to_db(
             false
         }
         OnDetect::Block => {
-            let (_, stdout_labels) =
-                redact_with_custom_patterns(&stdout_clean, custom_patterns);
-            let (_, stderr_labels) =
-                redact_with_custom_patterns(&stderr_clean, custom_patterns);
+            let (_, stdout_labels) = redact_with_custom_patterns(&stdout_clean, custom_patterns);
+            let (_, stderr_labels) = redact_with_custom_patterns(&stderr_clean, custom_patterns);
             if !stdout_labels.is_empty() || !stderr_labels.is_empty() {
                 let _ = db::delete_command(db_conn, command_id);
                 true
@@ -191,6 +202,32 @@ fn flush_to_db(
                 false
             }
         }
+    }
+}
+
+/// Check whether the shell process is gone or a zombie.
+/// On Linux, reads `/proc/<pid>/stat` to detect zombie state (kill(pid, 0)
+/// returns success for zombies, which causes deadlocks with `script`).
+fn is_shell_gone(pid: i32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let stat_path = format!("/proc/{pid}/stat");
+        match std::fs::read_to_string(&stat_path) {
+            Ok(contents) => {
+                // Format: "pid (comm) state ..."
+                if let Some(pos) = contents.rfind(')') {
+                    let after = contents[pos + 1..].trim_start();
+                    after.starts_with('Z')
+                } else {
+                    true // can't parse → assume gone
+                }
+            }
+            Err(_) => true, // can't read → process gone
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        unsafe { nix::libc::kill(pid, 0) != 0 }
     }
 }
 
@@ -210,11 +247,12 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
         writeln!(fifo, "{} {}", stdout_pty.slave_path, stderr_pty.slave_path)?;
     }
 
-    // Keep slave fds alive — dropping them before the shell opens its own causes
-    // a race where the master sees EIO. Instead, we use SIGUSR1 from the shell's
-    // precmd to signal "flush and exit."
-    let _stdout_slave = stdout_pty.slave_fd;
-    let _stderr_slave = stderr_pty.slave_fd;
+    // Hold slave fds temporarily. We drop them after the first poll() iteration
+    // (250ms) — by then the shell has opened its own copies (~1ms after FIFO read).
+    // Dropping them means that when the shell exits, the master sees POLLHUP
+    // immediately (no deadlock with `script` waiting for slave refs to close).
+    let mut stdout_slave_hold: Option<std::os::fd::OwnedFd> = Some(stdout_pty.slave_fd);
+    let mut stderr_slave_hold: Option<std::os::fd::OwnedFd> = Some(stderr_pty.slave_fd);
 
     // Set up SIGUSR1 handler — precmd sends this to tell us to flush
     FLUSH_REQUESTED.store(false, Ordering::Relaxed);
@@ -227,14 +265,12 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     }
 
     // Open /dev/tty for relay output
-    let mut tty = std::fs::OpenOptions::new()
-        .write(true)
-        .open("/dev/tty")?;
+    let mut tty = std::fs::OpenOptions::new().write(true).open("/dev/tty")?;
 
     // Open DB connection — if this fails, tee still relays output to /dev/tty
-    let db_conn_result = resolve_db_path().ok_or_else(|| {
-        Error::Db("no DB path available".into())
-    }).and_then(|path| db::open(&path));
+    let db_conn_result = resolve_db_path()
+        .ok_or_else(|| Error::Db("no DB path available".into()))
+        .and_then(|path| db::open(&path));
 
     let db_available = db_conn_result.is_ok();
     let db_conn = db_conn_result.ok();
@@ -255,6 +291,7 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     let mut last_flush_stdout_len: usize = 0;
     let mut last_flush_stderr_len: usize = 0;
     let mut warn_logged = false;
+    let mut redaction_logged = false;
     let mut db_blocked = false;
 
     let mut stdout_buf: Vec<u8> = Vec::new();
@@ -298,11 +335,8 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 }
                 if last_orphan_check.elapsed() > orphan_check_interval {
                     last_orphan_check = std::time::Instant::now();
-                    if shell_pid > 0 {
-                        let alive = unsafe { nix::libc::kill(shell_pid, 0) };
-                        if alive != 0 {
-                            break;
-                        }
+                    if shell_pid > 0 && is_shell_gone(shell_pid) {
+                        break;
                     }
                 }
             }
@@ -314,6 +348,13 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 continue;
             }
             Err(_) => break,
+        }
+
+        // After the first poll returns, the shell has had time to open the slave
+        // fds. Drop our copies so the master sees POLLHUP when the shell exits.
+        if stdout_slave_hold.is_some() {
+            stdout_slave_hold.take();
+            stderr_slave_hold.take();
         }
 
         let mut pf_idx = 0;
@@ -386,6 +427,7 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                         on_detect,
                         &custom_patterns,
                         &mut warn_logged,
+                        &mut redaction_logged,
                     );
                 }
                 last_flush_stdout_len = stdout_buf.len();
@@ -400,20 +442,21 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
         let stdout_has_new = stdout_buf.len() > last_flush_stdout_len;
         let stderr_has_new = stderr_buf.len() > last_flush_stderr_len;
 
-        if stdout_has_new || stderr_has_new {
-            if let Some(ref conn) = db_conn {
-                flush_to_db(
-                    conn,
-                    &config.command_id,
-                    &stdout_buf,
-                    &stderr_buf,
-                    stdout_truncated,
-                    stderr_truncated,
-                    on_detect,
-                    &custom_patterns,
-                    &mut warn_logged,
-                );
-            }
+        if (stdout_has_new || stderr_has_new)
+            && let Some(ref conn) = db_conn
+        {
+            flush_to_db(
+                conn,
+                &config.command_id,
+                &stdout_buf,
+                &stderr_buf,
+                stdout_truncated,
+                stderr_truncated,
+                on_detect,
+                &custom_patterns,
+                &mut warn_logged,
+                &mut redaction_logged,
+            );
         }
     }
 

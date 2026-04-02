@@ -8,10 +8,8 @@ impl SecretScanner for CliPasswordFlagScanner {
         let mut matches = Vec::new();
 
         // mysql/mysqldump -pPASSWORD (no space, unquoted)
-        let unquoted = Regex::new(
-            r#"(?:mysql|mysqldump)\b[^\n]*\s-p([^\s'"]\S*)(?:\s|$)"#,
-        )
-        .unwrap();
+        let unquoted =
+            Regex::new(r#"(?:mysql|mysqldump)\b[^\n]*\s-p([^\s'"]\S*)(?:\s|$)"#).unwrap();
         for cap in unquoted.captures_iter(input) {
             let val = cap.get(1).unwrap();
             matches.push(SecretMatch {
@@ -22,10 +20,7 @@ impl SecretScanner for CliPasswordFlagScanner {
         }
 
         // mysql/mysqldump -p'PASSWORD' (single-quoted)
-        let single_q = Regex::new(
-            r"(?:mysql|mysqldump)\b[^\n]*\s-p'([^']+)'",
-        )
-        .unwrap();
+        let single_q = Regex::new(r"(?:mysql|mysqldump)\b[^\n]*\s-p'([^']+)'").unwrap();
         for cap in single_q.captures_iter(input) {
             let val = cap.get(1).unwrap();
             matches.push(SecretMatch {
@@ -36,10 +31,7 @@ impl SecretScanner for CliPasswordFlagScanner {
         }
 
         // mysql/mysqldump -p"PASSWORD" (double-quoted)
-        let double_q = Regex::new(
-            r#"(?:mysql|mysqldump)\b[^\n]*\s-p"([^"]+)""#,
-        )
-        .unwrap();
+        let double_q = Regex::new(r#"(?:mysql|mysqldump)\b[^\n]*\s-p"([^"]+)""#).unwrap();
         for cap in double_q.captures_iter(input) {
             let val = cap.get(1).unwrap();
             matches.push(SecretMatch {
@@ -50,10 +42,7 @@ impl SecretScanner for CliPasswordFlagScanner {
         }
 
         // mysql/mysqldump --password=VALUE
-        let long_flag = Regex::new(
-            r"(?:mysql|mysqldump)\b[^\n]*\s--password=(\S+)",
-        )
-        .unwrap();
+        let long_flag = Regex::new(r"(?:mysql|mysqldump)\b[^\n]*\s--password=(\S+)").unwrap();
         for cap in long_flag.captures_iter(input) {
             let val = cap.get(1).unwrap();
             matches.push(SecretMatch {
@@ -101,7 +90,10 @@ mod tests {
 
     fn assert_ignores(input: &str, msg: &str) {
         let matches = scan(input);
-        assert!(matches.is_empty(), "should NOT detect: {msg} — input: {input}");
+        assert!(
+            matches.is_empty(),
+            "should NOT detect: {msg} — input: {input}"
+        );
     }
 
     // ──────────────────────────────────────────────────────────────

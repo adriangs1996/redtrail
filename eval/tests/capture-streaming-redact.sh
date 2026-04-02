@@ -15,20 +15,17 @@ setopt NO_HUP
 setopt NO_CHECK_JOBS
 EOF
 
+# Foreground command outputs a secret between sleeps — tee is alive the whole time.
+# Semicolon-chained so it's one command line (one tee instance).
 cat >"$TMPDIR/commands.txt" <<'CMDS'
-{ sleep 1; echo "key=AKIAIOSFODNN7EXAMPLE"; sleep 2; } &
-BGPID=$!
-sleep 3
-/usr/local/bin/redtrail query "SELECT stdout FROM commands WHERE stdout IS NOT NULL ORDER BY timestamp_start DESC LIMIT 1" --json > /tmp/rt-redact-mid.json 2>/dev/null
-wait $BGPID 2>/dev/null
-sleep 2
+echo "before-secret"; sleep 2; echo "key=AKIAIOSFODNN7EXAMPLE"; sleep 2; echo "after-secret"
 exit
 CMDS
 
 HOME="$TMPDIR" script -q -c "zsh -i" /dev/null <"$TMPDIR/commands.txt" >/dev/null 2>&1 || true
 
-# Check: raw key should NOT be in DB
-FINAL=$("$RT" query "SELECT stdout FROM commands WHERE stdout LIKE '%AKIA%' OR stdout LIKE '%REDACTED%' ORDER BY timestamp_start DESC LIMIT 1" --json 2>/dev/null)
+# Check: raw key should NOT be in DB, REDACTED marker should be present
+FINAL=$("$RT" query "SELECT stdout FROM commands WHERE stdout IS NOT NULL AND command_raw LIKE '%before-secret%' LIMIT 1" --json 2>/dev/null)
 
 echo "$FINAL" | grep -q "AKIAIOSFODNN7EXAMPLE" && {
   echo "FAIL: raw AWS key found in DB (should be redacted)"

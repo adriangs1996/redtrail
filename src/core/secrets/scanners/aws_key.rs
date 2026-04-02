@@ -13,9 +13,7 @@ impl SecretScanner for AwsKeyScanner {
             // Reject if preceded by an uppercase letter (e.g. "FAKIA...")
             // Lowercase/digits/symbols are fine — they indicate the key is
             // embedded in noise or after a delimiter, not part of a longer identifier.
-            if m.start() > 0
-                && input.as_bytes()[m.start() - 1].is_ascii_uppercase()
-            {
+            if m.start() > 0 && input.as_bytes()[m.start() - 1].is_ascii_uppercase() {
                 continue;
             }
             matches.push(SecretMatch {
@@ -81,7 +79,10 @@ mod tests {
 
     fn assert_ignores(input: &str, msg: &str) {
         let matches = scan(input);
-        assert!(matches.is_empty(), "should NOT detect: {msg} — input: {input}");
+        assert!(
+            matches.is_empty(),
+            "should NOT detect: {msg} — input: {input}"
+        );
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -95,12 +96,18 @@ mod tests {
 
     #[test]
     fn detects_akia_key_all_uppercase_letters() {
-        assert_detects("AKIAZZZZZZZZZZZZZZZZ", "AKIA key with all uppercase letters");
+        assert_detects(
+            "AKIAZZZZZZZZZZZZZZZZ",
+            "AKIA key with all uppercase letters",
+        );
     }
 
     #[test]
     fn detects_akia_key_all_digits() {
-        assert_detects("AKIA1234567890123456", "AKIA key with all digits after prefix");
+        assert_detects(
+            "AKIA1234567890123456",
+            "AKIA key with all digits after prefix",
+        );
     }
 
     #[test]
@@ -389,7 +396,10 @@ mod tests {
 
     #[test]
     fn detects_key_surrounded_by_whitespace_only() {
-        assert_detects("   AKIAIOSFODNN7EXAMPLE   ", "key with surrounding whitespace");
+        assert_detects(
+            "   AKIAIOSFODNN7EXAMPLE   ",
+            "key with surrounding whitespace",
+        );
     }
 
     #[test]
@@ -399,10 +409,7 @@ mod tests {
 
     #[test]
     fn detects_key_on_its_own_line() {
-        assert_detects(
-            "line1\nAKIAIOSFODNN7EXAMPLE\nline3",
-            "key alone on a line",
-        );
+        assert_detects("line1\nAKIAIOSFODNN7EXAMPLE\nline3", "key alone on a line");
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -429,7 +436,10 @@ mod tests {
 
     #[test]
     fn ignores_env_var_reference_without_value() {
-        assert_ignores("echo $AWS_ACCESS_KEY_ID", "shell variable reference (no value)");
+        assert_ignores(
+            "echo $AWS_ACCESS_KEY_ID",
+            "shell variable reference (no value)",
+        );
     }
 
     #[test]
@@ -445,27 +455,42 @@ mod tests {
     #[test]
     fn ignores_akia_prefix_too_short() {
         // Only 15 chars after AKIA — not a valid key
-        assert_ignores("AKIAIOSFODNN7EXAMPL", "AKIA prefix + only 15 chars (too short)");
+        assert_ignores(
+            "AKIAIOSFODNN7EXAMPL",
+            "AKIA prefix + only 15 chars (too short)",
+        );
     }
 
     #[test]
     fn ignores_partial_prefix_aki() {
-        assert_ignores("AKIIOSFODNN7EXAMPLE1", "AKI without the A — not AKIA prefix");
+        assert_ignores(
+            "AKIIOSFODNN7EXAMPLE1",
+            "AKI without the A — not AKIA prefix",
+        );
     }
 
     #[test]
     fn ignores_wrong_prefix_abia() {
-        assert_ignores("ABIAIOSFODNN7EXAMPLE", "ABIA prefix — not a valid AWS key prefix");
+        assert_ignores(
+            "ABIAIOSFODNN7EXAMPLE",
+            "ABIA prefix — not a valid AWS key prefix",
+        );
     }
 
     #[test]
     fn ignores_wrong_prefix_acia() {
-        assert_ignores("ACIAIOSFODNN7EXAMPLE", "ACIA prefix — not a valid AWS key prefix");
+        assert_ignores(
+            "ACIAIOSFODNN7EXAMPLE",
+            "ACIA prefix — not a valid AWS key prefix",
+        );
     }
 
     #[test]
     fn ignores_wrong_prefix_adia() {
-        assert_ignores("ADIAIOSFODNN7EXAMPLE", "ADIA prefix — not a valid AWS key prefix");
+        assert_ignores(
+            "ADIAIOSFODNN7EXAMPLE",
+            "ADIA prefix — not a valid AWS key prefix",
+        );
     }
 
     #[test]
@@ -569,10 +594,7 @@ mod tests {
 
     #[test]
     fn handles_emoji_surrounding_key() {
-        assert_detects(
-            "🔑AKIAIOSFODNN7EXAMPLE🔑",
-            "key surrounded by emoji",
-        );
+        assert_detects("🔑AKIAIOSFODNN7EXAMPLE🔑", "key surrounded by emoji");
     }
 
     #[test]
@@ -589,7 +611,11 @@ mod tests {
         let line = "key=AKIAIOSFODNN7EXAMPLE\n";
         let input = line.repeat(100);
         let matches = scan(&input);
-        assert_eq!(matches.len(), 100, "should find one key per line × 100 lines");
+        assert_eq!(
+            matches.len(),
+            100,
+            "should find one key per line × 100 lines"
+        );
     }
 
     #[test]

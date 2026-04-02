@@ -79,20 +79,40 @@ fn insert_command_generates_uuid_id() {
 fn get_commands_filters_by_exit_code() {
     let conn = setup();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "true", exit_code: Some(0),
-        timestamp_start: 1000, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "true",
+            exit_code: Some(0),
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "false", exit_code: Some(1),
-        timestamp_start: 1001, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "false",
+            exit_code: Some(1),
+            timestamp_start: 1001,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let failed = db::get_commands(&conn, &db::CommandFilter {
-        failed_only: true,
-        ..Default::default()
-    }).unwrap();
+    let failed = db::get_commands(
+        &conn,
+        &db::CommandFilter {
+            failed_only: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].command_raw, "false");
@@ -102,20 +122,40 @@ fn get_commands_filters_by_exit_code() {
 fn get_commands_filters_by_binary() {
     let conn = setup();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "git status", command_binary: Some("git"),
-        timestamp_start: 1000, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "git status",
+            command_binary: Some("git"),
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "ls -la", command_binary: Some("ls"),
-        timestamp_start: 1001, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "ls -la",
+            command_binary: Some("ls"),
+            timestamp_start: 1001,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let git_cmds = db::get_commands(&conn, &db::CommandFilter {
-        command_binary: Some("git"),
-        ..Default::default()
-    }).unwrap();
+    let git_cmds = db::get_commands(
+        &conn,
+        &db::CommandFilter {
+            command_binary: Some("git"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(git_cmds.len(), 1);
     assert_eq!(git_cmds[0].command_raw, "git status");
@@ -125,20 +165,40 @@ fn get_commands_filters_by_binary() {
 fn get_commands_filters_by_cwd() {
     let conn = setup();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "make", cwd: Some("/home/user/project"),
-        timestamp_start: 1000, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "make",
+            cwd: Some("/home/user/project"),
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "ls", cwd: Some("/tmp"),
-        timestamp_start: 1001, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "ls",
+            cwd: Some("/tmp"),
+            timestamp_start: 1001,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let project_cmds = db::get_commands(&conn, &db::CommandFilter {
-        cwd: Some("/home/user/project"),
-        ..Default::default()
-    }).unwrap();
+    let project_cmds = db::get_commands(
+        &conn,
+        &db::CommandFilter {
+            cwd: Some("/home/user/project"),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(project_cmds.len(), 1);
     assert_eq!(project_cmds[0].command_raw, "make");
@@ -149,16 +209,27 @@ fn get_commands_respects_limit() {
     let conn = setup();
 
     for i in 0..10 {
-        db::insert_command(&conn, &db::NewCommand {
-            session_id: "s1", command_raw: &format!("cmd-{i}"),
-            timestamp_start: 1000 + i, source: "human", ..Default::default()
-        }).unwrap();
+        db::insert_command(
+            &conn,
+            &db::NewCommand {
+                session_id: "s1",
+                command_raw: &format!("cmd-{i}"),
+                timestamp_start: 1000 + i,
+                source: "human",
+                ..Default::default()
+            },
+        )
+        .unwrap();
     }
 
-    let cmds = db::get_commands(&conn, &db::CommandFilter {
-        limit: Some(3),
-        ..Default::default()
-    }).unwrap();
+    let cmds = db::get_commands(
+        &conn,
+        &db::CommandFilter {
+            limit: Some(3),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(cmds.len(), 3);
     // Most recent first
@@ -170,22 +241,40 @@ fn get_commands_filters_by_since_timestamp() {
     let conn = setup();
 
     // Old command (yesterday-ish)
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "echo old",
-        timestamp_start: 1000, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "echo old",
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Recent command
     let recent_ts = now_ts();
-    db::insert_command(&conn, &db::NewCommand {
-        session_id: "s1", command_raw: "echo recent",
-        timestamp_start: recent_ts, source: "human", ..Default::default()
-    }).unwrap();
+    db::insert_command(
+        &conn,
+        &db::NewCommand {
+            session_id: "s1",
+            command_raw: "echo recent",
+            timestamp_start: recent_ts,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
-    let cmds = db::get_commands(&conn, &db::CommandFilter {
-        since: Some(recent_ts - 10),
-        ..Default::default()
-    }).unwrap();
+    let cmds = db::get_commands(
+        &conn,
+        &db::CommandFilter {
+            since: Some(recent_ts - 10),
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     assert_eq!(cmds.len(), 1);
     assert_eq!(cmds[0].command_raw, "echo recent");

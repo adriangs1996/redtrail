@@ -15,7 +15,10 @@ fn parse_command_with_flags() {
     assert_eq!(parsed.binary, "git");
     assert_eq!(parsed.subcommand.as_deref(), Some("commit"));
     assert!(parsed.flags.contains_key("-m"), "should capture -m flag");
-    assert!(parsed.flags.contains_key("--amend"), "should capture --amend flag");
+    assert!(
+        parsed.flags.contains_key("--amend"),
+        "should capture --amend flag"
+    );
 }
 
 #[test]

@@ -1,7 +1,9 @@
 use crate::config::{Config, OnDetect};
 use crate::core::capture;
 use crate::core::db;
-use crate::core::secrets::engine::{load_custom_patterns, redact_with_custom_patterns, CustomPattern};
+use crate::core::secrets::engine::{
+    CustomPattern, load_custom_patterns, redact_with_custom_patterns,
+};
 use crate::error::Error;
 use rusqlite::Connection;
 
@@ -46,6 +48,7 @@ pub fn start(conn: &Connection, args: &StartArgs) -> Result<(), Error> {
         .unwrap_or_default();
 
     // Secret handling on command_raw
+    let mut cmd_raw_labels: Vec<String> = Vec::new();
     let command_raw: std::borrow::Cow<str> = match args.config.secrets.on_detect {
         OnDetect::Block => {
             let (_, labels) = redact_with_custom_patterns(args.command, &custom_patterns);
@@ -55,7 +58,8 @@ pub fn start(conn: &Connection, args: &StartArgs) -> Result<(), Error> {
             std::borrow::Cow::Borrowed(args.command)
         }
         OnDetect::Redact => {
-            let (redacted, _) = redact_with_custom_patterns(args.command, &custom_patterns);
+            let (redacted, labels) = redact_with_custom_patterns(args.command, &custom_patterns);
+            cmd_raw_labels = labels;
             std::borrow::Cow::Owned(redacted)
         }
         OnDetect::Warn => {
@@ -66,16 +70,18 @@ pub fn start(conn: &Connection, args: &StartArgs) -> Result<(), Error> {
                     labels.join(", ")
                 );
             }
+            cmd_raw_labels = labels;
             std::borrow::Cow::Borrowed(args.command)
         }
     };
 
-    let redacted = command_raw.as_ref() != args.command;
+    // Secrets detected = string was modified (redact) or labels found (warn)
+    let redacted = !cmd_raw_labels.is_empty();
 
     let args_json = serde_json::to_string(&parsed.args).unwrap_or_default();
     let flags_json = serde_json::to_string(&parsed.flags).unwrap_or_default();
 
-    let _ = db::cleanup_orphaned_commands(conn, args.session_id);
+    let _ = db::cleanup_orphaned_commands(conn);
 
     let id = db::insert_command_start(
         conn,
@@ -97,6 +103,11 @@ pub fn start(conn: &Connection, args: &StartArgs) -> Result<(), Error> {
             redacted,
         },
     )?;
+
+    // Log redaction events for command_raw (audit trail)
+    for label in &cmd_raw_labels {
+        let _ = db::log_redaction(conn, &id, "command_raw", label);
+    }
 
     print!("{id}");
     Ok(())
@@ -145,12 +156,16 @@ pub fn finish(conn: &Connection, args: &FinishArgs) -> Result<(), Error> {
     // Handle on_detect modes on final stdout/stderr
     match args.config.secrets.on_detect {
         OnDetect::Block => {
-            let stdout_has_secrets = stdout
-                .as_deref()
-                .is_some_and(|s| !redact_with_custom_patterns(s, &custom_patterns).1.is_empty());
-            let stderr_has_secrets = stderr
-                .as_deref()
-                .is_some_and(|s| !redact_with_custom_patterns(s, &custom_patterns).1.is_empty());
+            let stdout_has_secrets = stdout.as_deref().is_some_and(|s| {
+                !redact_with_custom_patterns(s, &custom_patterns)
+                    .1
+                    .is_empty()
+            });
+            let stderr_has_secrets = stderr.as_deref().is_some_and(|s| {
+                !redact_with_custom_patterns(s, &custom_patterns)
+                    .1
+                    .is_empty()
+            });
 
             if stdout_has_secrets || stderr_has_secrets {
                 db::delete_command(conn, args.command_id)?;
@@ -158,13 +173,21 @@ pub fn finish(conn: &Connection, args: &FinishArgs) -> Result<(), Error> {
             }
         }
         OnDetect::Redact => {
-            // Re-redact full content (defense-in-depth)
-            let redacted_stdout = stdout
+            // Re-redact full content (defense-in-depth) and log redaction events
+            let (redacted_stdout, stdout_labels) = stdout
                 .as_deref()
-                .map(|s| redact_with_custom_patterns(s, &custom_patterns).0);
-            let redacted_stderr = stderr
+                .map(|s| {
+                    let (r, l) = redact_with_custom_patterns(s, &custom_patterns);
+                    (Some(r), l)
+                })
+                .unwrap_or((None, Vec::new()));
+            let (redacted_stderr, stderr_labels) = stderr
                 .as_deref()
-                .map(|s| redact_with_custom_patterns(s, &custom_patterns).0);
+                .map(|s| {
+                    let (r, l) = redact_with_custom_patterns(s, &custom_patterns);
+                    (Some(r), l)
+                })
+                .unwrap_or((None, Vec::new()));
 
             db::finish_command(
                 conn,
@@ -178,6 +201,14 @@ pub fn finish(conn: &Connection, args: &FinishArgs) -> Result<(), Error> {
                     stderr: redacted_stderr.as_deref(),
                 },
             )?;
+
+            // Audit: log redaction events for stdout/stderr
+            for label in &stdout_labels {
+                let _ = db::log_redaction(conn, args.command_id, "stdout", label);
+            }
+            for label in &stderr_labels {
+                let _ = db::log_redaction(conn, args.command_id, "stderr", label);
+            }
 
             let max_bytes = args.config.capture.max_stdout_bytes;
             let _ = db::compress_command_output_if_needed(conn, args.command_id, max_bytes);

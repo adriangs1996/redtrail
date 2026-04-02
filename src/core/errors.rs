@@ -6,17 +6,13 @@ use regex::Regex;
 use crate::core::classify::classify_command;
 use crate::core::db::CommandRow;
 
-static RE_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:/[a-zA-Z0-9_.@-]+){2,}(?:\.[a-zA-Z0-9]+)?").unwrap()
-});
+static RE_PATH: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:/[a-zA-Z0-9_.@-]+){2,}(?:\.[a-zA-Z0-9]+)?").unwrap());
 
-static RE_LINE_COL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r":\d+:\d+:?").unwrap()
-});
+static RE_LINE_COL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":\d+:\d+:?").unwrap());
 
-static RE_TIMESTAMP_ISO: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[Z\d:.+-]*").unwrap()
-});
+static RE_TIMESTAMP_ISO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[Z\d:.+-]*").unwrap());
 
 /// Normalize an error message for matching:
 /// strips ANSI, file paths, line numbers, timestamps, lowercases, trims.
@@ -134,4 +130,3 @@ pub fn detect_error_fix_sequences(commands: &[CommandRow]) -> Vec<ErrorFixSequen
     }
     sequences
 }
-

@@ -74,7 +74,9 @@ fn make_event(session_id: &str) -> db::AgentEvent {
         redacted: false,
         tool_name: "Bash".into(),
         tool_input: Some(r#"{"command":"git push origin main"}"#.into()),
-        tool_response: Some(r#"{"stdout":"Everything up-to-date","stderr":"","exitCode":0}"#.into()),
+        tool_response: Some(
+            r#"{"stdout":"Everything up-to-date","stderr":"","exitCode":0}"#.into(),
+        ),
     }
 }
 
@@ -262,21 +264,11 @@ fn find_or_create_reuses_existing_session() {
 #[test]
 fn different_agent_sessions_get_different_redtrail_sessions() {
     let conn = setup();
-    let id1 = db::find_or_create_agent_session(
-        &conn,
-        "claude-session-1",
-        None,
-        "claude_code",
-    )
-    .unwrap();
+    let id1 =
+        db::find_or_create_agent_session(&conn, "claude-session-1", None, "claude_code").unwrap();
 
-    let id2 = db::find_or_create_agent_session(
-        &conn,
-        "claude-session-2",
-        None,
-        "claude_code",
-    )
-    .unwrap();
+    let id2 =
+        db::find_or_create_agent_session(&conn, "claude-session-2", None, "claude_code").unwrap();
 
     assert_ne!(id1, id2);
 }

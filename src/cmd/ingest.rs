@@ -26,12 +26,8 @@ pub fn run(conn: &Connection) -> Result<(), Error> {
     let agent_session_id = payload["session_id"].as_str().unwrap_or("unknown");
 
     // Find or create a RedTrail session for this agent session
-    let session_id = db::find_or_create_agent_session(
-        conn,
-        agent_session_id,
-        cwd.as_deref(),
-        "claude_code",
-    )?;
+    let session_id =
+        db::find_or_create_agent_session(conn, agent_session_id, cwd.as_deref(), "claude_code")?;
 
     // Derive command_raw — human-readable summary
     let command_raw = derive_command_raw(&tool_name, tool_input);
@@ -63,10 +59,18 @@ pub fn run(conn: &Connection) -> Result<(), Error> {
     let r_tool_response = tool_response_str.as_deref().map(redact_secrets);
 
     let was_redacted = r_command_raw != command_raw
-        || stdout.as_deref().is_some_and(|s| r_stdout.as_deref() != Some(s))
-        || stderr.as_deref().is_some_and(|s| r_stderr.as_deref() != Some(s))
-        || tool_input_str.as_deref().is_some_and(|s| r_tool_input.as_deref() != Some(s))
-        || tool_response_str.as_deref().is_some_and(|s| r_tool_response.as_deref() != Some(s));
+        || stdout
+            .as_deref()
+            .is_some_and(|s| r_stdout.as_deref() != Some(s))
+        || stderr
+            .as_deref()
+            .is_some_and(|s| r_stderr.as_deref() != Some(s))
+        || tool_input_str
+            .as_deref()
+            .is_some_and(|s| r_tool_input.as_deref() != Some(s))
+        || tool_response_str
+            .as_deref()
+            .is_some_and(|s| r_tool_response.as_deref() != Some(s));
 
     // Truncate tool_response for storage
     let r_tool_response = r_tool_response.map(|s| {
@@ -109,30 +113,12 @@ pub fn run(conn: &Connection) -> Result<(), Error> {
 
 fn derive_command_raw(tool_name: &str, tool_input: &serde_json::Value) -> String {
     match tool_name {
-        "Bash" => tool_input["command"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
-        "Edit" => format!(
-            "Edit {}",
-            tool_input["file_path"].as_str().unwrap_or("?")
-        ),
-        "Write" => format!(
-            "Write {}",
-            tool_input["file_path"].as_str().unwrap_or("?")
-        ),
-        "Read" => format!(
-            "Read {}",
-            tool_input["file_path"].as_str().unwrap_or("?")
-        ),
-        "Glob" => format!(
-            "Glob {}",
-            tool_input["pattern"].as_str().unwrap_or("?")
-        ),
-        "Grep" => format!(
-            "Grep {}",
-            tool_input["pattern"].as_str().unwrap_or("?")
-        ),
+        "Bash" => tool_input["command"].as_str().unwrap_or("").to_string(),
+        "Edit" => format!("Edit {}", tool_input["file_path"].as_str().unwrap_or("?")),
+        "Write" => format!("Write {}", tool_input["file_path"].as_str().unwrap_or("?")),
+        "Read" => format!("Read {}", tool_input["file_path"].as_str().unwrap_or("?")),
+        "Glob" => format!("Glob {}", tool_input["pattern"].as_str().unwrap_or("?")),
+        "Grep" => format!("Grep {}", tool_input["pattern"].as_str().unwrap_or("?")),
         "Agent" => format!(
             "Agent {}",
             tool_input["description"].as_str().unwrap_or("?")
@@ -152,19 +138,24 @@ fn derive_command_raw(tool_name: &str, tool_input: &serde_json::Value) -> String
 fn derive_parsed_fields(
     tool_name: &str,
     tool_input: &serde_json::Value,
-) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
-    if tool_name == "Bash" {
-        if let Some(cmd) = tool_input["command"].as_str() {
-            let parsed = capture::parse_command(cmd);
-            let binary = if parsed.binary.is_empty() {
-                None
-            } else {
-                Some(parsed.binary)
-            };
-            let args = serde_json::to_string(&parsed.args).ok();
-            let flags = serde_json::to_string(&parsed.flags).ok();
-            return (binary, parsed.subcommand, args, flags);
-        }
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    if tool_name == "Bash"
+        && let Some(cmd) = tool_input["command"].as_str()
+    {
+        let parsed = capture::parse_command(cmd);
+        let binary = if parsed.binary.is_empty() {
+            None
+        } else {
+            Some(parsed.binary)
+        };
+        let args = serde_json::to_string(&parsed.args).ok();
+        let flags = serde_json::to_string(&parsed.flags).ok();
+        return (binary, parsed.subcommand, args, flags);
     }
     // Non-Bash: tool_name as command_binary
     (Some(tool_name.to_string()), None, None, None)

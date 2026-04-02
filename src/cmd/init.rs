@@ -88,9 +88,14 @@ __redtrail_precmd() {
         exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR}
         exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&-
 
-        # Signal tee to flush and exit, then wait for it (poll — disowned jobs can't use wait)
+        # Signal tee to flush and exit, then wait with timeout (poll — disowned jobs can't use wait)
         kill -USR1 "$__RT_TEE_PID" 2>/dev/null
-        while kill -0 "$__RT_TEE_PID" 2>/dev/null; do :; done
+        local __rt_w=0
+        while kill -0 "$__RT_TEE_PID" 2>/dev/null; do
+            sleep 0.01
+            (( __rt_w++ ))
+            (( __rt_w >= 200 )) && { kill -9 "$__RT_TEE_PID" 2>/dev/null; break; }
+        done
     fi
 
     [[ -z "$__REDTRAIL_CMD_ID" ]] && return
@@ -208,9 +213,14 @@ __redtrail_precmd() {
         exec 1>&${__RT_SAVE_OUT} 2>&${__RT_SAVE_ERR}
         exec {__RT_SAVE_OUT}>&- {__RT_SAVE_ERR}>&-
 
-        # Signal tee to flush and exit, then wait for it (poll — disowned jobs can't use wait)
+        # Signal tee to flush and exit, then wait with timeout (poll — disowned jobs can't use wait)
         kill -USR1 "$__RT_TEE_PID" 2>/dev/null
-        while kill -0 "$__RT_TEE_PID" 2>/dev/null; do :; done
+        local __rt_w=0
+        while kill -0 "$__RT_TEE_PID" 2>/dev/null; do
+            sleep 0.01
+            (( __rt_w++ )) || true
+            (( __rt_w >= 200 )) && { kill -9 "$__RT_TEE_PID" 2>/dev/null; break; }
+        done
     fi
 
     if [ -z "$__REDTRAIL_CMD_ID" ]; then

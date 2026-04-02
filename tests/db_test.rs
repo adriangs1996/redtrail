@@ -7,12 +7,7 @@ fn setup() -> rusqlite::Connection {
 #[test]
 fn schema_creates_all_core_tables() {
     let conn = setup();
-    let expected_tables = [
-        "commands",
-        "sessions",
-        "entities",
-        "relationships",
-    ];
+    let expected_tables = ["commands", "sessions", "entities", "relationships"];
     for table in &expected_tables {
         let exists: bool = conn
             .query_row(
@@ -28,11 +23,7 @@ fn schema_creates_all_core_tables() {
 #[test]
 fn schema_creates_pattern_mining_tables() {
     let conn = setup();
-    let expected_tables = [
-        "patterns",
-        "error_resolutions",
-        "suggestions",
-    ];
+    let expected_tables = ["patterns", "error_resolutions", "suggestions"];
     for table in &expected_tables {
         let exists: bool = conn
             .query_row(
@@ -108,7 +99,11 @@ fn commands_table_has_required_columns() {
         "UPDATE commands SET agent_session_id = 'abc', parent_process = 'node', is_automated = 1 WHERE id = 'cmd-1'",
         [],
     );
-    assert!(result2.is_ok(), "agent columns should exist: {:?}", result2.err());
+    assert!(
+        result2.is_ok(),
+        "agent columns should exist: {:?}",
+        result2.err()
+    );
 }
 
 #[test]
@@ -149,7 +144,11 @@ fn pragma_optimize_does_not_error() {
     // Double-check by running it explicitly — if there's a schema problem
     // this will fail.
     let result = conn.execute_batch("PRAGMA optimize;");
-    assert!(result.is_ok(), "PRAGMA optimize should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "PRAGMA optimize should succeed: {:?}",
+        result.err()
+    );
 }
 
 // --- Streaming capture tests ---
@@ -168,7 +167,7 @@ fn commands_table_has_status_column() {
 
 #[test]
 fn new_command_defaults_to_finished() {
-    use redtrail::core::db::{insert_command, NewCommand};
+    use redtrail::core::db::{NewCommand, insert_command};
     let conn = setup();
     let cmd = NewCommand {
         session_id: "sess-1",
@@ -179,18 +178,19 @@ fn new_command_defaults_to_finished() {
     };
     let id = insert_command(&conn, &cmd).unwrap();
     let status: String = conn
-        .query_row(
-            "SELECT status FROM commands WHERE id = ?1",
-            [&id],
-            |r| r.get(0),
-        )
+        .query_row("SELECT status FROM commands WHERE id = ?1", [&id], |r| {
+            r.get(0)
+        })
         .unwrap();
-    assert_eq!(status, "finished", "insert_command should default status to 'finished'");
+    assert_eq!(
+        status, "finished",
+        "insert_command should default status to 'finished'"
+    );
 }
 
 #[test]
 fn insert_command_start_creates_running_row() {
-    use redtrail::core::db::{insert_command_start, NewCommandStart};
+    use redtrail::core::db::{NewCommandStart, insert_command_start};
     let conn = setup();
     let id = insert_command_start(
         &conn,
@@ -209,14 +209,17 @@ fn insert_command_start_creates_running_row() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!(status, "running", "insert_command_start should set status = 'running'");
+    assert_eq!(
+        status, "running",
+        "insert_command_start should set status = 'running'"
+    );
     assert!(stdout.is_none(), "stdout should be NULL on start");
     assert!(exit_code.is_none(), "exit_code should be NULL on start");
 }
 
 #[test]
 fn update_command_output_writes_stdout() {
-    use redtrail::core::db::{insert_command_start, update_command_output, NewCommandStart};
+    use redtrail::core::db::{NewCommandStart, insert_command_start, update_command_output};
     let conn = setup();
     let id = insert_command_start(
         &conn,
@@ -230,18 +233,18 @@ fn update_command_output_writes_stdout() {
     .unwrap();
     update_command_output(&conn, &id, Some("line1\nline2"), None, false, false).unwrap();
     let stdout: Option<String> = conn
-        .query_row(
-            "SELECT stdout FROM commands WHERE id = ?1",
-            [&id],
-            |r| r.get(0),
-        )
+        .query_row("SELECT stdout FROM commands WHERE id = ?1", [&id], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(stdout.as_deref(), Some("line1\nline2"));
 }
 
 #[test]
 fn finish_command_sets_status_and_exit_code() {
-    use redtrail::core::db::{insert_command_start, finish_command, NewCommandStart, FinishCommand};
+    use redtrail::core::db::{
+        FinishCommand, NewCommandStart, finish_command, insert_command_start,
+    };
     let conn = setup();
     // Create a session so error_count gets incremented
     conn.execute(
@@ -272,7 +275,12 @@ fn finish_command_sets_status_and_exit_code() {
         },
     )
     .unwrap();
-    let (status, exit_code, git_repo, stdout): (String, Option<i32>, Option<String>, Option<String>) = conn
+    let (status, exit_code, git_repo, stdout): (
+        String,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+    ) = conn
         .query_row(
             "SELECT status, exit_code, git_repo, stdout FROM commands WHERE id = ?1",
             [&id],
@@ -287,7 +295,7 @@ fn finish_command_sets_status_and_exit_code() {
 
 #[test]
 fn delete_command_removes_row() {
-    use redtrail::core::db::{insert_command, delete_command, NewCommand};
+    use redtrail::core::db::{NewCommand, delete_command, insert_command};
     let conn = setup();
     let cmd = NewCommand {
         session_id: "sess-1",
@@ -299,18 +307,16 @@ fn delete_command_removes_row() {
     let id = insert_command(&conn, &cmd).unwrap();
     delete_command(&conn, &id).unwrap();
     let count: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM commands WHERE id = ?1",
-            [&id],
-            |r| r.get(0),
-        )
+        .query_row("SELECT count(*) FROM commands WHERE id = ?1", [&id], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(count, 0, "delete_command should remove the row");
 }
 
 #[test]
 fn cleanup_orphaned_commands_marks_stale_running() {
-    use redtrail::core::db::{cleanup_orphaned_commands, insert_command_start, NewCommandStart};
+    use redtrail::core::db::{NewCommandStart, cleanup_orphaned_commands, insert_command_start};
     let conn = setup();
     // Insert a command with timestamp_start far in the past (> 24h ago)
     let stale_start = (std::time::SystemTime::now()
@@ -336,8 +342,11 @@ fn cleanup_orphaned_commands_marks_stale_running() {
     )
     .unwrap();
 
-    let affected = cleanup_orphaned_commands(&conn, "sess-1").unwrap();
-    assert_eq!(affected, 1, "only the stale running command should be orphaned");
+    let affected = cleanup_orphaned_commands(&conn).unwrap();
+    assert_eq!(
+        affected, 1,
+        "only the stale running command should be orphaned"
+    );
 
     let status: String = conn
         .query_row(

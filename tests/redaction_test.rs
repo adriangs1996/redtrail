@@ -79,7 +79,10 @@ fn clean_command_not_marked_redacted() {
 
     let cmds = db::get_commands(&conn, &db::CommandFilter::default()).unwrap();
     assert_eq!(cmds[0].command_raw, "ls -la");
-    assert!(!cmds[0].redacted, "clean command should not be marked redacted");
+    assert!(
+        !cmds[0].redacted,
+        "clean command should not be marked redacted"
+    );
 }
 
 #[test]
@@ -152,7 +155,10 @@ fn clean_command_has_no_redaction_logs() {
     .unwrap();
 
     let logs = db::get_redaction_logs(&conn, &cmd_id).unwrap();
-    assert!(logs.is_empty(), "clean command should have no redaction logs");
+    assert!(
+        logs.is_empty(),
+        "clean command should have no redaction logs"
+    );
 }
 
 #[test]
@@ -174,6 +180,9 @@ fn redaction_audit_log_covers_multiple_fields() {
 
     let logs = db::get_redaction_logs(&conn, &cmd_id).unwrap();
     let fields: Vec<&str> = logs.iter().map(|l| l.field.as_str()).collect();
-    assert!(fields.contains(&"command_raw"), "should log command_raw redaction");
+    assert!(
+        fields.contains(&"command_raw"),
+        "should log command_raw redaction"
+    );
     assert!(fields.contains(&"stdout"), "should log stdout redaction");
 }

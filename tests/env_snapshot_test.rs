@@ -14,7 +14,10 @@ fn snapshot_env_captures_selected_vars() {
     assert_eq!(parsed["PATH"], "/usr/bin:/usr/local/bin");
     assert_eq!(parsed["NODE_ENV"], "production");
     assert!(parsed.get("HOME").is_none(), "HOME should not be captured");
-    assert!(parsed.get("RANDOM_VAR").is_none(), "random vars should not be captured");
+    assert!(
+        parsed.get("RANDOM_VAR").is_none(),
+        "random vars should not be captured"
+    );
 }
 
 #[test]

@@ -109,14 +109,14 @@ pub fn parse_duration_ago(input: &str) -> Result<i64, crate::error::Error> {
     } else if input.ends_with('s') {
         (&input[..input.len() - 1], 1i64)
     } else {
-        return Err(crate::error::Error::Db(
-            format!("invalid duration: {input}. Use format like '30s', '2h', '30m', '7d'")
-        ));
+        return Err(crate::error::Error::Db(format!(
+            "invalid duration: {input}. Use format like '30s', '2h', '30m', '7d'"
+        )));
     };
 
-    let num: i64 = num_str.parse().map_err(|_| {
-        crate::error::Error::Db(format!("invalid duration number: {num_str}"))
-    })?;
+    let num: i64 = num_str
+        .parse()
+        .map_err(|_| crate::error::Error::Db(format!("invalid duration number: {num_str}")))?;
 
     Ok(now - (num * unit))
 }

@@ -85,11 +85,26 @@ fn zsh_hook_contains_capture_start_and_finish() {
         .expect("failed to run");
 
     let hook = String::from_utf8_lossy(&output.stdout);
-    assert!(hook.contains("capture start"), "zsh hook should call capture start");
-    assert!(hook.contains("capture finish"), "zsh hook should call capture finish");
-    assert!(hook.contains("--command-id"), "zsh hook should pass --command-id to tee and finish");
-    assert!(hook.contains("&!"), "zsh hook should background capture finish with &!");
-    assert!(hook.contains("__REDTRAIL_CMD_ID"), "zsh hook should use __REDTRAIL_CMD_ID variable");
+    assert!(
+        hook.contains("capture start"),
+        "zsh hook should call capture start"
+    );
+    assert!(
+        hook.contains("capture finish"),
+        "zsh hook should call capture finish"
+    );
+    assert!(
+        hook.contains("--command-id"),
+        "zsh hook should pass --command-id to tee and finish"
+    );
+    assert!(
+        hook.contains("&!"),
+        "zsh hook should background capture finish with &!"
+    );
+    assert!(
+        hook.contains("__REDTRAIL_CMD_ID"),
+        "zsh hook should use __REDTRAIL_CMD_ID variable"
+    );
 }
 
 #[test]
@@ -101,9 +116,18 @@ fn zsh_hook_contains_fifo_setup() {
 
     let hook = String::from_utf8_lossy(&output.stdout);
     assert!(hook.contains("mkfifo"), "zsh hook should create FIFO");
-    assert!(hook.contains("redtrail tee"), "zsh hook should launch redtrail tee");
-    assert!(hook.contains("read -t 1"), "zsh hook should have FIFO read timeout");
-    assert!(hook.contains("__RT_BLACKLIST"), "zsh hook should have inline blacklist");
+    assert!(
+        hook.contains("redtrail tee"),
+        "zsh hook should launch redtrail tee"
+    );
+    assert!(
+        hook.contains("read -t 1"),
+        "zsh hook should have FIFO read timeout"
+    );
+    assert!(
+        hook.contains("__RT_BLACKLIST"),
+        "zsh hook should have inline blacklist"
+    );
 }
 
 #[test]
@@ -114,11 +138,26 @@ fn bash_hook_contains_capture_start_and_finish() {
         .expect("failed to run");
 
     let hook = String::from_utf8_lossy(&output.stdout);
-    assert!(hook.contains("capture start"), "bash hook should call capture start");
-    assert!(hook.contains("capture finish"), "bash hook should call capture finish");
-    assert!(hook.contains("--command-id"), "bash hook should pass --command-id to tee and finish");
-    assert!(hook.contains("disown"), "bash hook should use disown after capture finish");
-    assert!(hook.contains("__REDTRAIL_CMD_ID"), "bash hook should use __REDTRAIL_CMD_ID variable");
+    assert!(
+        hook.contains("capture start"),
+        "bash hook should call capture start"
+    );
+    assert!(
+        hook.contains("capture finish"),
+        "bash hook should call capture finish"
+    );
+    assert!(
+        hook.contains("--command-id"),
+        "bash hook should pass --command-id to tee and finish"
+    );
+    assert!(
+        hook.contains("disown"),
+        "bash hook should use disown after capture finish"
+    );
+    assert!(
+        hook.contains("__REDTRAIL_CMD_ID"),
+        "bash hook should use __REDTRAIL_CMD_ID variable"
+    );
 }
 
 #[test]
@@ -130,10 +169,22 @@ fn bash_hook_contains_fifo_setup() {
 
     let hook = String::from_utf8_lossy(&output.stdout);
     assert!(hook.contains("mkfifo"), "bash hook should create FIFO");
-    assert!(hook.contains("redtrail tee"), "bash hook should launch redtrail tee");
-    assert!(hook.contains("read -t 1"), "bash hook should have FIFO read timeout");
-    assert!(hook.contains("history 1"), "bash hook should use history 1 for full command");
-    assert!(hook.contains("__RT_CAPTURE_ACTIVE"), "bash hook should have compound command guard");
+    assert!(
+        hook.contains("redtrail tee"),
+        "bash hook should launch redtrail tee"
+    );
+    assert!(
+        hook.contains("read -t 1"),
+        "bash hook should have FIFO read timeout"
+    );
+    assert!(
+        hook.contains("history 1"),
+        "bash hook should use history 1 for full command"
+    );
+    assert!(
+        hook.contains("__RT_CAPTURE_ACTIVE"),
+        "bash hook should have compound command guard"
+    );
 }
 
 #[test]

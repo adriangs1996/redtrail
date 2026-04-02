@@ -9,50 +9,31 @@ trap 'rm -rf "$TMPDIR"' EXIT
 export HOME="$TMPDIR"
 export REDTRAIL_DB="$TMPDIR/test.db"
 
-SESSION_ID=$("$RT" session-id 2>/dev/null)
-NOW=$(date +%s)
-
-# Write a stdout temp file with known content
-STDOUT_FILE="$TMPDIR/rt-out-search"
-cat > "$STDOUT_FILE" <<EOF
-ts_start:$NOW
-ts_end:$((NOW + 1))
-truncated:false
-
-MIGRATION_STATUS: all migrations applied successfully
-Tables: users, orders, products
+cat >"$TMPDIR/.zshrc" <<'EOF'
+eval "$(/usr/local/bin/redtrail init zsh)"
+setopt NO_HUP
+setopt NO_CHECK_JOBS
 EOF
 
-# Capture a command with stdout containing searchable content
-"$RT" capture \
-    --session-id "$SESSION_ID" \
-    --command "rake db:migrate" \
-    --exit-code 0 \
-    --shell zsh \
-    --hostname testbox \
-    --stdout-file "$STDOUT_FILE" \
-    2>/dev/null
+# Run commands that produce searchable output via real shell hooks + tee
+cat >"$TMPDIR/commands.txt" <<'CMDS'
+echo "MIGRATION_STATUS: all migrations applied successfully"
+echo "git-status-clean"
+exit
+CMDS
 
-# Capture another command without output
-"$RT" capture \
-    --session-id "$SESSION_ID" \
-    --command "git status" \
-    --exit-code 0 \
-    --ts-start "$((NOW + 2))" \
-    --shell zsh \
-    --hostname testbox \
-    2>/dev/null
+HOME="$TMPDIR" script -q -c "zsh -i" /dev/null <"$TMPDIR/commands.txt" >/dev/null 2>&1 || true
 
 # Search for text in the command string
-SEARCH_CMD=$("$RT" history --search "migrate" --json 2>/dev/null)
-echo "$SEARCH_CMD" | grep -q "rake" || { echo "FAIL: search for 'migrate' should find the rake command"; exit 1; }
+SEARCH_CMD=$("$RT" history --search "MIGRATION_STATUS" --json 2>/dev/null)
+echo "$SEARCH_CMD" | grep -q "MIGRATION_STATUS" || { echo "FAIL: search for 'MIGRATION_STATUS' should find the echo command. Got: $SEARCH_CMD"; exit 1; }
 
 # Search for text in stdout content
-SEARCH_OUT=$("$RT" history --search "MIGRATION_STATUS" --json 2>/dev/null)
-echo "$SEARCH_OUT" | grep -q "rake" || { echo "FAIL: search for 'MIGRATION_STATUS' (in stdout) should find the rake command"; exit 1; }
+SEARCH_OUT=$("$RT" history --search "migrations" --json 2>/dev/null)
+echo "$SEARCH_OUT" | grep -q "MIGRATION_STATUS" || { echo "FAIL: search for 'migrations' (in stdout) should find the echo command. Got: $SEARCH_OUT"; exit 1; }
 
 # Search that doesn't match anything
 SEARCH_NONE=$("$RT" history --search "nonexistent_xyz_term" --json 2>/dev/null)
-echo "$SEARCH_NONE" | grep -q "rake" && { echo "FAIL: search for nonexistent term should not find anything"; exit 1; }
+echo "$SEARCH_NONE" | grep -q "MIGRATION_STATUS" && { echo "FAIL: search for nonexistent term should not find anything"; exit 1; }
 
 echo "PASS"

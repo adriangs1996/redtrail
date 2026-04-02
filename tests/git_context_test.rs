@@ -15,7 +15,10 @@ fn detect_git_repo_returns_none_outside_repo() {
     let ctx = capture::git_context("/tmp");
 
     assert!(ctx.repo.is_none(), "should return None outside git repo");
-    assert!(ctx.branch.is_none(), "should return None for branch outside git repo");
+    assert!(
+        ctx.branch.is_none(),
+        "should return None for branch outside git repo"
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use redtrail::core::tee::{strip_ansi, allocate_pty_pair};
+use redtrail::core::tee::{allocate_pty_pair, strip_ansi};
 use std::os::fd::AsRawFd;
 
 #[test]

@@ -17,28 +17,36 @@ fn setup_db() -> tempfile::TempDir {
     let conn = redtrail::core::db::open(db_path.to_str().unwrap()).unwrap();
 
     // One ancient command
-    redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
-        session_id: "s1",
-        command_raw: "echo old",
-        command_binary: Some("echo"),
-        exit_code: Some(0),
-        timestamp_start: 1000,
-        source: "human",
-        ..Default::default()
-    }).unwrap();
+    redtrail::core::db::insert_command(
+        &conn,
+        &redtrail::core::db::NewCommand {
+            session_id: "s1",
+            command_raw: "echo old",
+            command_binary: Some("echo"),
+            exit_code: Some(0),
+            timestamp_start: 1000,
+            source: "human",
+            ..Default::default()
+        },
+    )
+    .unwrap();
 
     // Two recent commands
     let now = now_ts();
     for i in 0..2 {
-        redtrail::core::db::insert_command(&conn, &redtrail::core::db::NewCommand {
-            session_id: "s1",
-            command_raw: &format!("echo recent-{i}"),
-            command_binary: Some("echo"),
-            exit_code: Some(0),
-            timestamp_start: now - 60 + i, // within the last minute
-            source: "human",
-            ..Default::default()
-        }).unwrap();
+        redtrail::core::db::insert_command(
+            &conn,
+            &redtrail::core::db::NewCommand {
+                session_id: "s1",
+                command_raw: &format!("echo recent-{i}"),
+                command_binary: Some("echo"),
+                exit_code: Some(0),
+                timestamp_start: now - 60 + i, // within the last minute
+                source: "human",
+                ..Default::default()
+            },
+        )
+        .unwrap();
     }
 
     dir
@@ -55,10 +63,14 @@ fn export_outputs_valid_json() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&stdout)
-        .expect(&format!("should be valid JSON, got: {stdout}"));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect(&format!("should be valid JSON, got: {stdout}"));
     assert!(parsed.is_array());
     assert_eq!(parsed.as_array().unwrap().len(), 3);
 }

@@ -17,7 +17,11 @@ fn session_id_outputs_uuid() {
         .output()
         .expect("failed to run");
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let id = stdout.trim();
     assert!(id.len() >= 32, "should be UUID-like, got: {id}");
@@ -55,5 +59,9 @@ fn session_id_is_silent_on_stderr() {
         .output()
         .expect("failed to run");
 
-    assert!(output.stderr.is_empty(), "should produce no stderr, got: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.stderr.is_empty(),
+        "should produce no stderr, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

@@ -85,7 +85,7 @@ pub fn run(conn: &Connection, args: &ExtractArgs) -> Result<(), Error> {
             }
         }
         // Print progress every 50 commands
-        if processed % 50 == 0 && processed > 0 {
+        if processed.is_multiple_of(50) && processed > 0 {
             eprintln!("  ... {processed}/{total}");
         }
     }

@@ -47,10 +47,10 @@ fn parse_log_default(stdout: &str, repo: &str) -> Extraction {
             // skip — we don't parse these fields currently
         } else if line.is_empty() && current_hash.is_some() {
             in_message = true;
-        } else if in_message {
-            if let Some(msg) = line.strip_prefix("    ") {
-                message_lines.push(msg.to_string());
-            }
+        } else if in_message
+            && let Some(msg) = line.strip_prefix("    ")
+        {
+            message_lines.push(msg.to_string());
         }
     }
 

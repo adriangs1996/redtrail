@@ -45,7 +45,7 @@ fn parse_diff_full(stdout: &str, repo: &str) -> Vec<crate::extract::types::NewEn
         .filter_map(|line| {
             // "diff --git a/path b/path"
             let rest = line.strip_prefix("diff --git ")?;
-            let b_part = rest.splitn(2, " b/").nth(1)?;
+            let b_part = rest.split_once(" b/")?.1;
             let path = b_part.trim();
             if path.is_empty() {
                 return None;

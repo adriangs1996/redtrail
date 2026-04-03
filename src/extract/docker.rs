@@ -160,10 +160,10 @@ fn parse_docker_build(stdout: &str) -> Vec<NewEntity> {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("Successfully built ") {
             built_id = non_empty(rest.trim());
-        } else if let Some(rest) = trimmed.strip_prefix("Successfully tagged ") {
-            if let Some(tag) = non_empty(rest.trim()) {
-                tagged.push(tag);
-            }
+        } else if let Some(rest) = trimmed.strip_prefix("Successfully tagged ")
+            && let Some(tag) = non_empty(rest.trim())
+        {
+            tagged.push(tag);
         }
     }
 

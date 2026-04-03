@@ -358,18 +358,16 @@ pub fn mark_extracted(conn: &Connection, command_id: &str, method: &str) -> Resu
     Ok(())
 }
 
+/// Raw columns fetched for stdout/stderr: (text, text, compressed_blob, compressed_blob).
+type OutputColumns = (Option<String>, Option<String>, Option<Vec<u8>>, Option<Vec<u8>>);
+
 /// Fetch stdout/stderr for a command with transparent decompression.
 /// Returns (stdout, stderr).
 pub fn get_command_output(
     conn: &Connection,
     command_id: &str,
 ) -> Result<(Option<String>, Option<String>), Error> {
-    let (stdout_text, stderr_text, stdout_blob, stderr_blob): (
-        Option<String>,
-        Option<String>,
-        Option<Vec<u8>>,
-        Option<Vec<u8>>,
-    ) = conn
+    let (stdout_text, stderr_text, stdout_blob, stderr_blob): OutputColumns = conn
         .query_row(
             "SELECT stdout, stderr, stdout_compressed, stderr_compressed FROM commands WHERE id = ?1",
             [command_id],

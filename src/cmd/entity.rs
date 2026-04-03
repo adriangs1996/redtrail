@@ -136,84 +136,82 @@ fn print_detail(
         when = ascii::format_relative_time(entity.last_seen),
     );
 
-    if let Some(props_str) = &entity.properties {
-        if let Ok(props) = serde_json::from_str::<serde_json::Value>(props_str) {
-            if let Some(obj) = props.as_object() {
-                if !obj.is_empty() {
-                    println!();
-                    println!(
-                        "  {BOLD}Properties:{RESET}",
-                        BOLD = ascii::BOLD,
-                        RESET = ascii::RESET,
-                    );
-                    for (k, v) in obj {
-                        println!(
-                            "    {DIM}{k}:{RESET} {v}",
-                            DIM = ascii::DIM,
-                            RESET = ascii::RESET,
-                        );
-                    }
-                }
-            }
+    if let Some(props_str) = &entity.properties
+        && let Ok(props) = serde_json::from_str::<serde_json::Value>(props_str)
+        && let Some(obj) = props.as_object()
+        && !obj.is_empty()
+    {
+        println!();
+        println!(
+            "  {BOLD}Properties:{RESET}",
+            BOLD = ascii::BOLD,
+            RESET = ascii::RESET,
+        );
+        for (k, v) in obj {
+            println!(
+                "    {DIM}{k}:{RESET} {v}",
+                DIM = ascii::DIM,
+                RESET = ascii::RESET,
+            );
         }
     }
 
-    if let Some(rels) = rels {
-        if !rels.is_empty() {
-            println!();
+    if let Some(rels) = rels
+        && !rels.is_empty()
+    {
+        println!();
+        println!(
+            "  {BOLD}Relationships:{RESET} {DIM}({count}){RESET}",
+            BOLD = ascii::BOLD,
+            RESET = ascii::RESET,
+            DIM = ascii::DIM,
+            count = rels.len(),
+        );
+        for r in rels {
+            let direction = if r.source_entity_id == entity.id {
+                format!("→ {}", r.target_entity_id)
+            } else {
+                format!("← {}", r.source_entity_id)
+            };
             println!(
-                "  {BOLD}Relationships:{RESET} {DIM}({count}){RESET}",
-                BOLD = ascii::BOLD,
-                RESET = ascii::RESET,
+                "    {DIM}[{rtype}]{RESET} {dir}",
                 DIM = ascii::DIM,
-                count = rels.len(),
+                RESET = ascii::RESET,
+                rtype = r.relation_type,
+                dir = direction,
             );
-            for r in rels {
-                let direction = if r.source_entity_id == entity.id {
-                    format!("→ {}", r.target_entity_id)
-                } else {
-                    format!("← {}", r.source_entity_id)
-                };
-                println!(
-                    "    {DIM}[{rtype}]{RESET} {dir}",
-                    DIM = ascii::DIM,
-                    RESET = ascii::RESET,
-                    rtype = r.relation_type,
-                    dir = direction,
-                );
-            }
         }
     }
 
-    if let Some(obs) = observations {
-        if !obs.is_empty() {
-            println!();
+    if let Some(obs) = observations
+        && !obs.is_empty()
+    {
+        println!();
+        println!(
+            "  {BOLD}Observation History:{RESET} {DIM}({count} observations){RESET}",
+            BOLD = ascii::BOLD,
+            RESET = ascii::RESET,
+            DIM = ascii::DIM,
+            count = obs.len(),
+        );
+        for o in obs.iter().rev().take(10) {
+            let ctx = o.context.as_deref().unwrap_or("");
             println!(
-                "  {BOLD}Observation History:{RESET} {DIM}({count} observations){RESET}",
-                BOLD = ascii::BOLD,
+                "    {YELLOW}{when}{RESET}  {DIM}{ctx}{RESET}",
+                YELLOW = ascii::YELLOW,
                 RESET = ascii::RESET,
                 DIM = ascii::DIM,
-                count = obs.len(),
+                when = ascii::format_relative_time(o.observed_at),
+                ctx = ascii::truncate_command(ctx, 60),
             );
-            for o in obs.iter().rev().take(10) {
-                let ctx = o.context.as_deref().unwrap_or("");
-                println!(
-                    "    {YELLOW}{when}{RESET}  {DIM}{ctx}{RESET}",
-                    YELLOW = ascii::YELLOW,
-                    RESET = ascii::RESET,
-                    DIM = ascii::DIM,
-                    when = ascii::format_relative_time(o.observed_at),
-                    ctx = ascii::truncate_command(ctx, 60),
-                );
-            }
-            if obs.len() > 10 {
-                println!(
-                    "    {DIM}... ({} more){RESET}",
-                    obs.len() - 10,
-                    DIM = ascii::DIM,
-                    RESET = ascii::RESET,
-                );
-            }
+        }
+        if obs.len() > 10 {
+            println!(
+                "    {DIM}... ({} more){RESET}",
+                obs.len() - 10,
+                DIM = ascii::DIM,
+                RESET = ascii::RESET,
+            );
         }
     }
 

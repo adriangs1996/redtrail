@@ -65,8 +65,11 @@ pub fn extract_command(conn: &Connection, cmd: &CommandRow) -> Result<(), Extrac
             })
         }
         Domain::Docker => {
-            // Docker extractor not yet implemented — skip silently.
-            Extraction::empty()
+            let extractor = docker::DockerExtractor;
+            extractor.extract(cmd).unwrap_or_else(|e| {
+                eprintln!("[redtrail] docker extractor error (cmd={}): {e}", cmd.id);
+                Extraction::empty()
+            })
         }
         Domain::Generic => Extraction::empty(),
     };

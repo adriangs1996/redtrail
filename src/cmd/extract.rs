@@ -67,6 +67,13 @@ pub fn run(conn: &Connection, args: &ExtractArgs) -> Result<(), Error> {
     let mut errors = 0usize;
 
     for cmd in &commands {
+        // If reprocessing, reset the extracted flag so extract_command() doesn't skip
+        if args.reprocess {
+            let _ = conn.execute(
+                "UPDATE commands SET extracted = 0, extraction_method = NULL WHERE id = ?1",
+                [&cmd.id],
+            );
+        }
         match extract::extract_command(conn, cmd) {
             Ok(()) => processed += 1,
             Err(e) => {

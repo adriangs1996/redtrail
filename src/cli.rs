@@ -167,6 +167,53 @@ enum Commands {
         #[arg(long)]
         markdown: bool,
     },
+    /// Run extraction on captured commands
+    Extract {
+        /// Re-extract already processed commands
+        #[arg(long)]
+        reprocess: bool,
+        /// Only extract commands from the last duration (e.g., 7d, 24h)
+        #[arg(long)]
+        since: Option<String>,
+        /// Show what would be extracted without writing
+        #[arg(long)]
+        dry_run: bool,
+        /// Maximum number of commands to process
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// List extracted entities
+    Entities {
+        /// Filter by entity type (e.g., git_file, git_branch)
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show details for a specific entity
+    Entity {
+        /// Entity ID
+        id: String,
+        /// Show relationships
+        #[arg(long)]
+        relationships: bool,
+        /// Show observation history
+        #[arg(long)]
+        history: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Generate project context snapshot
+    Context {
+        /// Output format: markdown (default) or json
+        #[arg(long, default_value = "markdown")]
+        format: String,
+        /// Scope to a specific repo path (use "." for current directory)
+        #[arg(long)]
+        repo: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -456,6 +503,70 @@ pub fn run() -> Result<(), Error> {
                     cwd: cwd.as_deref(),
                     json,
                     markdown,
+                },
+            )
+        }
+        Commands::Extract {
+            reprocess,
+            since,
+            dry_run,
+            limit,
+        } => {
+            let conn = open_db()?;
+            let since_ts = if let Some(dur) = &since {
+                let secs = redtrail::core::capture::parse_duration(dur)?;
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                Some(now - secs)
+            } else {
+                None
+            };
+            cmd::extract::run(
+                &conn,
+                &cmd::extract::ExtractArgs {
+                    reprocess,
+                    since: since_ts,
+                    dry_run,
+                    limit,
+                },
+            )
+        }
+        Commands::Entities { entity_type, json } => {
+            let conn = open_db()?;
+            cmd::entities::run(
+                &conn,
+                &cmd::entities::EntitiesArgs {
+                    entity_type: entity_type.as_deref(),
+                    json,
+                },
+            )
+        }
+        Commands::Entity {
+            id,
+            relationships,
+            history,
+            json,
+        } => {
+            let conn = open_db()?;
+            cmd::entity::run(
+                &conn,
+                &cmd::entity::EntityArgs {
+                    id: &id,
+                    relationships,
+                    history,
+                    json,
+                },
+            )
+        }
+        Commands::Context { format, repo } => {
+            let conn = open_db()?;
+            cmd::context::run(
+                &conn,
+                &cmd::context::ContextArgs {
+                    format: &format,
+                    repo: repo.as_deref(),
                 },
             )
         }

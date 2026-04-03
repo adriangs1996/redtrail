@@ -5,6 +5,9 @@ use crate::core::secrets::engine::{
     CustomPattern, load_custom_patterns, redact_with_custom_patterns,
 };
 use crate::error::Error;
+use crate::extract;
+use crate::extract::domain::detect_domain;
+use crate::extract::types::Domain;
 use rusqlite::Connection;
 
 pub struct StartArgs<'a> {
@@ -213,6 +216,7 @@ pub fn finish(conn: &Connection, args: &FinishArgs) -> Result<(), Error> {
             let max_bytes = args.config.capture.max_stdout_bytes;
             let _ = db::compress_command_output_if_needed(conn, args.command_id, max_bytes);
             let _ = db::enforce_retention(conn, args.config.capture.retention_days);
+            try_inline_extraction(conn, args.command_id);
             return Ok(());
         }
         OnDetect::Warn => {
@@ -255,6 +259,24 @@ pub fn finish(conn: &Connection, args: &FinishArgs) -> Result<(), Error> {
     let max_bytes = args.config.capture.max_stdout_bytes;
     let _ = db::compress_command_output_if_needed(conn, args.command_id, max_bytes);
     let _ = db::enforce_retention(conn, args.config.capture.retention_days);
+    try_inline_extraction(conn, args.command_id);
 
     Ok(())
+}
+
+/// Best-effort inline extraction for known domain commands (git, docker).
+/// Runs after capture finish + compress. Never blocks the shell — all errors are
+/// silently caught. Only runs for domain-specific extractors (<10ms budget).
+/// Generic extraction is deferred to `redtrail extract`.
+fn try_inline_extraction(conn: &Connection, command_id: &str) {
+    let cmd_row = match extract::db::get_command_by_id(conn, command_id) {
+        Ok(row) => row,
+        Err(_) => return,
+    };
+    let binary = cmd_row.command_binary.as_deref().unwrap_or("");
+    let domain = detect_domain(binary);
+    if domain == Domain::Generic {
+        return; // Only inline-extract for known domains
+    }
+    let _ = extract::extract_command(conn, &cmd_row);
 }

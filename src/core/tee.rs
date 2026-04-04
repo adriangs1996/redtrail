@@ -267,12 +267,16 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     // Open /dev/tty for relay output
     let mut tty = std::fs::OpenOptions::new().write(true).open("/dev/tty")?;
 
-    // Open DB connection — if this fails, tee still relays output to /dev/tty
+    // Open DB connection — lightweight open since capture start already initialised the schema.
+    // If this fails, tee still relays output to /dev/tty but warns the user once.
     let db_conn_result = resolve_db_path()
         .ok_or_else(|| Error::Db("no DB path available".into()))
-        .and_then(|path| db::open(&path));
+        .and_then(|path| db::open_existing(&path));
 
     let db_available = db_conn_result.is_ok();
+    if let Err(ref e) = db_conn_result {
+        let _ = writeln!(tty, "[redtrail] warning: output capture disabled (DB: {e})");
+    }
     let db_conn = db_conn_result.ok();
 
     // Load config for secret detection

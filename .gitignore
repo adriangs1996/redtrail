@@ -13,6 +13,7 @@ docs-site/labs/
 
 # Plans and PRDs
 plans/
+tasks/
 tasks/prd*.json
 tasks/prd*.md
 docs/prd-*.md

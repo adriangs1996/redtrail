@@ -399,6 +399,18 @@ pub fn open(path: &str) -> Result<Connection, Error> {
     Ok(conn)
 }
 
+/// Lightweight open for processes that only need to read/write existing data
+/// (e.g. tee). Skips schema creation, migrations, and PRAGMA optimize to avoid
+/// contention with the main CLI process that already initialised the DB.
+pub fn open_existing(path: &str) -> Result<Connection, Error> {
+    let conn = Connection::open(path).map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|e| Error::Db(e.to_string()))?;
+    conn.execute_batch("PRAGMA busy_timeout=3000;")
+        .map_err(|e| Error::Db(e.to_string()))?;
+    Ok(conn)
+}
+
 #[cfg(unix)]
 fn set_file_permissions(path: &str) {
     use std::os::unix::fs::PermissionsExt;

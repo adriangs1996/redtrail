@@ -278,5 +278,5 @@ fn try_inline_extraction(conn: &Connection, command_id: &str) {
     if domain == Domain::Generic {
         return; // Only inline-extract for known domains
     }
-    let _ = extract::extract_command(conn, &cmd_row);
+    let _ = extract::extract_command(conn, &cmd_row, None);
 }

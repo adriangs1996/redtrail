@@ -82,6 +82,28 @@ extern "C" fn handle_sigusr1(_: nix::libc::c_int) {
     FLUSH_REQUESTED.store(true, Ordering::Relaxed);
 }
 
+/// Why the tee main loop exited — logged for diagnostics.
+#[derive(Debug, Clone, Copy)]
+enum TeeExitReason {
+    FlushSignal,      // SIGUSR1 from precmd (normal completion)
+    ShellGone,        // is_shell_gone() returned true
+    PollError,        // poll() returned non-EINTR error
+    PtyEof,           // both PTY masters hit EOF/HUP (loop condition)
+    FlushSignalEintr, // SIGUSR1 caught during EINTR
+}
+
+impl std::fmt::Display for TeeExitReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FlushSignal => write!(f, "SIGUSR1 (normal)"),
+            Self::ShellGone => write!(f, "shell process gone"),
+            Self::PollError => write!(f, "poll error"),
+            Self::PtyEof => write!(f, "PTY EOF on both masters"),
+            Self::FlushSignalEintr => write!(f, "SIGUSR1 during EINTR"),
+        }
+    }
+}
+
 /// Resolve DB path the same way cli.rs does.
 fn resolve_db_path() -> Option<String> {
     std::env::var("REDTRAIL_DB").ok().or_else(|| {
@@ -112,7 +134,9 @@ fn flush_to_db(
     custom_patterns: &[CustomPattern],
     warn_logged: &mut bool,
     redaction_logged: &mut bool,
+    mut debug_tty: Option<&mut std::fs::File>,
 ) -> bool {
+    use std::io::Write;
     let stdout_clean = strip_ansi(stdout_buf);
     let stderr_clean = strip_ansi(stderr_buf);
 
@@ -125,6 +149,17 @@ fn flush_to_db(
         None
     } else {
         Some(stderr_clean.as_str())
+    };
+
+    // Helper: write to DB and log failures when debug is on
+    let mut do_update = |so: Option<&str>, se: Option<&str>| {
+        if let Err(e) = db::update_command_output(
+            db_conn, command_id, so, se, stdout_truncated, stderr_truncated,
+        ) {
+            if let Some(ref mut tty) = debug_tty {
+                let _ = writeln!(tty, "[redtrail] tee: DB write failed: {e}");
+            }
+        }
     };
 
     match on_detect {
@@ -143,14 +178,7 @@ fn flush_to_db(
             } else {
                 Some(stderr_redacted.as_str())
             };
-            let _ = db::update_command_output(
-                db_conn,
-                command_id,
-                so,
-                se,
-                stdout_truncated,
-                stderr_truncated,
-            );
+            do_update(so, se);
             // Log redaction events once (first detection)
             if !*redaction_logged && (!stdout_labels.is_empty() || !stderr_labels.is_empty()) {
                 for label in &stdout_labels {
@@ -174,14 +202,7 @@ fn flush_to_db(
                     *warn_logged = true;
                 }
             }
-            let _ = db::update_command_output(
-                db_conn,
-                command_id,
-                stdout_opt,
-                stderr_opt,
-                stdout_truncated,
-                stderr_truncated,
-            );
+            do_update(stdout_opt, stderr_opt);
             false
         }
         OnDetect::Block => {
@@ -191,14 +212,7 @@ fn flush_to_db(
                 let _ = db::delete_command(db_conn, command_id);
                 true
             } else {
-                let _ = db::update_command_output(
-                    db_conn,
-                    command_id,
-                    stdout_opt,
-                    stderr_opt,
-                    stdout_truncated,
-                    stderr_truncated,
-                );
+                do_update(stdout_opt, stderr_opt);
                 false
             }
         }
@@ -208,6 +222,8 @@ fn flush_to_db(
 /// Check whether the shell process is gone or a zombie.
 /// On Linux, reads `/proc/<pid>/stat` to detect zombie state (kill(pid, 0)
 /// returns success for zombies, which causes deadlocks with `script`).
+/// On macOS, uses kill(pid, 0) but only treats ESRCH (no such process) as gone;
+/// EPERM means the process exists but we can't signal it.
 fn is_shell_gone(pid: i32) -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -227,7 +243,13 @@ fn is_shell_gone(pid: i32) -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        unsafe { nix::libc::kill(pid, 0) != 0 }
+        let ret = unsafe { nix::libc::kill(pid, 0) };
+        if ret == 0 {
+            return false; // process exists and we can signal it
+        }
+        // Only consider the process gone if errno is ESRCH (no such process).
+        // EPERM means the process exists but we lack permission to signal it.
+        std::io::Error::last_os_error().raw_os_error() == Some(nix::libc::ESRCH)
     }
 }
 
@@ -279,6 +301,8 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     }
     let db_conn = db_conn_result.ok();
 
+    let debug = std::env::var("REDTRAIL_DEBUG").is_ok();
+
     // Load config for secret detection
     let app_config = crate::config::Config::load(&resolve_config_path()).unwrap_or_default();
     let on_detect = app_config.secrets.on_detect;
@@ -316,6 +340,7 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
     let shell_pid: i32 = config.shell_pid.parse().unwrap_or(0);
     let orphan_check_interval = std::time::Duration::from_secs(5);
     let mut last_orphan_check = std::time::Instant::now();
+    let mut exit_reason = TeeExitReason::PtyEof; // default if loop condition exits naturally
 
     while !stdout_eof || !stderr_eof {
         let mut pollfds = Vec::new();
@@ -335,11 +360,13 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
         match poll(&mut pollfds, PollTimeout::from(250u16)) {
             Ok(0) => {
                 if FLUSH_REQUESTED.load(Ordering::Relaxed) {
+                    exit_reason = TeeExitReason::FlushSignal;
                     break;
                 }
                 if last_orphan_check.elapsed() > orphan_check_interval {
                     last_orphan_check = std::time::Instant::now();
                     if shell_pid > 0 && is_shell_gone(shell_pid) {
+                        exit_reason = TeeExitReason::ShellGone;
                         break;
                     }
                 }
@@ -347,11 +374,15 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
             Ok(_) => {}
             Err(nix::errno::Errno::EINTR) => {
                 if FLUSH_REQUESTED.load(Ordering::Relaxed) {
+                    exit_reason = TeeExitReason::FlushSignalEintr;
                     break;
                 }
                 continue;
             }
-            Err(_) => break,
+            Err(_) => {
+                exit_reason = TeeExitReason::PollError;
+                break;
+            }
         }
 
         // After the first poll returns, the shell has had time to open the slave
@@ -432,6 +463,7 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                         &custom_patterns,
                         &mut warn_logged,
                         &mut redaction_logged,
+                        if debug { Some(&mut tty) } else { None },
                     );
                 }
                 last_flush_stdout_len = stdout_buf.len();
@@ -460,8 +492,19 @@ pub fn run_tee(config: &TeeConfig) -> Result<(), Error> {
                 &custom_patterns,
                 &mut warn_logged,
                 &mut redaction_logged,
+                if debug { Some(&mut tty) } else { None },
             );
         }
+    }
+
+    if debug {
+        let _ = writeln!(
+            tty,
+            "[redtrail] tee exit: {exit_reason} (cmd={}, stdout={}B, stderr={}B)",
+            config.command_id,
+            stdout_buf.len(),
+            stderr_buf.len(),
+        );
     }
 
     Ok(())

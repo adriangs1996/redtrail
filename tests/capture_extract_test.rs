@@ -52,7 +52,7 @@ fn inline_extraction_creates_entities_for_git_commands() {
 
     // Run inline extraction (same as try_inline_extraction would do)
     let cmd = extract::db::get_command_by_id(&conn, &id).unwrap();
-    let _ = extract::extract_command(&conn, &cmd);
+    let _ = extract::extract_command(&conn, &cmd, None);
 
     // Verify entities were created
     let entities = extract::db::get_entities(

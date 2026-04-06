@@ -12,6 +12,17 @@ pub struct ExtractArgs {
 }
 
 pub fn run(conn: &Connection, args: &ExtractArgs) -> Result<(), Error> {
+    let config_path = std::env::var("REDTRAIL_CONFIG").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        format!("{home}/.config/redtrail/config.yaml")
+    });
+    let config = crate::config::Config::load(&config_path).unwrap_or_default();
+    let llm_config = if config.llm.enabled {
+        Some(config.llm.clone())
+    } else {
+        None
+    };
+
     let limit = args.limit.unwrap_or(1000);
 
     // Get commands to process
@@ -74,7 +85,7 @@ pub fn run(conn: &Connection, args: &ExtractArgs) -> Result<(), Error> {
                 [&cmd.id],
             );
         }
-        match extract::extract_command(conn, cmd) {
+        match extract::extract_command(conn, cmd, llm_config.as_ref()) {
             Ok(()) => processed += 1,
             Err(e) => {
                 eprintln!(

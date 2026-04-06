@@ -7,6 +7,67 @@ pub struct Config {
     pub capture: CaptureConfig,
     #[serde(default)]
     pub secrets: SecretsConfig,
+    #[serde(default)]
+    pub llm: LlmConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_llm_provider")]
+    pub provider: String,
+    #[serde(default)]
+    pub ollama: OllamaConfig,
+    #[serde(default = "default_llm_timeout")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_max_input_chars")]
+    pub max_input_chars: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaConfig {
+    #[serde(default = "default_ollama_url")]
+    pub url: String,
+    #[serde(default = "default_ollama_model")]
+    pub model: String,
+}
+
+fn default_llm_provider() -> String {
+    "ollama".to_string()
+}
+fn default_llm_timeout() -> u64 {
+    30
+}
+fn default_max_input_chars() -> usize {
+    4096
+}
+fn default_ollama_url() -> String {
+    "http://localhost:11434".to_string()
+}
+fn default_ollama_model() -> String {
+    "gemma4".to_string()
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: default_llm_provider(),
+            ollama: OllamaConfig::default(),
+            timeout_seconds: default_llm_timeout(),
+            max_input_chars: default_max_input_chars(),
+        }
+    }
+}
+
+impl Default for OllamaConfig {
+    fn default() -> Self {
+        Self {
+            url: default_ollama_url(),
+            model: default_ollama_model(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +212,30 @@ impl Config {
             }
             "secrets.patterns_file" => {
                 self.secrets.patterns_file = Some(value.to_string());
+            }
+            "llm.enabled" => {
+                self.llm.enabled = value
+                    .parse()
+                    .map_err(|_| Error::Config("expected bool".into()))?
+            }
+            "llm.provider" => {
+                self.llm.provider = value.to_string();
+            }
+            "llm.ollama.url" => {
+                self.llm.ollama.url = value.to_string();
+            }
+            "llm.ollama.model" => {
+                self.llm.ollama.model = value.to_string();
+            }
+            "llm.timeout_seconds" => {
+                self.llm.timeout_seconds = value
+                    .parse()
+                    .map_err(|_| Error::Config("expected number".into()))?
+            }
+            "llm.max_input_chars" => {
+                self.llm.max_input_chars = value
+                    .parse()
+                    .map_err(|_| Error::Config("expected number".into()))?
             }
             _ => return Err(Error::Config(format!("unknown config key: {key}"))),
         }

@@ -36,7 +36,7 @@ fn extract_command_creates_entities_in_db() {
     insert_git_command(&conn, "cmd-1", "status", " M src/main.rs\n?? new.txt\n");
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let entities = extract::db::get_entities(&conn, &extract::db::EntityFilter::default()).unwrap();
     assert!(
@@ -59,7 +59,7 @@ fn extract_command_marks_as_extracted() {
     insert_git_command(&conn, "cmd-1", "branch", "* main\n  develop\n");
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let unextracted = extract::db::get_unextracted_commands(&conn, None, 100).unwrap();
     assert!(
@@ -74,7 +74,7 @@ fn extract_command_marks_heuristic_for_git() {
     insert_git_command(&conn, "cmd-1", "status", " M file.rs\n");
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let method: String = conn
         .query_row(
@@ -97,7 +97,7 @@ fn extract_command_marks_generic_for_unknown_domain() {
     );
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let method: String = conn
         .query_row(
@@ -124,7 +124,7 @@ fn extract_command_with_no_stdout_marks_skipped() {
     .unwrap();
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let method: Option<String> = conn
         .query_row(
@@ -147,7 +147,7 @@ fn already_extracted_command_is_skipped() {
     .unwrap();
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    let result = extract::extract_command(&conn, &cmd);
+    let result = extract::extract_command(&conn, &cmd, None);
     assert!(result.is_ok());
 
     // Should not have created any entities (was already extracted)
@@ -162,7 +162,7 @@ fn extract_creates_relationships() {
     insert_git_command(&conn, "cmd-1", "branch", "* main\n  develop\n");
 
     let cmd = extract::db::get_command_by_id(&conn, "cmd-1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     // Branches should have belongs_to relationships to repo
     let entities = extract::db::get_entities(

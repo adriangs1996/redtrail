@@ -17,7 +17,7 @@ fn setup_with_entities() -> rusqlite::Connection {
     .unwrap();
 
     let cmd = extract::db::get_command_by_id(&conn, "c1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
     conn
 }
 

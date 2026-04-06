@@ -3,9 +3,11 @@ pub mod docker;
 pub mod domain;
 pub mod generic;
 pub mod git;
+pub mod llm;
 pub mod parse;
 pub mod types;
 
+use crate::config::LlmConfig;
 use crate::core::db::CommandRow;
 use crate::extract::types::{Domain, DomainExtractor, ExtractError, Extraction};
 use rusqlite::Connection;
@@ -19,7 +21,11 @@ use rusqlite::Connection;
 /// Errors from domain extractors are non-fatal and logged to stderr; the pipeline
 /// continues and falls back to generic extraction. This ensures a single bad
 /// command never breaks the extraction loop.
-pub fn extract_command(conn: &Connection, cmd: &CommandRow) -> Result<(), ExtractError> {
+pub fn extract_command(
+    conn: &Connection,
+    cmd: &CommandRow,
+    llm_config: Option<&LlmConfig>,
+) -> Result<(), ExtractError> {
     // 1. Skip already-extracted commands — idempotent by design.
     let already_extracted: bool = conn
         .query_row(
@@ -96,6 +102,19 @@ pub fn extract_command(conn: &Connection, cmd: &CommandRow) -> Result<(), Extrac
     let mut combined = domain_extraction;
     combined.merge(generic_extraction);
 
+    // 7b. LLM fallback — only when heuristics produced nothing.
+    let mut llm_produced = false;
+    if combined.is_empty()
+        && let Some(cfg) = llm_config
+        && let Some(extractor) = llm::LlmExtractor::new(cfg)
+    {
+        let llm_result = extractor.extract(&cmd_with_stdout, stdout_text);
+        if !llm_result.is_empty() {
+            llm_produced = true;
+            combined.merge(llm_result);
+        }
+    }
+
     // 8-10. Atomically store all entities and relationships.
     if !combined.is_empty() {
         conn.execute_batch("BEGIN")
@@ -132,6 +151,8 @@ pub fn extract_command(conn: &Connection, cmd: &CommandRow) -> Result<(), Extrac
     // 11-12. Choose extraction method and mark the command as done.
     let method = if domain_had_results {
         "heuristic"
+    } else if llm_produced {
+        "llm"
     } else if !combined.is_empty() {
         "generic"
     } else {

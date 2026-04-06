@@ -17,7 +17,7 @@ fn setup_with_entity() -> (rusqlite::Connection, String) {
     .unwrap();
 
     let cmd = extract::db::get_command_by_id(&conn, "c1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let entities = extract::db::get_entities(
         &conn,
@@ -139,7 +139,7 @@ fn entity_command_json_via_binary() {
     )
     .unwrap();
     let cmd = extract::db::get_command_by_id(&conn, "c1").unwrap();
-    extract::extract_command(&conn, &cmd).unwrap();
+    extract::extract_command(&conn, &cmd, None).unwrap();
 
     let entities = extract::db::get_entities(
         &conn,

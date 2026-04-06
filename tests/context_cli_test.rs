@@ -36,7 +36,7 @@ fn setup_with_git_entities() -> rusqlite::Connection {
 
     for id in &["c1", "c2"] {
         let cmd = extract::db::get_command_by_id(&conn, id).unwrap();
-        extract::extract_command(&conn, &cmd).unwrap();
+        extract::extract_command(&conn, &cmd, None).unwrap();
     }
 
     conn

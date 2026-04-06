@@ -144,9 +144,15 @@ enum Commands {
         /// How far back to look (e.g., "7d", "24h"). Default: 3 most recent sessions
         #[arg(long)]
         since: Option<String>,
-        /// Approximate token limit for output
+        /// Approximate token limit for output (default: 3000)
         #[arg(long)]
         max_tokens: Option<usize>,
+        /// Use LLM-powered summarization (default when LLM is configured)
+        #[arg(long)]
+        smart: bool,
+        /// Heuristic-only mode, no LLM calls (default when LLM is not configured)
+        #[arg(long)]
+        fast: bool,
     },
     /// Generate a report of AI agent activity
     #[command(name = "agent-report")]
@@ -476,7 +482,10 @@ pub fn run() -> Result<(), Error> {
             format,
             since,
             max_tokens,
+            smart,
+            fast,
         } => {
+            let config = redtrail::config::Config::load(&config_path()).unwrap_or_default();
             let conn = open_db()?;
             cmd::agent_context::run(
                 &conn,
@@ -484,6 +493,9 @@ pub fn run() -> Result<(), Error> {
                     format: &format,
                     since: since.as_deref(),
                     max_tokens,
+                    smart,
+                    fast,
+                    config: &config,
                 },
             )
         }

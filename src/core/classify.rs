@@ -1,4 +1,44 @@
-/// Command classification for analysis and reporting.
+// Command classification for analysis and reporting.
+
+use crate::core::db::CommandRow;
+
+/// Binaries that produce noise — read-only, navigation, or shell builtins.
+const NOISE_BINARIES: &[&str] = &[
+    "find", "ls", "cd", "cat", "clear", "pwd", "echo", "which", "type", "head", "tail", "less",
+    "more", "wc", "bat", "tree", "file", "stat", "du", "df", "env", "printenv", "whoami",
+];
+
+/// Claude Code tool names that are read-only noise.
+const NOISE_TOOLS: &[&str] = &["Read", "Glob", "Grep", "TodoRead", "WebFetch", "LSP"];
+
+/// Binaries that represent project-level commands (builds, tests, package managers, etc.).
+const PROJECT_BINARIES: &[&str] = &[
+    "cargo", "npm", "npx", "yarn", "pnpm", "bun", "pip", "pip3", "python", "python3", "go",
+    "make", "cmake", "docker", "dotnet", "gcc", "g++", "clang", "javac", "tsc", "webpack",
+    "esbuild", "vite", "rollup", "pytest", "jest", "vitest", "mocha", "rspec", "phpunit", "mvn",
+    "gradle", "ruby", "rake", "mix", "rustc",
+];
+
+/// Returns true if this command is noise — read-only investigation, navigation, or shell builtins.
+pub fn is_noise_command(cmd: &CommandRow) -> bool {
+    if cmd.tool_name.as_deref().is_some_and(|t| NOISE_TOOLS.contains(&t)) {
+        return true;
+    }
+    if cmd.command_binary.as_deref().is_some_and(|b| NOISE_BINARIES.contains(&b)) {
+        return true;
+    }
+    let category = classify_command(
+        cmd.command_binary.as_deref().unwrap_or(""),
+        cmd.command_subcommand.as_deref(),
+        cmd.tool_name.as_deref(),
+    );
+    category.is_read_only()
+}
+
+/// Returns true if the binary is a project-level command (build, test, package manager, etc.).
+pub fn is_project_command(binary: &str) -> bool {
+    PROJECT_BINARIES.contains(&binary)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommandCategory {

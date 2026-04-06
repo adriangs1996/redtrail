@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::core::classify::classify_command;
+use crate::core::classify::{classify_command, is_project_command};
 use crate::core::db::CommandRow;
 
 static RE_PATH: LazyLock<Regex> =
@@ -72,6 +72,10 @@ pub struct ErrorFixSequence {
     pub fix_actions: Vec<String>,
     pub resolution_command: Option<String>,
     pub resolved: bool,
+    /// True when the resolution command has the same raw text as the failing command (a retry).
+    pub is_retry: bool,
+    /// Extracted error lines from stderr (via `extract_error_lines`).
+    pub stderr_snippet: String,
 }
 
 /// Detect error-fix sequences in a list of commands.
@@ -118,15 +122,52 @@ pub fn detect_error_fix_sequences(commands: &[CommandRow]) -> Vec<ErrorFixSequen
                 }
             }
 
+            // A retry is when the same command succeeds WITHOUT any intermediate
+            // fix actions. If there were edits/writes between failure and success,
+            // it's a genuine fix, not a retry.
+            let is_retry = resolved
+                && fix_actions.is_empty()
+                && resolution
+                    .as_ref()
+                    .is_some_and(|r| r.trim() == cmd.command_raw.trim());
+
+            let stderr_snippet = cmd
+                .stderr
+                .as_deref()
+                .map(extract_error_lines)
+                .unwrap_or_default();
+
             sequences.push(ErrorFixSequence {
                 failing_command: cmd.command_raw.clone(),
                 error_message: error_msg,
                 fix_actions,
                 resolution_command: resolution,
                 resolved,
+                is_retry,
+                stderr_snippet,
             });
         }
         i += 1;
     }
     sequences
+}
+
+/// Like `detect_error_fix_sequences`, but filters the results:
+/// - Retries (same command succeeding with no intermediate fix actions)
+/// - Claude Code tool-level errors (tool_name set but not "Bash")
+/// - Non-project commands (only keeps cargo, npm, python, etc.)
+///
+/// All commands are still passed to the detector so intermediate fix actions
+/// (edits, writes) are properly tracked for retry vs. real-fix classification.
+pub fn detect_error_fix_sequences_filtered(commands: &[CommandRow]) -> Vec<ErrorFixSequence> {
+    detect_error_fix_sequences(commands)
+        .into_iter()
+        .filter(|seq| !seq.is_retry)
+        .filter(|seq| {
+            // Only keep errors from project commands executed via Bash (not tool errors)
+            let parts: Vec<&str> = seq.failing_command.split_whitespace().collect();
+            let binary = parts.first().copied().unwrap_or("");
+            is_project_command(binary)
+        })
+        .collect()
 }

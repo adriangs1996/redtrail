@@ -86,7 +86,7 @@ Return ONLY a JSON array, no other text. If no entities found, return []."#
     )
 }
 
-fn call_ollama(
+pub fn call_ollama(
     url: &str,
     model: &str,
     prompt: &str,
